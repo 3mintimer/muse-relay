@@ -405,9 +405,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
     const message=exchange?.reply||selected,waiting=Boolean(exchange&&!exchange.reply);
     const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
-    const input=exchange?excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:messageText(exchange.input)}),2):undefined;
-    const stamp=new Date(message.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp}\n${messageText(message)}`;
+    const stamp=(m:Message)=>new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    let input:string|undefined;
+    if(exchange){
+      const original=messages.find(m=>m.id===exchange.input.reply_to&&m.from==='You')??exchange.input;
+      input=excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:`${stamp(original)} · ${messageText(exchange.input)}`}),2);
+    }
+    const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp(message)}\n${messageText(message)}`;
     const hasImage=!waiting&&state.settings.images&&Boolean(message.image||message.image_file);
     const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
       ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
@@ -676,7 +680,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     state.selectedMessageId=id;screen='message';page=0;feedback=undefined;state.error='';
     const ready=render(true),frame=renderSerial;
     await ready;
-    if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&!state.recording&&!voiceBusy
+    if(glasses.ready&&active&&!disposed&&frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&!state.recording&&!voiceBusy
       &&screen==='message'&&state.selectedMessageId===id&&!state.readIds.includes(id))state.readIds.push(id);
     emit();saveSoon();
   }
@@ -924,8 +928,17 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     async markRead(ids){await guarded(async()=>{
       if(!persistenceReady||state.persistence==='loading')return;
       const existing=new Set(state.snapshot.messages.map(m=>m.id));
-      state.readIds=[...new Set([...state.readIds,...ids.filter(id=>existing.has(id))])].slice(-300);
-      emit();await save(true);
+      const previous=state.readIds;
+      const read=[...new Set([...previous,...ids.filter(id=>existing.has(id))])];
+      // Keep read messages in the current snapshot when trimming older history.
+      const next=[...read.filter(id=>!existing.has(id)),...read.filter(id=>existing.has(id))].slice(-300);
+      const savedLength=next.length;
+      state.readIds=next;emit();
+      try{await save(true);}
+      catch(e){
+        if(state.readIds===next)state.readIds=[...previous,...next.slice(savedLength)];
+        throw e;
+      }
     });},
     async hideMessages(ids){await guarded(async()=>{
       if(!persistenceReady||state.persistence==='loading')return;

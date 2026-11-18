@@ -121,6 +121,9 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .empty-state .prompt-panel { text-align: left; }
 .message-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
 .history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 8px; }
+.chat-content .history-toolbar { flex-wrap: wrap; }
+.chat-history-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-left: auto; }
+.chat-history-actions .small-button { padding: 8px 10px; font-size: 13px; }
 .message-card { padding: 15px 16px 8px; border-radius: 8px; background: var(--even-surface); }
 .message-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--even-muted); }
 .sender { font-size: 14px; color: var(--even-text); }

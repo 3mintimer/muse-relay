@@ -19,8 +19,10 @@ function guideLink(label: string, section: GuideSection) {
 }
 
 export function mountApp(root: HTMLElement, controller: AppController): () => void {
-  let draft = { ...controller.state.settings };
-  let settingsDirty = false;
+  let savedSettings = controller.state.settings;
+  let draft = { ...savedSettings };
+  const settingKeys = Object.keys(draft) as (keyof Settings)[];
+  let submittedDraft: Settings | undefined;
   let wizard = !draft.configured;
   let step = 0;
   let view: View = 'chat';
@@ -62,19 +64,24 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   let historyMode: 'older' | 'read' = 'older';
   let renderPending = false;
   let viewportFrame = 0;
-  let lastSettings = JSON.stringify(controller.state.settings);
   const t = (ja: string, en: string, values: Record<string, string | number> = {}) => translate(draft.language, ja, en, values);
   const languageOptions = (): [Language, string][] => [['system', t('端末に合わせる', 'Follow phone')], ...locales.map(locale => [locale.code, locale.label] as [Language, string])];
   const signature = (settings = draft) => JSON.stringify([settings.relay, settings.gistId, settings.githubToken, settings.relayUrl, settings.relayToken, settings.gatewayToken]);
   const voiceSignature = (settings = draft) => JSON.stringify([sonioxAuthMode(settings), settings.sonioxApiKey, settings.sonioxTokenUrl, settings.sonioxTokenAuth, settings.sonioxGatewayToken, signature(settings), settings.language]);
   const connectionChecked = () => Boolean(testResult && testedSignature === signature());
   const needsConnectionCheck = () => signature() !== signature(controller.state.settings) && !connectionChecked();
+  const settingsDirty = () => settingKeys.some(key => draft[key] !== savedSettings[key]);
   const editable = () => !working && !controller.state.busy;
 
   function changed<K extends keyof Settings>(key: K, value: Settings[K]) {
     draft[key] = value;
     if (key === 'sonioxApiKey' && String(value).trim() && draft.sonioxAuth === 'auto') draft.sonioxAuth = 'api-key';
-    settingsDirty = true; uiError = ''; uiNotice = '';
+    uiError = ''; uiNotice = '';
+  }
+  async function saveDraft(configured: boolean) {
+    submittedDraft = { ...draft };
+    try { await controller.saveSettings({ ...submittedDraft, configured }); }
+    finally { submittedDraft = undefined; }
   }
   function theme() {
     document.documentElement.dataset.evenTheme = draft.theme;
@@ -170,7 +177,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     input.addEventListener('change', () => action(input.checked)); row.append(input); return row;
   }
   function header() {
-    return el('header', 'app-header', el('h1', '', 'Muse Relay'), settingsDirty && !wizard ? el('span', 'muted', t('未保存の変更', 'Unsaved changes')) : null);
+    return el('header', 'app-header', el('h1', '', 'Muse Relay'), !wizard && settingsDirty() ? el('span', 'muted', t('未保存の変更', 'Unsaved changes')) : null);
   }
   function audioRelay(settings = draft) {
     return settings.relay === 'gist' ? 'GitHub Gist' : t('HTTPS 中継', 'HTTPS relay');
@@ -222,7 +229,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     if (error) { const p = el('p', 'feedback error', error); p.setAttribute('role', 'alert'); box.append(p); }
     const savedNotice = controller.state.notice;
     const browserNotice = ['グラスと音声は Even アプリから利用できます。', 'Open in the Even app for glasses and voice.'].includes(savedNotice);
-    const notice = uiNotice || (browserNotice ? t('グラスと音声は Even アプリから利用できます。', 'Glasses and voice are available in the Even app.') : savedNotice);
+    const notice = location === 'save' ? (!settingsDirty() ? uiNotice : '')
+      : uiNotice || (browserNotice ? t('グラスと音声は Even アプリから利用できます。', 'Glasses and voice are available in the Even app.') : savedNotice);
     if (notice && !error) { const p = el('p', 'feedback', notice); p.setAttribute('role', 'status'); box.append(p); }
     return box;
   }
@@ -394,12 +402,12 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     return panel;
   }
   function checkButton(location: 'connection' | 'voice' = 'connection', label = t('接続を確認', 'Check connection')) {
-    return button(working ? t('確認中…', 'Checking…') : label, () => { void run(async () => {
+    return button(working && feedbackLocation === location ? t('確認中…', 'Checking…') : label, () => { void run(async () => {
       testResult = null;
       const checkedSettings = { ...draft }; const checkedSignature = signature(checkedSettings);
       const result = await controller.checkConnection(checkedSettings);
       testResult = result; testedSignature = checkedSignature;
-    }, location); }, { icon: 'refresh', disabled: !editable(), className: 'full-width' });
+    }, location); }, { icon: 'refresh', disabled: !editable(), className: 'full-width', highlighted: wizard ? !connectionChecked() : needsConnectionCheck() });
   }
   function checkSummary() {
     const box = el('div', 'check-summary');
@@ -433,8 +441,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       step++; uiError = ''; render(); window.scrollTo({ top: 0 });
     }, { icon: 'arrow', disabled: working }));
     else actions.append(button(t('保存して開く', 'Save and open'), () => { void run(async () => {
-      await controller.saveSettings({ ...draft, configured: true }); draft.configured = true; settingsDirty = false; wizard = false; view = 'chat';
-    }); }, { icon: 'check', disabled: working || testedSignature !== signature() || !testResult }));
+      await saveDraft(true); wizard = false; view = 'chat';
+    }); }, { icon: 'check', highlighted: true, disabled: !editable() || !connectionChecked() }));
     content.append(actions, button(t('後で設定する', 'Set up later'), () => { wizard = false; view = 'chat'; render(); }, { secondary: true, className: 'quiet-button' }));
     return content;
   }
@@ -448,7 +456,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function enableImages() {
     return el('div', '', small(t('画像を受信しました。画像の表示はオフです。', 'Image received. Image display is off.')),
       button(t('画像を有効にする', 'Enable images'), () => { void run(async () => {
-        await controller.saveSettings({ ...controller.state.settings, images: true }); draft.images = true;
+        await controller.saveSettings({ ...controller.state.settings, images: true });
         uiNotice = t('画像を有効にしました。「グラスに表示」で開けます。', 'Images enabled. Open one with “Show on glasses”.');
       }); }, { secondary: true, icon: 'image', className: 'small-button', disabled: !editable() }));
   }
@@ -484,8 +492,10 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const content = el('div', 'chat-content');
     const s = controller.state;
     const visible = visibleMessages();
-    const unread = visible.filter(m => !s.readIds.includes(m.id) && m.from.toLowerCase() !== 'you').length;
-    const toolbar = el('div', 'page-toolbar', el('h2', 'page-title', t('チャット', 'Chat')), el('span', 'muted', unread ? t('{count} 件未読', '{count} unread', { count: unread }) : t('すべて既読', 'All read')),
+    const unreadIds = visible.filter(m => !s.readIds.includes(m.id) && m.from.toLowerCase() !== 'you').map(m => m.id);
+    const unread = el('span', 'muted', unreadIds.length ? t('{count} 件未読', '{count} unread', { count: unreadIds.length }) : t('すべて既読', 'All read'));
+    unread.setAttribute('role', 'status');
+    const toolbar = el('div', 'page-toolbar', el('h2', 'page-title', t('チャット', 'Chat')), unread,
       button(t('更新', 'Refresh'), () => { void run(() => controller.refresh()); }, { secondary: true, icon: 'refresh', className: 'small-button', disabled: !s.settings.configured || !editable() }));
     content.append(toolbar);
     if (!s.settings.configured) content.append(notConfigured());
@@ -497,8 +507,11 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       content.append(live);
     }
     if (s.settings.configured) {
-      content.append(el('div', 'history-toolbar', el('span', 'muted', t('新しい順', 'Newest first')),
-        button(t('履歴を整理', 'Manage history'), () => { historyOpen = true; render(); }, { secondary: true, className: 'small-button', disabled: !editable() || (!visible.length && !s.hiddenIds.length) })));
+      const actions = el('div', 'chat-history-actions',
+        unreadIds.length ? button(t('全件既読にする', 'Mark all as read'), () => { void run(() => controller.markRead(unreadIds)); },
+          { highlighted: true, icon: 'check', className: 'small-button', disabled: !editable() || s.persistence === 'unavailable' }) : null,
+        button(t('履歴を整理', 'Manage history'), () => { historyOpen = true; render(); }, { secondary: true, className: 'small-button', disabled: !editable() || (!visible.length && !s.hiddenIds.length) }));
+      content.append(el('div', 'history-toolbar', el('span', 'muted', t('新しい順', 'Newest first')), actions));
       if (!visible.length) content.append(el('div', 'empty-state', icon('chat'), el('h3', '', t('メッセージはありません', 'No messages yet')),
         s.hiddenIds.length ? button(t('非表示を戻す', 'Restore hidden messages'), () => { void run(() => controller.restoreHiddenMessages()); }, { secondary: true, icon: 'back', disabled: !editable() }) : null));
       else { const timeline = el('div', 'message-list'); visible.forEach(m => timeline.append(messageCard(m))); content.append(timeline); }
@@ -790,7 +803,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(settingsGroup('glasses', t('G2 表示', 'G2 display'), draft.autoHideSeconds ? t('{seconds} 秒', '{seconds} seconds', {seconds: draft.autoHideSeconds}) : t('自動非表示オフ', 'Auto-hide off'), el('div', 'even-card',
       chatLayout,
       select('autoHideSeconds', t('自動で非表示', 'Auto-hide display'), [0, 5, 10, 15, 20, 25, 30].map(seconds => [seconds, seconds ? t('{seconds} 秒', '{seconds} seconds', { seconds }) : t('オフ', 'Off')])),
-      toggle(t('送信後にチャットへ戻る', 'Return to chat after sending'), draft.returnToChatAfterSend, value => changed('returnToChatAfterSend', value), t('チャット送信のみ', 'Chat messages only')),
+      toggle(t('送信後にチャットへ戻る', 'Return to chat after sending'), draft.returnToChatAfterSend, value => { changed('returnToChatAfterSend', value); render(); }, t('チャット送信のみ', 'Chat messages only')),
       avatarSettings(),
       button(t('復帰操作を試す', 'Try restoring the display'), () => { tutorial = true; tutorialMode = 'chat'; tutorialStep = 4; tutorialDemo = false; render(); }, { secondary: true, icon: 'help', className: 'full-width' }))));
     content.append(settingsGroup('display', t('表示', 'Display'), draft.language === 'system' ? t('端末に合わせる', 'Follow phone') : languageOptions().find(([id]) => id === draft.language)![1], el('div', 'even-card',
@@ -798,7 +811,21 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       select('language', t('表示言語', 'Language'), languageOptions()),
       select('pollSeconds', t('通常の受信間隔', 'Normal receive interval'), [[5, t('5 秒', '5 seconds')], [15, t('15 秒', '15 seconds')], [30, t('30 秒', '30 seconds')], [60, t('60 秒', '60 seconds')]]),
       draft.relay==='gadget'?el('div','even-row',el('span','even-row-label',t('送信後の受信間隔', 'Receive interval after sending')),el('span','muted',t('自動で1秒', '1 second automatically'))):null)));
-    content.append(el('div', 'settings-save', button(working ? t('保存中…', 'Saving…') : t('設定を保存', 'Save settings'), () => { if (needsConnectionCheck()) { feedbackLocation = 'connection'; uiError = t('変更した接続先を確認してください。', 'Check the changed connection first.'); settingsGroups.add('connection'); render(); root.querySelector('[data-group="connection"]')?.scrollIntoView({ block: 'start' }); return; } void run(async () => { await controller.saveSettings({ ...draft, configured: draft.configured || connectionChecked() }); draft.configured = controller.state.settings.configured; settingsDirty = false; uiNotice = controller.state.notice; }, 'save'); }, { disabled: !editable(), icon: 'check', className: 'full-width' }), notifications('save'), settingsDirty ? el('p', 'unsaved-status', t('未保存の変更', 'Unsaved changes')) : null));
+    const dirty = settingsDirty();
+    const save = button(working && feedbackLocation === 'save' ? t('保存中…', 'Saving…') : t('設定を保存', 'Save settings'), () => {
+      if (needsConnectionCheck()) {
+        feedbackLocation = 'connection';
+        uiError = t('変更した接続先を確認してください。', 'Check the changed connection first.');
+        settingsGroups.add('connection'); render();
+        root.querySelector('[data-group="connection"]')?.scrollIntoView({ block: 'start' });
+        return;
+      }
+      void run(async () => {
+        await saveDraft(draft.configured || connectionChecked());
+        uiNotice = controller.state.notice;
+      }, 'save');
+    }, { disabled: !editable(), highlighted: dirty, icon: 'check', className: 'full-width' });
+    content.append(el('div', 'settings-save', save, notifications('save'), dirty ? el('p', 'unsaved-status', t('未保存の変更', 'Unsaved changes')) : null));
     content.append(settingsGroup('controls', t('使い方', 'Controls'), t('ガイド・操作練習', 'Guides & practice'), el('div', 'even-card',
       el('div', 'guide-links',
         guideLink(t('セットアップガイド', 'Setup guide'), 'setup'),
@@ -845,7 +872,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function forgetDialog() {
     const dialog = el('dialog', 'tutorial-dialog'); dialog.setAttribute('aria-labelledby', 'forget-title');
     const h = el('h2', 'page-title', t('接続情報を削除しますか？', 'Remove connection details?')); h.id = 'forget-title';
-    dialog.append(h, small(t('このアプリに保存した接続先とトークンを削除します。', 'Remove endpoints and access tokens stored in this app.')), el('div', 'wizard-actions', button(t('戻る', 'Cancel'), () => { confirmForget = false; render(); }, { secondary: true }), button(t('削除', 'Remove'), () => { confirmForget = false; void run(async () => { await controller.clearCredentials(); draft = { ...controller.state.settings }; settingsDirty = false; testResult = null; testedSignature = ''; wizard = true; step = 0; }); })));
+    dialog.append(h, small(t('このアプリに保存した接続先とトークンを削除します。', 'Remove endpoints and access tokens stored in this app.')), el('div', 'wizard-actions', button(t('戻る', 'Cancel'), () => { confirmForget = false; render(); }, { secondary: true }), button(t('削除', 'Remove'), () => { confirmForget = false; void run(async () => { await controller.clearCredentials(); draft = { ...controller.state.settings }; testResult = null; testedSignature = ''; wizard = true; step = 0; }); })));
     dialog.addEventListener('cancel', event => { event.preventDefault(); confirmForget = false; render(); }); return dialog;
   }
   function historyDialog() {
@@ -949,10 +976,18 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     if (!preserved) window.scrollTo({ top: scroll, behavior: 'instant' });
   }
   const unsubscribe = controller.subscribe(() => {
-    const nextSettings = JSON.stringify(controller.state.settings);
-    if (nextSettings !== lastSettings) {
-      lastSettings = nextSettings;
-      if (!settingsDirty) { draft = { ...controller.state.settings }; if (draft.configured) wizard = false; }
+    const nextSettings = controller.state.settings;
+    if (nextSettings !== savedSettings) {
+      const wasClean = !settingsDirty();
+      // Keep edits made after this write began, or edits unrelated to a glasses-side save.
+      const baseline = submittedDraft ?? savedSettings;
+      const nextDraft = { ...nextSettings };
+      for (const key of settingKeys) {
+        if (draft[key] !== baseline[key]) Object.assign(nextDraft, { [key]: draft[key] });
+      }
+      draft = nextDraft;
+      savedSettings = nextSettings;
+      if (wasClean && draft.configured) wizard = false;
     }
     scheduleRender();
   });

@@ -27,6 +27,7 @@ const interactiveFixture=():Snapshot=>({messages:[],spaces:[{id:'test-space',tit
   {id:'mic',title:'メモ',text:'',control:{type:'microphone'}},
 ]}]});
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+const chatStamp = (ts:number) => new Date(ts*1000).toLocaleString('ja',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 async function until(check: () => boolean, label: string) {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (check()) return;
@@ -214,6 +215,7 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   const part=(name:string)=>app.containers().find((c:any)=>c.containerName===name);
   assert.equal(part('input').textColor,1);assert.equal(part('body').textColor,4);assert.equal(part('footer').textColor,4);
   assert.match(part('input').content,/あなた:.*質問/s);assert.match(part('input').content,/…$/);
+  assert.ok(part('input').content.startsWith(`あなた: ${chatStamp(1)} · `));
   assert.equal(wrapLines(part('input').content).length,2);assert.equal(part('input').height,2*G2_LINE_HEIGHT);
   const longInputBodyHeight=bodyGeometry(app).body.height;
   assert.match(part('footer').content,/タップ: 次のページ · 2回: ホーム/);
@@ -227,7 +229,7 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   assert.match(part('footer').content,/2回タップ: ホーム/);
   app.emit({sysEvent:{}});await settle();assert.equal(part('body').content,first,'the existing final-page wrap is preserved');
   app.emit({textEvent:{eventType:1}});await settle();assert.match(part('body').content,/次の回答/);
-  assert.equal(part('input').content,'あなた: 次の質問');
+  assert.equal(part('input').content,`あなた: ${chatStamp(3)} · 次の質問`);
   assert.equal(part('input').height,G2_LINE_HEIGHT);assert.ok(bodyGeometry(app).body.height>longInputBodyHeight);
   assert.doesNotMatch(part('footer').content,/次のページ/,'a one-page answer only shows the home gesture');
   app.overlay(11);await settle();assert.equal(app.controller.state.settings.chatLayout,'single');assert.equal(part('input'),undefined);
@@ -237,6 +239,28 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   await app.controller.showMessage('reply');t.mock.timers.tick(5000);await settle();
   assert.equal(app.text().trim(),'');assert.equal(part('input'),undefined,'auto-hide removes both chat panes');
   await app.controller.restoreDisplay();assert.equal(part('input').textColor,1);assert.equal(part('body').textColor,4);
+});
+
+test('G2 chat uses the original input time for a transcript and the latest message time for a standalone reply',async t=>{
+  const snapshot=fixture();
+  snapshot.messages=[
+    {id:'ask',from:'You',type:'voice-note',text:'',ts:60},
+    {id:'transcript',from:'You',type:'text',text:'音声の質問',reply_to:'ask',ts:120},
+    {id:'reply',from:'Muse',type:'text',text:'回答',reply_to:'ask',ts:180},
+    {id:'standalone',from:'Muse',type:'text',text:'単独の回答',ts:240},
+  ];
+  const app=await appFixture(t,snapshot);
+  await app.controller.showMessage('reply');
+  let frame=bodyGeometry(app);
+  assert.equal(frame.input.content,`あなた: ${chatStamp(60)} · 音声の質問`);
+  assert.equal(frame.body.content,'Muse: 回答');
+  await app.controller.showMessage('standalone');
+  frame=bodyGeometry(app);
+  assert.equal(frame.input,undefined);
+  assert.equal(frame.body.content,`Muse · ${chatStamp(240)}\n単独の回答`);
+  snapshot.messages[3]!.ts=300;
+  await app.controller.refresh();
+  assert.equal(bodyGeometry(app).body.content,`Muse · ${chatStamp(300)}\n単独の回答`);
 });
 
 test('all display languages page the complete reply using the actual input and footer geometry',async t=>{
@@ -902,6 +926,30 @@ test('chat changes made while a preference save waits are kept and saved afterwa
   assert.deepEqual(app.controller.state.hiddenIds,['test-message']);
   assert.deepEqual(JSON.parse(lastStored).readIds,['test-message']);
   assert.deepEqual(JSON.parse(lastStored).hiddenIds,['test-message']);
+});
+
+test('a batch of read messages retains existing read markers and can be retried after a storage failure', async t => {
+  const snapshot=fixture();
+  snapshot.messages=['read','unread-1','unread-2','hidden'].map((id,index)=>({id,from:'Muse',type:'text',text:id,ts:index+1}));
+  const app=await appFixture(t,snapshot);
+  await app.controller.hideMessages(['hidden']);
+  const previous=['read',...Array.from({length:299},(_,i)=>`old-${i}`)];
+  app.controller.state.readIds=previous;
+  const writeLocal=localStorage.setItem,writeNative=app.bridge.setLocalStorage;
+  localStorage.setItem=()=>{throw new Error('Synthetic storage failure');};
+  app.bridge.setLocalStorage=async()=>false;
+  const ids=['unread-1','unread-2','missing'];
+  try {
+    await assert.rejects(app.controller.markRead(ids),/Settings save failed/);
+    assert.deepEqual(app.controller.state.readIds,previous);
+  } finally {
+    localStorage.setItem=writeLocal;app.bridge.setLocalStorage=writeNative;
+  }
+  await app.controller.markRead(ids);
+  await app.controller.reloadSettings();
+  assert.deepEqual(app.controller.state.readIds.slice(-3),['read','unread-1','unread-2']);
+  assert.equal(app.controller.state.readIds.length,300);
+  assert.deepEqual(app.controller.state.hiddenIds,['hidden']);
 });
 
 test('opening Chat with an empty saved and remote snapshot shows an explicit empty state', async t => {

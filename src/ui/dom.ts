@@ -34,8 +34,10 @@ export function icon(name: IconName): SVGSVGElement {
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', paths[name]); svg.append(path);
   return svg;
 }
-export function button(label: string, action: () => void, options: { secondary?: boolean; icon?: IconName; className?: string; disabled?: boolean } = {}): HTMLButtonElement {
-  const b = el('button', `even-button ${options.secondary ? 'even-button--secondary' : ''} ${options.className ?? ''}`.trim(), options.icon ? icon(options.icon) : null, el('span', '', label));
+export function button(label: string, action: () => void, options: { secondary?: boolean; highlighted?: boolean; icon?: IconName; className?: string; disabled?: boolean } = {}): HTMLButtonElement {
+  const b = el('button', `even-button ${options.className ?? ''}`.trim(), options.icon ? icon(options.icon) : null, el('span', '', label));
+  if (options.secondary) b.classList.add('even-button--secondary');
+  if (options.highlighted) b.classList.add('even-button--highlighted');
   b.type = 'button'; b.disabled = Boolean(options.disabled); b.addEventListener('click', action); return b;
 }
 export function externalLink(label: string, href: string): HTMLAnchorElement {
