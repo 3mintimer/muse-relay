@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { localizedHtml } from './localized-html.mjs';
+import { languages, languageHref } from './web/language.js';
+import { prepareLocale } from './web/i18n.js';
 
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const WEB = join(directory, 'web');
@@ -33,6 +36,15 @@ export async function collectPublicAssets() {
   }
   await visit(WEB);
   if (!assets['/index.html']) throw new Error('web/index.html is required.');
+  const template = Buffer.from(assets['/index.html'].base64, 'base64').toString('utf8');
+  for (const language of Object.keys(languages)) {
+    await prepareLocale(language);
+    const bytes = Buffer.from(localizedHtml(template, language));
+    const name = languageHref(language) + 'index.html';
+    total += bytes.byteLength - (assets[name]?.size || 0);
+    if (bytes.byteLength > 2_000_000 || total > 8_000_000) throw new Error('Localized HTML exceeds the public asset size budget.');
+    assets[name] = { type: TYPES['.html'], size: bytes.byteLength, base64: bytes.toString('base64'), etag: `"${createHash('sha256').update(bytes).digest('hex')}"` };
+  }
   return assets;
 }
 

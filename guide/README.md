@@ -6,27 +6,57 @@
 
 ## Languages and links
 
-The guide opens in **English by default**. The header offers **English / 日本語** without reloading the page. Direct links support `?lang=en` or `?lang=ja`, followed by any existing anchor:
+The guide uses the same nine language codes as the app. **English is the default** at `/`; `/en/` is an alias. The language menu uses each language's own name and ordinary links. Every language URL returns translated HTML before JavaScript runs. The direct **日本語** link remains available on the landing page.
+
+| Code | Menu label | Direct path |
+| --- | --- | --- |
+| `en` | English | `/` (`/en/` alias) |
+| `zh-Hans` | 简体中文 | `/zh-Hans/` |
+| `zh-Hant` | 繁體中文 | `/zh-Hant/` |
+| `ja` | 日本語 | `/ja/` |
+| `es` | Español | `/es/` |
+| `fr` | Français | `/fr/` |
+| `de` | Deutsch | `/de/` |
+| `it` | Italiano | `/it/` |
+| `ko` | 한국어 | `/ko/` |
+
+With JavaScript, selecting a language updates the same page. Without it, the links navigate normally. A valid `?lang=<code>` takes precedence over the path; existing English and Japanese query links remain compatible. Keep existing anchors:
 
 ```text
-/?lang=en#setup
+/#setup
+/ja/#connection
 /?lang=ja#connection
+/ja/#g2muse
+/zh-Hant/#voice
+/fr/#feedback
 /#voice
 /#relay
 /#feedback
 ```
 
-The language switch preserves the selected relay, voice mode, image setting, tutorial step, HUD state, feedback draft, and sharing consent. Only the language is written to the URL. Drafts, connection settings, and consent are not stored or included in URLs. Changing language does not submit the form or call an external service.
+The same-page language switch preserves the theme, selected relay, voice mode, image setting, tutorial step, HUD state, feedback draft, and sharing consent. Only the language path and existing fragment are written to the URL. Drafts, connection settings, and consent are not stored or included in URLs. Loading a translation uses only this site's assets; changing language does not submit the form or call an external service. A direct URL determines the language; there is no stored language override.
 
 | File | Responsibility |
 | --- | --- |
 | `web/index.html` | English initial content, semantic markup, and explicit translation hooks |
 | `web/app.js` | Shared interaction, setup, prompt-generation, and feedback logic |
-| `web/i18n.js` | Locale selection, numbered placeholders, explicit DOM hooks, and document links |
+| `web/i18n.js` | Asynchronous dictionary preparation, message lookup, explicit DOM hooks, and document links |
+| `web/language.js` | The nine menu names, URL rules, and valid page paths shared by the browser and Worker |
 | `web/messages.js` | Japanese translations keyed by the canonical English messages |
+| `web/locales/<code>.js` | Full dictionaries for Chinese, Spanish, French, German, Italian, and Korean |
 | `web/style.css` | Shared light/dark and responsive styles |
+| `localized-html.mjs` | Build-time rendering of the same template into every supported language |
+| `routes.test.mjs` | Locale contracts, dictionary completeness, translated HTML, and route/cache compatibility |
 
-Translate complete messages, including ARIA labels, errors, and AI instructions. Keep numbered `{0}` placeholders unchanged; literal protocol JSON is not a placeholder. Do not translate user-entered feedback. English GitHub links use canonical `.md` files. Japanese links use `.ja.md` only for paths listed in `i18n.js`; other technical references keep their canonical URL. No separate page or duplicated interaction logic is needed.
+Call `await prepareLocale(code)` before using `messageFor(key, code)` or switching the active dictionary. `setLocale`, `getLocale`, and `t` retain the shared interaction API. Each non-English dictionary covers the full canonical set in `messages.js` (currently 504 messages), including ARIA labels, examples, errors, and AI instructions. Keep numbered `{0}` placeholders and protocol identifiers unchanged. Space-creation instructions must request content in the selected language.
+
+Put `data-i18n` only on text-only elements; the build rejects nested markup under this hook. Do not translate user-entered feedback. English and other non-Japanese pages link to canonical English `.md` files. Japanese pages use `.ja.md` only for paths listed in `i18n.js`; other references keep their canonical URL. The build generates each language's HTML in the asset map from one template. Do not maintain translated HTML copies.
+
+Core technical references: [relay setup](https://github.com/3mintimer/muse-relay/blob/main/docs/relay-setup.md) and [protocol](https://github.com/3mintimer/muse-relay/blob/main/docs/protocol.md).
+
+After choosing a route, Ask Muse leads directly to the copy action. The full request, API contract, and reference implementation are collapsed. A clipboard failure opens and selects the full request for manual copying. `/#g2muse` and `/ja/#g2muse` select the existing-G2Muse request and Gist route; other routes hide that shortcut. The reuse request preserves the current writer, settings, and legacy files, and limits cleanup to confirmed requests and their owned attachments.
+
+The first-use checks are separate disclosures for saving the active relay, a matching text reply, voice transcript and reply, and mobile-data access. Troubleshooting, audio routes, and image requirements stay collapsed. The guide never connects to a user's relay or sends its AI request automatically.
 
 ## Run locally
 
@@ -71,14 +101,18 @@ Use `npm --prefix guide run build -- --outdir /absolute/path/to/dist` for a diff
 
 | Route or policy | Behavior |
 | --- | --- |
-| `/` and public files | GET / HEAD, with ETag-based 304 responses; language query parameters use the same assets |
+| `/`, `/en/`, each `/<code>/`, legacy language queries | Localized HTML, `Content-Language`, and separate ETags; GET / HEAD |
+| `/ja`, `/ja/index.html`, `/index.html?lang=ja` | Existing Japanese links continue to work |
+| Public files | GET / HEAD, with ETag-based 304 responses |
 | Unknown path | 404 |
 | Unsupported method | 405 with an Allow header |
 | `/api/feedback` | Delegates to `handleFeedback`; POST only |
 | CSP | Scripts, styles, and connections restricted to the same origin; no iframe embedding |
 | Other headers | `Referrer-Policy: no-referrer`, `nosniff`; input values are not logged |
 
-For a focused UI check, switch languages with a synthetic draft and unchecked/checked consent, then exercise all relay and voice modes. Check the five anchors, all prompt topics, and translated error states. Use a local fake response when testing form rendering; do not submit test feedback to production. Browser layout and physical-device behavior are separate checks.
+The route suite contains four tests: nine-language URL/app compatibility, all dictionary keys and numbered placeholders, translated HTML without JavaScript, and legacy links/conditional requests. It compares with `../src/core/i18n.ts` when run in the app repository; an independent Sites checkout needs no app source. The existing feedback test remains separate.
+
+For focused browser QA, switch languages with a synthetic draft, selected theme, and checked/unchecked consent. Check a setup/copy flow, the G2Muse shortcut, mobile layout, and one translated error using a local fake response. Do not submit test feedback to production. Browser layout and physical-device behavior are separate checks.
 
 ## Separate Sites checkout
 

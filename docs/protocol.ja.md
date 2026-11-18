@@ -92,9 +92,37 @@ Gadgetの添付形式:
 | `device` | Gadget参照実装の接続状態（任意） |
 | `capabilities` | `images` はアプリからMuseへの画像送信可否。受信画像の表示とは別。任意の `soniox` はサーバーに長期キーが設定されているかの boolean で、接続検証済みを意味しない |
 
-チャットで入力と回答を併記する場合は、入力を `from:"You", id:<元の依頼ID>, text:<入力文または文字起こし>`、回答を `from:"Muse", reply_to:<同じ依頼ID>` にします。文字起こしは元のYouメッセージを同じIDで更新します。独立したMuse投稿は `reply_to` を省略し、関係のない入力と結び付けません。
+### 文字起こしと返信の対応
 
-Sonioxではアプリが確定文を保存します。Gist参考watcherはハンドラーの `transcript` を同じYouメッセージへ反映します。Gadget参考サーバーはACKに一致するSDK `message.user` の文字列をYouへ反映しますが、SDKから文字起こしが届くこと自体を保証しません。独自Gistが別IDのYou文字起こしを返す場合は、その `reply_to` を元の依頼IDにすれば表示側で解決できます。
+Museの回答と文字起こしは別々の結果です。表示できる入力文がなければG2は音声メッセージとして表示し、発話内容を推測しません。
+
+<details>
+<summary>中継・Museの実装担当向けの項目</summary>
+
+| 経路 | アプリへ返す入力文 |
+|---|---|
+| Gist参考watcher | ハンドラーの `transcript` → `You.text`。`You.id` は元の依頼ID。省略時は依頼の `text` を使用し、音声だけの依頼では空の場合がある |
+| Gadget参考中継 | 音声依頼では、ACKのIDに一致するSDK `message.user` の `payload.display_text` / `payload.text` / `payload.content` から元の `You.text` を更新。SDKから表示できる文字起こしが届かない場合もある |
+| Soniox・両方式 | 確定文がアプリ依頼の `text` と端末内のYouメッセージになる。中継は文字起こし用WAVではなくテキストを受け取る |
+
+入力のIDと回答の `reply_to` に、同じ元のアプリ依頼IDを使います。
+
+```json
+{"messages":[
+  {"id":"r_voice1","from":"You","type":"voice-note","text":"次の予定は？","ts":1794880000},
+  {"id":"muse_r_voice1","from":"Muse","type":"text","text":"次の予定を表示します。","ts":1794880012,"reply_to":"r_voice1"}
+]}
+```
+
+GadgetのSDKユーザーメッセージIDは `payload.message_id` / `event.message_id` / `payload.id`、照合するACKのIDは `result.message_id` と任意の `result.reply_to_message_id` です。[専用会話の照合](#atom--中継)も必要です。書き出すメッセージのアプリ依頼IDをSDKのIDへ置き換えません。
+
+独自Gistで文字起こしに別IDを使う場合は、その `from:"You"` 行の `reply_to` を元の依頼IDにします。Muse回答も同じ元IDを参照します。独立したMuse投稿は `reply_to` を省略し、関係のない入力と結び付けません。
+
+`Muse.text` に文字起こしを書いても `You.text` は更新されません。参考中継の `POST /v1/messages` はMuseの出力専用で、Youの文字起こしは作れません。欠けた文字起こしを埋めるためにSDKのユーザーイベントを捏造しないでください。
+
+実装: [Gistの書き出し](../adapters/gist/watcher.mjs)、[Gadgetのイベント処理](../server/core.mjs)、[入力と回答の対応](../src/core/chat.ts)。
+
+</details>
 
 ### Museのアバター → G2ホーム
 
@@ -151,7 +179,7 @@ Gistの `muse-relay-profile.json` は次の形です。`avatar` のインライ�
 | `muse-relay-output-<id>.base64` | 参照watcher | Museからの画像返信 |
 | `muse-relay-avatar-<sha256>.base64` | 参照watcher | プロフィール画像のbase64文字列 |
 
-アプリは共有の `messages` 配列へ追記せず、依頼ごとに異なるファイルへ書きます。Muse側が受信した依頼と返信を `g2muse-relay.json` に反映します。複数のwriterで同じJSONを上書きする構成は避けます。
+アプリは共有の `messages` 配列へ追記せず、依頼ごとに異なるファイルへ書きます。Muse側が受信した依頼と返信を `g2muse-relay.json` に反映します。G2Museが既に書き込んでいる場合は履歴を残し、その既存writerへMuse Relayの依頼処理を追加します。再初期化や別writerの二重起動はしません。別のGadget中継へ、このGistのプロフィールや履歴を複製する必要はありません。
 
 音声付き依頼ファイルの例:
 
@@ -197,9 +225,36 @@ sequenceDiagram
 | `https://api.github.com/gists/<id>` | GitHubトークン | GET / PATCH |
 | APIが返した `https://gist.githubusercontent.com/...` | なし | `truncated:true` のファイルを取得 |
 
-raw取得にはトークンを付けず、別ホストへのリダイレクトは追跡しません。GitHubは約1MBを超えるファイル内容を切り詰め、300ファイルを超えると一覧も切り詰める場合があります。処理済みファイルの清掃をMuse側で行います。[GitHub Gists API](https://docs.github.com/en/rest/gists/gists#truncation)
+raw取得にはトークンを付けず、リダイレクトを拒否します。GitHubは約1MBを超えるファイル内容を切り詰め、300ファイルを超えると一覧も切り詰める場合があります。この2つは別の状態です。[GitHub Gists API](https://docs.github.com/en/rest/gists/gists#truncation)
+
+| 通知される状態 | 参考実装の動作 |
+|---|---|
+| 一覧内のファイルに `truncated:true` | アプリ／watcherがAPI指定のraw URLから、そのファイルをサイズ上限内で取得する |
+| Gist全体に `truncated:true` | 参考watcherはその読み取りをエラーで止める。アプリは一覧の切り詰めを明示的に拒否しないため、一覧から外れたファイルが見えない場合がある。rootの読取成功だけでは全件取得を確認できない |
+
+一覧にない要求を完了扱いにしません。所有者が処理済みファイルを照合し、一覧を全件取得できる状態に戻してからwatcherを再開します。共有履歴と、メッセージ・スペース・プロフィールから参照中のファイルは残します。
 
 secret GistはURLを知る人が閲覧できる非公開一覧であり、内容を暗号化しません。音声・画像・会話はGitHubへ保存されます。ファイル削除後もGistの履歴に残り得ます。
+
+### Gistの清掃と保持
+
+以下は同梱watcherの方針で、すべての中継の必須条件ではありません。既存の共有Gistへ導入する前に保持方針を決めます。
+
+<details>
+<summary>運用・実装担当向けの清掃条件</summary>
+
+| 対象 | 参考実装の動作 |
+|---|---|
+| 処理済み依頼と入力の音声・画像ファイル | 保存済みの結果を書き出すPATCHで、照合済みかつ他から参照されていない入力を削除する。所有や参照を確認できないファイルは残す |
+| 表示履歴 | このwatcherが書いたYou・Museを合わせて直近50メッセージ。既存のG2Museなどの共有履歴は保持する |
+| 生成した出力ファイル | この書き込み処理が保存した内容と一致し、保持中のどのファイルからも参照されていないものだけを削除する |
+| 重複処理の記録 | 完了から30日が経ち依頼ファイルがなくなると、ローカルの処理記録はIDと内容のハッシュに縮小し、同じ依頼の再実行を防ぐ |
+| アプリの非表示／履歴整理 | 端末内の表示だけを変え、Gistの削除要求は送らない |
+| Gistの変更履歴 | 現在のファイル削除では消去されない。fork・コピー・Muse側の保持も別 |
+
+共有rootのwriterは1つにします。中断時は保存済み結果を使い、Museへの操作を無条件にやり直しません。[watcherの運用](../adapters/gist/README.ja.md)と[データ削除](data.ja.md)も参照してください。
+
+</details>
 
 ## Muse Gadget SDK方式
 
@@ -362,7 +417,7 @@ flowchart LR
 
 Soniox認証は、アプリに入力した本人のAPIキー、または発行サーバーから取得する一時キーを選べます。APIキー方式はGistでも追加サーバー不要です。キーを共通ビルドやMuseへの依頼文へ埋め込みません。アプリは選んだキーで `wss://stt-rt.soniox.com/transcribe-websocket` に接続し、音声を直接Sonioxへ送信します。Museへは確定したテキストを送ります。Gist方式でも一時キーの発行先は別途設定できます。
 
-Muse方式の文字起こしを別表示する場合、参考Gist watcherはハンドラーの `transcript` を `from:"You"` として保存します。参考Gadgetサーバーの `POST /v1/messages` は `from:"Muse"` 固定です。Gadgetでは文字起こしをMuse返信内に明示できますが、同APIでユーザー発言を作成することはできません。Soniox方式では確定テキストがアプリのユーザー発言となるため、再文字起こしは行いません。
+入力の文字起こしと対応する回答には[文字起こしの契約](#文字起こしと返信の対応)を使います。Sonioxの確定文は既にアプリの入力なので、再文字起こししません。
 
 一時キー応答: `{"api_key":"snx_temp_...","expires_at":"..."}`。参照サーバーは発行時に `usage_type:transcribe_websocket`、`expires_in_seconds:60`、`single_use:true`、`max_session_duration_seconds:150` を指定します。[Soniox仕様](https://docs.soniox.com/authentication/temporary-api-keys)
 
@@ -384,7 +439,7 @@ Muse方式の文字起こしを別表示する場合、参考Gist watcherはハ�
 | スペース | 参照中継は最大20、各50カード |
 | HTTP要求本文 | Gadget参照サーバーは2,000,000バイト以下 |
 | ジョブ | Gadgetは同時処理1件、待機20件、期限15分 |
-| 中継の保持 | Gist参照watcher50メッセージ / Gadget参照サーバー100メッセージ |
+| 中継の保持 | Gist参照watcherは自身の50メッセージのみ制限し、他の共有履歴は保持 / Gadget参照サーバー100メッセージ |
 | 既読・非表示 | アプリ内。元中継の削除を意味しない |
 
 中継の保持期間・処理済み音声・画像の削除は利用者 / Museが管理します。アプリの設定変更だけでGist履歴やMuse内のデータは消去しません。

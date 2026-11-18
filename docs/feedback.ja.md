@@ -4,7 +4,7 @@
 
 | 入口 | 公開範囲 | アカウント |
 |---|---|---|
-| [ガイドのフォーム](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback) | 非公開の受付DB。公開への同意があるものだけ匿名化した要約を検討 | 不要 |
+| [ガイドのフォーム](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#feedback) | 非公開の受付DB。公開への同意があるものだけ匿名化した要約を検討 | 不要 |
 | [GitHubのIssueフォーム](https://github.com/3mintimer/muse-relay/issues/new/choose) | 入力した内容が公開される | GitHubが必要 |
 
 「こう使いたい」「操作で困った」「設定・使い方」のいずれかを選んで送れます。連絡先は不要です。トークン、設定JSON、個人のURL、氏名、実際の会話・音声・写真は入力しないでください。受付番号は手元に控えます。番号から本文を読む公開APIや進捗照会はありません。連絡先を保持しないため、フォームから個別返信はできません。
