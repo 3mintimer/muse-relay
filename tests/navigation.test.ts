@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { getTextWidth } from '@evenrealities/pretext';
-import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import { ImageRawDataUpdateResult, type EvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import { createController } from '../src/core/controller.ts';
 import { defaults } from '../src/core/config.ts';
 import { Glasses, glassBodyRows } from '../src/core/glasses.ts';
@@ -57,6 +57,7 @@ function fakeDisplay() {
       if (!target) return false;
       target.content = value.content;if(value.textColor!==undefined)target.textColor=value.textColor;recordFrame(); return true;
     },
+    async updateImageRawData(_value: unknown) { operations.push('image');return ImageRawDataUpdateResult.success; },
     async audioControl(_open = false) { return true; },
     async shutDownPageContainer() { return true; },
   };
@@ -77,6 +78,7 @@ function bodyGeometry(app:ReturnType<typeof fakeDisplay>){
 
 async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false, settings:Partial<Settings>={}) {
   const display = fakeDisplay();
+  const cleanups:Array<()=>void>=[];
   const saved = JSON.stringify({ settings: { ...defaults, language: 'ja', relay: 'gadget', relayUrl: 'https://relay.example.test',
     relayToken: 'synthetic-navigation-test', configured: true, pollSeconds: 300, images: true,...settings }, snapshot,
     readIds: [], hiddenIds: [], selectedSpaceIds: ['test-space'] });
@@ -121,6 +123,7 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
   t.after(async () => {
     documentTarget.hidden = true; documentTarget.dispatchEvent(new Event('visibilitychange'));
     display.emit({ sysEvent: { eventType: 7 } }); windowTarget.dispatchEvent(new Event('pagehide'));
+    for(const cleanup of cleanups)cleanup();
     await settle();
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -135,6 +138,7 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
   await settle();
   return {
     ...display, controller, requests, sent, document: documentTarget,
+    onCleanup:(callback:()=>void)=>{cleanups.push(callback);},
     setSend: (handler: () => Promise<Response>) => { nextSend = handler; },
     setRead: (handler: (options: RequestInit) => Promise<Response>) => { nextRead = handler; },
     setAttachment: (handler: () => Promise<Response>) => { readAttachment = handler; },
@@ -645,13 +649,16 @@ test('reply wake supersedes a queued blank frame and starts its timeout after th
 });
 
 test('successful chat sends return to chat with an opt-out and failed sends never navigate or invite a duplicate retry',async t=>{
-  const snapshot=fixture(),app=await appFixture(t,snapshot,true);
+  const snapshot=fixture();snapshot.capabilities={audio:true,images:true,spaces:true};
+  const app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
   await app.controller.showSpace('test-space');
   await app.controller.sendText('送った本文');assert.match(app.text(),/送った本文/);
   snapshot.messages.push({id:'text-reply',reply_to:app.sent[0]!.id,from:'Muse',type:'text',text:'テキストへの返信',ts:11});
   t.mock.timers.tick(1000);await settle();assert.match(app.text(),/テキストへの返信/);
   const pendingSend=deferred<Response>();app.setSend(()=>pendingSend.promise);
-  const sending=app.controller.sendText('応答が先に届く');await settle();
+  const sending=app.controller.sendText('応答が先に届く',{mime:'image/png',name:'sample.png',data_base64:'c3ludGhldGlj'});
+  await settle();t.mock.timers.tick(6000);await settle();
+  assert.equal(app.controller.state.displaySleeping,false,'the relay is still accepting the outgoing photo');
   snapshot.messages.push({id:'early-reply',reply_to:app.sent[1]!.id,from:'Muse',type:'text',text:'先に受信した返信',ts:12});
   await app.controller.refresh();pendingSend.resolve(new Response('{}'));await sending;
   assert.match(app.text(),/先に受信した返信/,'a reply received before POST completion must not be lost');
@@ -668,22 +675,76 @@ test('successful chat sends return to chat with an opt-out and failed sends neve
   assert.match(app.controller.state.error,/接続|G2/,'display errors remain visible without rejecting the accepted send');
 });
 
-test('an image that finishes loading after timeout cannot repaint the blank display',async t=>{
-  const snapshot=fixture(),app=await appFixture(t,snapshot,true),image=deferred<Response>();
-  snapshot.messages[0]!.type='image';snapshot.messages[0]!.image_file='pending.png';
-  await app.controller.refresh();
-  await app.controller.saveSettings({...app.controller.state.settings,autoHideSeconds:5});
+test('auto-hide waits for image retrieval and the final native image acknowledgement without extending for unchanged polls',async t=>{
+  const snapshot=fixture();snapshot.messages[0]!.type='image';snapshot.messages[0]!.image_file='pending.png';
+  const app=await appFixture(t,snapshot,true,{autoHideSeconds:5,returnToChatAfterSend:false}),image=deferred<Response>(),lastAck=deferred<void>();
+  // Exercise the production transfer queue through the fake SDK bridge using synthetic tile bytes.
+  const tiles=Array.from({length:4},(_,i)=>({x:i%2*288,y:Math.floor(i/2)*117,width:288,height:117,bytes:Uint8Array.of(i+1)}));
+  t.mock.method(Glasses.prototype as unknown as {photoTiles:()=>Promise<typeof tiles>},'photoTiles',async()=>tiles);
+  let transfers=0;
+  app.bridge.updateImageRawData=async()=>{if(++transfers===4)await lastAck.promise;return ImageRawDataUpdateResult.success;};
+  const attachment=()=>Response.json({mime:'image/png',name:'pending.png',data_base64:'c3ludGhldGlj'});
+  app.onCleanup(()=>{image.resolve(attachment());lastAck.resolve();});
   app.setAttachment(()=>image.promise);
   const opening=app.controller.showMessage('test-message');await settle();assert.match(app.text(),/読み込み中/);
-  t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
-  image.resolve(Response.json({mime:'image/png',name:'pending.png',data_base64:'synthetic'}));await opening;
-  assert.equal(app.text().trim(),'');assert.ok(!app.controller.state.readIds.includes('test-message'));
-  app.controller.state.snapshot.messages[0]!.image=undefined;
-  const delayedRestore=deferred<Response>();app.setAttachment(()=>delayedRestore.promise);
-  const restoring=app.controller.restoreDisplay();await settle();assert.match(app.text(),/読み込み中/);
-  t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
-  delayedRestore.resolve(Response.json({mime:'image/png',name:'pending.png',data_base64:'synthetic'}));await restoring;
-  assert.equal(app.text().trim(),'');assert.ok(!app.controller.state.readIds.includes('test-message'),'a restore superseded by another timeout is still unread');
+  t.mock.timers.tick(6000);await settle();
+  assert.equal(app.controller.state.displaySleeping,false,'image retrieval must not consume the five visible seconds');
+  assert.match(app.text(),/読み込み中/);assert.equal(transfers,0);
+  image.resolve(attachment());await settle();
+  t.mock.timers.tick(500);await settle();assert.equal(transfers,4,'the final image tile is awaiting its native ACK');
+  t.mock.timers.tick(6000);await settle();
+  assert.equal(app.controller.state.displaySleeping,false,'earlier tile ACKs must not start the display deadline');
+  lastAck.resolve();await opening;await settle();
+  assert.ok(app.controller.state.readIds.includes('test-message'));
+  // Start the real one-second reply polling loop without changing the displayed image.
+  const reads=app.requests.length;await app.controller.sendText('synthetic polling trigger');
+  for(let second=0;second<4;second++){
+    t.mock.timers.tick(1000);await settle();
+    assert.equal(app.controller.state.displaySleeping,false);
+  }
+  assert.equal(app.requests.length,reads+4,'the unchanged image was polled every second');
+  assert.equal(transfers,4,'unchanged snapshots retain the acknowledged image');
+  t.mock.timers.tick(999);await settle();assert.equal(app.controller.state.displaySleeping,false,'4999 ms after the final ACK is still visible');
+  t.mock.timers.tick(1);await settle();assert.equal(app.controller.state.displaySleeping,true);assert.equal(app.text().trim(),'');
+});
+
+test('auto-hide waits for the newest text page ACK when an earlier native frame completes during navigation',async t=>{
+  const snapshot=fixture();snapshot.messages[0]!.text=Array.from({length:14},(_,i)=>`本文 ${String(i+1).padStart(2,'0')}`).join('\n');
+  const app=await appFixture(t,snapshot,true,{autoHideSeconds:5}),firstAck=deferred<void>(),secondAck=deferred<void>();
+  const rebuild=app.bridge.rebuildPageContainer,upgrade=app.bridge.textContainerUpgrade;
+  let acknowledgements=0;
+  const acknowledge=async()=>{
+    if(acknowledgements===0&&app.text().includes('本文 01')){acknowledgements++;await firstAck.promise;}
+    else if(acknowledgements===1&&app.text().includes('本文 14')){acknowledgements++;await secondAck.promise;}
+  };
+  app.bridge.rebuildPageContainer=async value=>{const result=await rebuild(value);await acknowledge();return result;};
+  app.bridge.textContainerUpgrade=async value=>{const result=await upgrade(value);if(value.containerName==='footer')await acknowledge();return result;};
+  app.onCleanup(()=>{firstAck.resolve();secondAck.resolve();});
+  const opening=app.controller.showMessage('test-message');await settle();assert.equal(acknowledgements,1);
+  t.mock.timers.tick(2000);app.emit({textEvent:{eventType:0,containerID:1}});await settle();
+  t.mock.timers.tick(2000);firstAck.resolve();await opening;await settle();
+  assert.equal(acknowledgements,2);assert.match(app.text(),/本文 14/);
+  t.mock.timers.tick(6000);await settle();
+  assert.equal(app.controller.state.displaySleeping,false,'a superseded frame ACK cannot start the pending page deadline');
+  secondAck.resolve();await settle();const pageTwo=app.text();
+  t.mock.timers.tick(4999);await settle();assert.equal(app.controller.state.displaySleeping,false);assert.equal(app.text(),pageTwo);
+  t.mock.timers.tick(1);await settle();assert.equal(app.controller.state.displaySleeping,true);assert.equal(app.text().trim(),'');
+});
+
+test('auto-hide keeps the replacement answer deadline when an obsolete image fetch finishes later',async t=>{
+  const snapshot=fixture();snapshot.messages[0]!.type='image';snapshot.messages[0]!.image_file='obsolete.png';
+  const app=await appFixture(t,snapshot,true,{autoHideSeconds:5}),image=deferred<Response>();
+  const attachment=()=>Response.json({mime:'image/png',name:'obsolete.png',data_base64:'c3ludGhldGlj'});
+  app.onCleanup(()=>image.resolve(attachment()));app.setAttachment(()=>image.promise);
+  const opening=app.controller.showMessage('test-message');await settle();assert.match(app.text(),/読み込み中/);
+  t.mock.timers.tick(2000);
+  snapshot.messages[0]={id:'test-message',from:'Muse',type:'text',text:'差し替わった回答',ts:2};
+  await app.controller.refresh();assert.match(app.text(),/差し替わった回答/);
+  const replacement=app.text();
+  t.mock.timers.tick(1000);image.resolve(attachment());await opening;await settle();
+  assert.equal(app.text(),replacement,'the obsolete image cannot repaint the replacement answer');
+  t.mock.timers.tick(3999);await settle();assert.equal(app.controller.state.displaySleeping,false);assert.equal(app.text(),replacement);
+  t.mock.timers.tick(1);await settle();assert.equal(app.controller.state.displaySleeping,true);assert.equal(app.text().trim(),'');
 });
 
 test('successful Gadget sends poll quickly in native background and system exit stops receives', async t => {

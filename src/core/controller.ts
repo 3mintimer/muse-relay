@@ -16,6 +16,14 @@ import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.m
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from './chat';
 
 type GlassPage={body:string;footer:string;image?:boolean};
+interface ChatPage {
+  body: string;
+  footer: string;
+  messageId?: string;
+  photo?: Message;
+  style?: GlassTextStyle;
+  readReplyId?: string;
+}
 
 const trackAt=(position:number,slots:number)=>`[${'-'.repeat(position)}O${'-'.repeat(slots-position-1)}]`;
 const sliderSlots=(()=>{
@@ -80,7 +88,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   const replyPoll=new ReplyPoll();
   // Session-only: restored history can never arm an automatic reply wake.
   const awaitingReplies=new Map<string,Set<string>>();
-  let autoHiddenReplies=new Set<string>(),replyWakeInFlight=false;
+  let autoHiddenReplies=new Set<string>();
+  let drawingChatFrame: number | undefined;
+  let lastChatPage: {frame: number; key: string; inlineImage?: string; ready: Promise<void>} | undefined;
   let menuActions:Array<()=>Promise<void>>=[];
   let displayTimer:ReturnType<typeof setTimeout>|undefined,displayDeadline=0,followingChatId:string|undefined;
   let homeClockTimer:ReturnType<typeof setTimeout>|undefined;
@@ -112,7 +122,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(homeClockVisible())homeClockTimer=setTimeout(()=>{if(homeClockVisible())fire(render());},60000-Date.now()%60000);
     clearTimeout(displayTimer);
     if(disposed||!active||!state.glasses||state.persistence==='loading'||!state.settings.autoHideSeconds
-      ||state.displaySleeping||state.recording||voiceBusy||state.busy||replyWakeInFlight||contextualOpen||feedback?.kind==='busy'){
+      ||state.displaySleeping||state.recording||voiceBusy||state.busy||drawingChatFrame===renderSerial||contextualOpen||feedback?.kind==='busy'){
       displayDeadline=0;return;
     }
     if(interaction||!displayDeadline)displayDeadline=Date.now()+state.settings.autoHideSeconds*1000;
@@ -150,10 +160,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       &&!state.hiddenIds.includes(reply.reply_to!));
   }
   async function wakeForReply(reply:Message){
-    replyWakeInFlight=true;
     displayInteraction();
-    try{await act(()=>openMessage(reply.id,false));}
-    finally{replyWakeInFlight=false;syncDisplayTimers(true);}
+    await act(()=>openMessage(reply.id,false));
   }
   async function restoreDisplay(){
     if(!active||disposed)return;
@@ -391,21 +399,93 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   function makeRelay(settings:Settings):Relay{return settings.relay==='gist'?new GistRelay(settings):new GadgetRelay(settings);}
   function armPoll(delay=replyPoll.delay(state.settings.pollSeconds*1000)){clearTimeout(poll);if(active&&relay&&!disposed)poll=setTimeout(()=>fire(refresh()),delay);}
-  async function render(){
-    const attempt=renderSerial+1;
-    try{await renderContent();}
-    catch(e){
+  function chatPage(): ChatPage {
+    const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
+    if(!selected)return {body:text('メッセージはありません\n録音またはスマートフォンから送信','No messages yet\nRecord voice or send from your phone'),footer:text('ダブルタップ: ホーム','Double-tap: home')};
+    const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
+    const message=exchange?.reply||selected,waiting=Boolean(exchange&&!exchange.reply);
+    const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
+    const input=exchange?excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:messageText(exchange.input)}),2):undefined;
+    const stamp=new Date(message.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp}\n${messageText(message)}`;
+    const hasImage=!waiting&&state.settings.images&&Boolean(message.image||message.image_file);
+    const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
+      ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
+    if(page>=pages.length)page=0;
+    const current=pages[page]!;
+    return {body:current.body,footer:current.footer,messageId:message.id,readReplyId:exchange?.reply?.id,
+      photo:current.image?message:undefined,style:current.image?undefined:{input,bodyColor:!waiting&&message.from==='You'?1:4}};
+  }
+
+  async function render(forceChat=false){
+    const visibleChat=glasses.ready&&active&&!disposed&&!contextualOpen&&!state.displaySleeping&&screen==='message';
+    const view=visibleChat&&!state.recording&&!voiceBusy&&!feedback?chatPage():undefined;
+    let key='',inlineImage:string|undefined;
+    if(view){
+      const {photo,...content}=view;
+      // A downloaded file keeps its identity when a poll replaces the snapshot.
+      // Compare inline bytes separately to avoid serializing an entire image on each poll.
+      const file=photo?.image_file;
+      inlineImage=photo?.image?.data_base64;
+      key=JSON.stringify([state.selectedMessageId,page,state.settings.language,contextualMenu(),content,
+        file,file?photo.ts:undefined,file?photo.mime_type:photo?.image?.mime]);
+      if(lastChatPage?.frame===renderSerial&&lastChatPage.key===key&&lastChatPage.inlineImage===inlineImage
+        &&(!forceChat||drawingChatFrame===renderSerial))return lastChatPage.ready;
+      if(forceChat)glasses.invalidateImage();
+    }
+    if(drawingChatFrame!==undefined)glasses.invalidateRender();
+    const frame=++renderSerial;
+    lastChatPage=undefined;
+    drawingChatFrame=visibleChat?frame:undefined;
+    if(visibleChat)syncDisplayTimers();
+    const ready=drawFrame(frame,view);
+    if(view)lastChatPage={frame,key,inlineImage,ready};
+    return ready;
+  }
+
+  async function drawFrame(frame:number,view?:ChatPage){
+    try{
+      if(view)await drawChatPage(frame,view);
+      else await renderContent(frame);
+    }catch(e){
+      if(view&&frame!==renderSerial)return;
+      if(lastChatPage?.frame===frame)lastChatPage=undefined;
       const message=imageFailure(e instanceof Error?e.message:'');
-      if(message&&attempt===renderSerial&&active&&!contextualOpen&&!feedback){
+      if(message&&frame===renderSerial&&active&&!contextualOpen&&!feedback){
         feedback=failureFeedback(e,()=>act(render));
-        await renderContent().catch(error);
+        await render().catch(error);
       }
       throw e;
-    }finally{syncDisplayTimers();}
+    }finally{
+      // Only the current page can start its reading interval. A superseded transfer
+      // may finish after the reader has already moved to another page.
+      if(drawingChatFrame===frame)drawingChatFrame=undefined;
+      syncDisplayTimers();
+    }
   }
-  async function renderContent(){
-    const frame=++renderSerial;
-    if(!glasses.ready||!active||contextualOpen)return;
+
+  async function drawChatPage(frame:number,view:ChatPage){
+    const photo=view.photo;
+    let image=photo?.image;
+    if(photo?.image_file&&!image&&relay){
+      await show(text('画像を読み込み中…','Loading image…'),text('ダブルタップ: 戻る','Double-tap: back'));
+      if(frame!==renderSerial)return;
+      const source=relay;
+      image=await imageAttachment(photo.image_file,photo.mime_type||'image/png');
+      const current=source===relay&&state.snapshot.messages.find(m=>m.id===photo.id&&m.ts===photo.ts&&m.image_file===photo.image_file&&m.mime_type===photo.mime_type);
+      if(current&&!current.image)current.image=image;
+      if(frame!==renderSerial)return;
+      // A subsequent snapshot may contain these same bytes or a replacement for the same file.
+      if(lastChatPage?.frame===frame)lastChatPage.inlineImage=image.data_base64;
+    }
+    await show(view.body,view.footer,image,view.style);
+    if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&view.readReplyId&&!state.readIds.includes(view.readReplyId)){
+      state.readIds.push(view.readReplyId);emit();saveSoon();
+    }
+  }
+
+  async function renderContent(frame:number){
+    if(!glasses.ready||!active||disposed||contextualOpen)return;
     // Keep an event-capturing page alive, with no text, footer, list border or image.
     if(state.displaySleeping){await show(' ',' ');return;}
     if(state.recording){
@@ -489,32 +569,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       }
       if(frame!==renderSerial)return;
       await show(current.body,current.footer,image);return;
-    }
-    if(screen==='message'){
-      const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
-      if(!selected){await show(text('メッセージはありません\n録音またはスマートフォンから送信','No messages yet\nRecord voice or send from your phone'),text('ダブルタップ: ホーム','Double-tap: home'));return;}
-      const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
-      const m=exchange?.reply||selected,waiting=Boolean(exchange&&!exchange.reply);
-      const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
-      const input=exchange?excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:messageText(exchange.input)}),2):undefined;
-      const stamp=new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-      const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${m.from}: ${messageText(m)}`:`${m.from} · ${stamp}\n${messageText(m)}`;
-      const hasImage=!waiting&&state.settings.images&&Boolean(m.image||m.image_file);
-      const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
-        ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
-      if(page>=pages.length)page=0;
-      const current=pages[page]!;
-      let image=current.image?m.image:undefined;
-      if(current.image&&!image&&m.image_file&&relay){
-        await show(text('画像を読み込み中…','Loading image…'),text('ダブルタップ: 戻る','Double-tap: back'));
-        image=await imageAttachment(m.image_file,m.mime_type||'image/png');m.image=image;
-      }
-      if(frame!==renderSerial)return;
-      await show(current.body,current.footer,image,current.image?undefined:{input,bodyColor:!waiting&&m.from==='You'?1:4});
-      if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&exchange?.reply&&!state.readIds.includes(exchange.reply.id)){
-        state.readIds.push(exchange.reply.id);emit();saveSoon();
-      }
-      return;
     }
   }
   async function showMenu(){
@@ -619,9 +673,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   async function openMessage(id:string,interaction=true){
     if(!state.snapshot.messages.some(m=>m.id===id))return;
     if(interaction){displayInteraction();followingChatId=undefined;}
-    state.selectedMessageId=id;screen='message';page=0;feedback=undefined;state.error='';glasses.invalidateImage();
-    const frame=renderSerial+1;
-    await render();
+    state.selectedMessageId=id;screen='message';page=0;feedback=undefined;state.error='';
+    const ready=render(true),frame=renderSerial;
+    await ready;
     if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&!state.recording&&!voiceBusy
       &&screen==='message'&&state.selectedMessageId===id&&!state.readIds.includes(id))state.readIds.push(id);
     emit();saveSoon();
@@ -938,6 +992,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(document.hidden){active=false;contextualOpen=false;pendingMenuAction=undefined;++actionSerial;++renderSerial;glasses.invalidateRender();clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());}
     else{active=true;contextualOpen=false;foregroundAbort=new AbortController();if(feedback?.kind==='busy')feedback=undefined;fire(render());armPoll(0);}
   });
-  window.addEventListener('pagehide',()=>{active=false;disposed=true;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
+  window.addEventListener('pagehide',()=>{active=false;disposed=true;++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
   return api;
 }
