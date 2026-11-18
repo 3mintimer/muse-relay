@@ -1,92 +1,94 @@
-# 要望・質問の受付
+# Requests and questions
 
-| 入口 | 公開範囲 | アカウント |
+[English](feedback.md) · [日本語](feedback.ja.md)
+
+| Entry point | Visibility | Account |
 |---|---|---|
-| [ガイドのフォーム](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback) | 非公開の受付DB。公開への同意があるものだけ匿名化した要約を検討 | 不要 |
-| [GitHubのIssueフォーム](https://github.com/3mintimer/muse-relay/issues/new/choose) | 入力した内容が公開される | GitHubが必要 |
+| [Guide form](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback) | Private receipt database; only explicitly consented submissions may be summarized without identifying details | None |
+| [GitHub Issue forms](https://github.com/3mintimer/muse-relay/issues/new/choose) | Submitted content is public; English and Japanese forms are available | GitHub required |
 
-「こう使いたい」「操作で困った」「設定・使い方」のいずれかを選んで送れます。連絡先は不要です。トークン、設定JSON、個人のURL、氏名、実際の会話・音声・写真は入力しないでください。受付番号は手元に控えます。番号から本文を読む公開APIや進捗照会はありません。連絡先を保持しないため、フォームから個別返信はできません。
+Choose an idea, a problem, or a setup/use question. Contact details are not required. Do not submit tokens, configuration JSON, personal URLs, names, or real conversations/audio/photos. Keep your receipt number. There is no public API for reading its body or checking progress. The form cannot provide individual replies because it stores no contact address.
 
 ```mermaid
 flowchart LR
-  F[フォーム] -->|HTTPS・同じOrigin| W[受付Worker]
-  W -->|本文と任意の公開同意| D[非公開D1]
-  D --> M[保守担当者が確認]
-  M -->|同意あり・本人特定を避けて要約| I[公開GitHub Issue]
-  M -->|同意なし| P[非公開のまま検討・削除]
-  I --> R[PR・確認・結果を記録]
+  F[Form] -->|HTTPS / same Origin| W[Feedback Worker]
+  W -->|Text and optional sharing consent| D[Private D1]
+  D --> M[Maintainer review]
+  M -->|Consent and de-identified summary| I[Public GitHub Issue]
+  M -->|No consent| P[Keep private / remove]
+  I --> R[PR, checks, and outcome]
 ```
 
-公開同意は初期状態でオフです。オンでも原文・受付番号・個人の環境をそのまま公開せず、保守担当者が内容と必要性を判断します。自動Issue作成、GitHub Bot、GitHubへのトークン保存はありません。
+Sharing is off by default. Even with consent, maintainers assess whether an Issue is useful and do not publish the raw text, receipt number, or identifying environment details. There is no automatic Issue creation, GitHub Bot, or stored GitHub token.
 
-## 保存するデータ
+## Stored data
 
-| データ | 場所・保持 |
+| Data | Location and retention |
 |---|---|
-| 種類、本文、公開同意、受付日時、ランダムな受付番号 | D1の `feedback_receipts`。90日を目安に清掃の実行時に削除 |
-| 確認状態、対応する公開IssueのURL | 同じ受付票。Issue URLの記録は公開同意がある票だけ |
-| 日替りHMACによる接続元識別子と件数 | `feedback_limits`。期限は最大48時間、次の清掃時に削除 |
-| 生IP・User-Agent・連絡先・Cookie | 受付実装では保存しない |
+| Kind, message, consent, time, random receipt number | D1 `feedback_receipts`; eligible for removal at cleanup after about 90 days |
+| Review status and corresponding public Issue URL | Same receipt. An Issue URL may be recorded only with sharing consent |
+| Daily HMAC client identifier and counts | `feedback_limits`; expires within 48 hours and is removed at the next cleanup |
+| Raw IP, User-Agent, contact address, Cookie | Not stored by this implementation |
 
-接続元IPはそのリクエスト内でのみHMAC計算に使い、本文の行とは関連付けて保存しません。入力値・ヘッダー・例外をアプリのログへ出しません。ホスティング事業者の通信ログやバックアップの保持は別なので、管理画面側でも設定を確認します。公開Issueになった要約は、受付票の削除だけでは削除されません。
+The address is used only within the request to calculate the HMAC; it is not saved alongside the receipt. The application does not log input, headers, or exceptions. Hosting-provider access logs and backups have separate policies; review those settings too. Deleting a receipt does not remove a summary already published as an Issue.
 
-## HTTP契約
+## HTTP contract
 
-`guide/feedback.mjs` の `handleFeedback(request, env)` を `POST /api/feedback` に接続します。サイトと同じOriginからJSONを送ります。利用者のトークン・Cookieは不要です。別OriginへのCORS公開はしません。
+Route `POST /api/feedback` to `handleFeedback(request, env)` in `guide/feedback.mjs`. Send JSON from the site's own Origin. No user token or Cookie is required. Cross-origin CORS access is not enabled.
 
 ```json
-{"kind":"idea","message":"スペース一覧を自分の順番に並べたいです。","share":false,"website":""}
+{"kind":"idea","message":"I would like to arrange Spaces in my own order.","share":false,"website":""}
 ```
 
-| 項目 | 制約 |
+| Field | Constraint |
 |---|---|
 | `kind` | `idea` / `problem` / `question` |
-| `message` | 前後の空白を除いて10〜4,000 Unicode文字。プレーンテキスト |
-| `share` | boolean。未指定は `false`。本人を特定する情報を除いた公開Issueへの要約に同意する場合だけ `true` |
-| `website` | 空文字／省略。フォームのhoneypotで、利用者には入力させない |
-| 本文全体 | UTF-8で16,384バイト以下。添付不可 |
+| `message` | 10–4,000 Unicode characters after trimming; plain text |
+| `share` | Boolean, default `false`. Set `true` only to consent to a public Issue summary with identifying details removed |
+| `website` | Empty or omitted. A honeypot; users should not fill it in |
+| Complete body | At most 16,384 UTF-8 bytes. No attachments |
 
-| 応答 | 意味 |
+| Response | Meaning |
 |---|---|
-| `201 {"receipt":"<UUID>"}` | 受付番号。内容や接続元は返さない |
-| `400 invalid_json` | JSONを読めない |
-| `403 origin_not_allowed` | 同じOriginではない、またはOriginがない |
-| `405 method_not_allowed` | POST以外。匿名の一覧・本文読取はない |
-| `413 too_large` / `415 json_required` | 本文サイズ／形式が不適合 |
-| `422 invalid_kind / invalid_message / invalid_share / invalid_website / invalid_input` | 入力値が不適合 |
-| `429 rate_limited` | `Retry-After` 秒待つ。入力内容を残し、自動連続送信しない |
-| `503 unavailable` | 設定・保存の問題。入力内容を残す |
+| `201 {"receipt":"<UUID>"}` | Receipt number; no message or address is returned |
+| `400 invalid_json` | Unreadable JSON |
+| `403 origin_not_allowed` | Missing or different Origin |
+| `405 method_not_allowed` | Not POST. No anonymous list/body reader |
+| `413 too_large` / `415 json_required` | Invalid body size/format |
+| `422 invalid_kind / invalid_message / invalid_share / invalid_website / invalid_input` | Invalid input |
+| `429 rate_limited` | Wait `Retry-After` seconds. Keep the draft; do not repeatedly auto-submit |
+| `503 unavailable` | Configuration/storage problem. Keep the draft |
 
-同じ接続元はUTCの1時間枠で3件、1日枠で10件、全体で1日100件までです。家庭・会社の共用回線では枠を共有します。HMACはサーバー秘密値とUTC日付で作り、生IPを残しません。Cloudflareの `CF-Connecting-IP` だけを使用し、欠落時は共通の制限枠になります。別のホストへ移植する場合は、信頼できるプロキシがこのヘッダーを置換する構成にします。制限と保存は同じD1 batchで確定します。[D1のトランザクション](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)、[Cloudflareの接続元ヘッダー](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
+Limits are 3 submissions per UTC hour and 10 per UTC day for the same address, plus 100 per day overall. Shared home/work networks share a limit. The HMAC uses a server secret and UTC day; raw addresses are not retained. Only Cloudflare's `CF-Connecting-IP` is used; missing metadata uses a shared limit. On another host, ensure a trusted proxy replaces this header. Acceptance and counters commit in the same D1 batch. [D1 transactions](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch), [Cloudflare address header](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
 
-honeypotに値がある送信は保存せず、同じ形の201を返します。これは高度なbot判定ではありません。通信が成功応答の直前に切れた場合は、票が既に保存されていることがあります。再送で重複した票は保守担当者が整理します。
+A filled honeypot receives the same 201 shape without storage. This is a basic measure, not advanced bot detection. If a connection drops just before the success response, the receipt may already exist. Maintainers consolidate duplicates caused by resubmission.
 
-## 配備・確認
+## Deployment and checks
 
-| 必要なもの | 設定 |
+| Requirement | Setting |
 |---|---|
-| D1 binding | `DB`。受付DBを公開する読取ルートを作らない |
-| サーバー秘密値 | `FEEDBACK_RATE_SECRET`。ランダムな32文字以上。配備先のsecretとして設定し、ソース・ビルド・ブラウザーへ含めない |
-| スキーマ | `guide/db/schema.ts` |
-| schema-only migration | `guide/db/drizzle/0000_feedback.sql` と `meta/` |
+| D1 binding | `DB`. Do not expose database reader routes |
+| Server secret | `FEEDBACK_RATE_SECRET`, random and at least 32 characters. Store as a deployment secret, never in source/build/browser |
+| Schema | `guide/db/schema.ts` |
+| Schema-only migration | `guide/db/drizzle/0000_feedback.sql` and `meta/` |
 
-Sites用の配備では、このmigrationと `meta/` を配備成果物の `.openai/drizzle/` へコピーします。マイグレーションにはテーブル・索引・制約だけを入れ、受付データや秘密値を混ぜません。
+For Sites, copy the migration and `meta/` to `.openai/drizzle/` in the deployment artifact. Migrations contain only tables, indexes, and constraints, not receipt data or secrets.
 
 ```sh
 node --test guide/feedback.test.mjs
 ```
 
-ローカルのSQLiteで実際のmigrationとSQLを使い、同意の初期値・同時送信の制限・公開読取の拒否・保持期限・受付番号による削除を確認します。外部へのテスト投稿は行いません。
+The local SQLite test executes the real migration and SQL for default consent, concurrent limits, rejection of public reads, retention, and receipt-based deletion. It does not post externally.
 
-開発プレビューは `guide/local-db.mjs` の `createLocalDb()` を使用できます。全migrationを適用したメモリ上のDBで、終了時に消えます。Hosted D1には接続しません。schemaを変更した場合はガイド用の依存をインストールしたうえで `npm --prefix guide run db:generate` を使い、生成SQLにデータ操作を混ぜないでください。
+Development can use `createLocalDb()` from `guide/local-db.mjs`: an in-memory database with all migrations, discarded on exit, without a hosted D1 connection. After schema changes, install guide dependencies and run `npm --prefix guide run db:generate`. Keep data changes out of generated SQL.
 
-配備後のスモークテストは保守担当者が1件だけ、架空の本文に `[動作確認・削除対象]` を付け、`share:false` で送ります。返った受付番号でD1到達を確認して削除します。この票を本物の要望や公開Issueにしません。
+A maintainer may run one deployment smoke test with artificial text labeled `[SMOKE TEST — DELETE]` and `share:false`. Verify D1 delivery using the returned receipt and delete it. Do not treat it as a real request or publish an Issue for it.
 
-## 保守担当者の確認・削除
+## Maintainer review and deletion
 
-ホスティングの認証済みD1管理画面・CLIで実行します。DB結果を公開ログやGitへ保存しません。以下の `?` は、ツールの値バインドまたは確認した受付番号へ置き換えます。
+Use the hosting provider's authenticated D1 console/CLI. Do not save database results in public logs or Git. Bind the `?` parameters below through your tool, or substitute a verified receipt number.
 
-1. 新しい票の概要を確認し、必要な1件だけ本文を開きます。
+1. List new receipt metadata, then open only the message needed.
 
 ```sql
 SELECT receipt, kind, share, created_at, status
@@ -95,7 +97,7 @@ SELECT receipt, kind, message, share, created_at, status, issue_url
 FROM feedback_receipts WHERE receipt = ?;
 ```
 
-2. 重複・操作方法・再現条件を確認します。`share=0` の原文・個別内容は公開へ転載しません。公開に同意した票も氏名・固有URL・会話・機器識別情報を除き、再現に必要な架空の例へ置き換えてからIssueを作ります。
+2. Check duplicates, usage questions, and reproduction. Do not publicly copy the original or individual details of `share=0` submissions. For consented submissions, remove names, private URLs, conversations, and device identifiers; use artificial examples necessary for reproduction before creating an Issue.
 
 ```sql
 UPDATE feedback_receipts SET status = 'reviewed' WHERE receipt = ?;
@@ -103,16 +105,16 @@ UPDATE feedback_receipts SET status = 'issue', issue_url = ?
 WHERE receipt = ? AND share = 1;
 ```
 
-3. Issueへ目的・受入条件を記載し、関連するPRと実施した確認を結び付けます。実機／Simulator／ブラウザーを区別します。対応しない場合も理由を残します。受付票の本文や番号はIssue・PRに載せません。
+3. Record purpose and acceptance criteria in the Issue, link the PR and relevant checks, and distinguish hardware, Simulator, and browser evidence. Record reasons for not proceeding. Do not put receipt text or numbers in Issues/PRs.
 
-4. 完了・重複・テスト票は閉じるか、受付番号を確認して削除します。削除依頼はフォームで受付番号を添えて送れます。公開Issueの修正・削除が必要な場合は別に確認します。
+4. Close or delete completed, duplicate, and test receipts after checking their number. Users may request deletion through the form with their receipt number. Review any requested public Issue changes separately.
 
 ```sql
 UPDATE feedback_receipts SET status = 'closed' WHERE receipt = ?;
 DELETE FROM feedback_receipts WHERE receipt = ?;
 ```
 
-有効な送信の処理時に、90日超の票を最大100件、期限切れの制限情報を最大200件清掃します。送信がない期間は自動実行されません。保守時にも次の限定クエリを繰り返し、残件がなくなったことを確認します。
+Valid submissions trigger cleanup of up to 100 receipts older than 90 days and 200 expired rate-limit rows. No submissions means no automatic cleanup. During maintenance, repeat these bounded queries until no eligible rows remain.
 
 ```sql
 DELETE FROM feedback_receipts WHERE receipt IN (
@@ -125,4 +127,4 @@ DELETE FROM feedback_limits WHERE bucket IN (
 );
 ```
 
-受付票の削除はGitHub上のIssue・PRやホスティングのバックアップまで削除する操作ではありません。秘密値を変更すると接続元ごとの現在の制限枠が切り替わりますが、全体の日別上限は維持されます。
+Receipt deletion does not delete GitHub Issues/PRs or hosting backups. Rotating the secret changes the current per-address limit buckets, but preserves the global daily limit.

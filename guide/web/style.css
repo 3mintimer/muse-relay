@@ -389,11 +389,16 @@ svg {
   text-decoration: underline;
 }
 
-.theme-field select {
+.theme-field select,
+.language-field select {
   font-size: 12px;
   min-height: 36px;
   padding: 5px 24px 5px 9px;
   background: var(--surface);
+}
+
+.language-field {
+  flex: 0 0 auto;
 }
 
 .flow-strip {
@@ -697,7 +702,7 @@ svg {
   color: var(--on-highlight);
 }
 
-.step-tabs button>span {
+.step-tabs button>span:first-child {
   font-size: 11px;
   border: 1px solid currentColor;
   width: 22px;
@@ -795,7 +800,7 @@ svg {
   font-size: 14px;
 }
 
-.disclosure>summary>span {
+.disclosure>summary>#implementation-name {
   float: right;
   color: var(--muted);
   font-size: 12px;
@@ -1348,11 +1353,27 @@ svg {
 
 @media (max-width: 900px) {
   .header-row {
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 0;
+    padding-top: 9px;
   }
 
   .header-row nav {
-    gap: 14px;
+    order: 3;
+    width: 100%;
+    margin: 4px 0 0;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .language-field {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .theme-field {
+    order: 2;
+    margin-left: 8px;
   }
 
   .flow-heading {
@@ -1445,12 +1466,12 @@ svg {
   }
 
   .theme-field {
-    order: 1;
-    margin-left: auto;
+    order: 2;
+    margin-left: 8px;
   }
 
   .header-row nav {
-    order: 2;
+    order: 3;
     width: 100%;
     margin: 4px 0 0;
     justify-content: space-between;
@@ -1636,7 +1657,7 @@ svg {
     padding: 16px;
   }
 
-  .disclosure>summary>span {
+  .disclosure>summary>#implementation-name {
     float: none;
     margin-left: 12px;
   }
@@ -1856,6 +1877,7 @@ svg {
 
   .header-row nav,
   .theme-field,
+  .language-field,
   .demo-controls,
   .feedback-layout form,
   .step-navigation,

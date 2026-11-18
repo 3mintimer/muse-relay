@@ -1,33 +1,35 @@
-# Gist と Muse Gadget SDK
+# Gist and Muse Gadget SDK
 
-共通のEvenHubアプリを使用し、中継とMuse側の処理は利用者が用意します。SDKの全機能がMuse Relayの機能になるわけではありません。
+[English](relay-comparison.md) · [日本語](relay-comparison.ja.md)
 
-| Muse Relayの操作 | Gist | Gadget / 参考ATOM S3 |
+Both use the same EvenHub app. Users supply the relay and Muse-side processing. The full Gadget SDK feature set is not automatically available through Muse Relay.
+
+| Muse Relay operation | Gist | Gadget / reference ATOM S3 |
 |---|---|---|
-| テキスト送受信 | 利用者のwatcher/handler | ペアリング済みSDK接続 |
-| 中継先で文字起こし | 送信された音声ファイルを利用者のハンドラーが処理 | 送信された音声ファイルをGadgetがSDK経由でMuseに渡す |
-| Soniox（アプリから直接） | 音声はSonioxへ、確定文字だけをGistへ。個人APIキーまたは一時キーで接続 | 同じ経路で確定文字をHTTPS中継へ。中継から一時キーを取得する場合も音声はSonioxへ直接送信 |
-| G2の話者選択 | 対応 | 対応 |
-| Museからの画像・アバター | 対応。バイト列を書き出す | 対応。HTTPSのMuse用出力APIへ書き出す |
-| アプリからMuseへ画像 | Gist添付を扱うハンドラーが必要 | 中継の `capabilities.images:true` 時のみ。参考機器の入力経路は未検証のため無効 |
-| スペースのボタン・スライダー・選択・マイク | 宣言データの書き出しと操作処理で対応 | 同じ形式で対応 |
-| スペース内画像 | 独自エクスポーターで対応。参考watcherの `spaces` 出力は文字・操作のみ | HTTPS出力APIで対応 |
-| 機器オンライン表示 | 対象なし | 中継が受けた機器heartbeatの鮮度 |
-| 外出先から使用 | GitHubへ接続 | 電源・Wi-Fiを維持した自宅機器と、外部到達可能なHTTPS中継 |
-| 録音上限（現実装） | 120秒 | 30秒 |
-| 送信後の受信 | 2秒後に1回、その後通常間隔 | 対応する返答を待つ間1秒、期限付き |
+| Send and receive text | Your watcher/handler | Paired SDK connection |
+| Relay-side transcription | Your handler processes the submitted audio file | Gadget passes the audio file to Muse through the SDK |
+| Soniox directly from the app | Audio goes to Soniox; only final text goes to Gist. Use your API key or a temporary key | The same path sends final text to the HTTPS relay. Even when the relay issues a temporary key, audio goes directly to Soniox |
+| G2 speaker selection | Supported | Supported |
+| Images and avatar from Muse | Export image bytes | Export through the HTTPS Muse-writer API |
+| Images from the app to Muse | A handler that processes Gist attachments is required | Only when `capabilities.images:true`. The reference device input path is unverified and disabled |
+| Space buttons, sliders, choices, and microphone | Export declarations and handle explicit actions | Same format |
+| Images within Spaces | Custom exporter; reference watcher's `spaces` output contains text and controls only | HTTPS output API |
+| Device online indication | Not applicable | Freshness of device heartbeats received by the relay |
+| Use away from home | Connect to GitHub | Keep the home device powered and on Wi-Fi; use a reachable HTTPS relay |
+| Current recording limit | 120 seconds | 30 seconds |
+| Polling after a send | Once after 2 seconds, then the normal interval | Every second while waiting for the matching reply, for a limited period |
 
 ```mermaid
 flowchart LR
-  App[Muse Relay] --> Choice{中継}
-  Choice --> Gist[GitHub Gist] --> Handler[利用者の監視・処理] --> Muse
-  Choice --> HTTPS[利用者のHTTPS中継] --> Atom[自宅のGadget] --> Muse
-  App -.音声 / 本人のAPIキーまたは一時キー.-> Soniox
-  Soniox -.確定文字.-> App
+  App[Muse Relay] --> Choice{Relay}
+  Choice --> Gist[GitHub Gist] --> Handler[Your watcher and handler] --> Muse
+  Choice --> HTTPS[Your HTTPS relay] --> Atom[Gadget at home] --> Muse
+  App -.Audio / your API key or temporary key.-> Soniox
+  Soniox -.Final text.-> App
 ```
 
-[公式SDK](https://github.com/facebookincubator/muse-gadget-sdk)は機器の画面・ボタン・センサー・アクチュエーター等との連携を提供します。Gist自体はデータを置く仕組みで、機器連携には別の実装が必要です。このプロジェクトの[ATOM S3ファームウェア](../firmware/guide.md)は中継専用で、SDKの機器画面や音声出力をG2へ転送するものではありません。G2のスペースは両方式ともMuseが作成したデータの書き出しで実現します。
+The [official SDK](https://github.com/facebookincubator/muse-gadget-sdk) integrates device displays, buttons, sensors, and actuators. A Gist is a data store; hardware integration requires additional implementation. This project's [ATOM S3 firmware](../firmware/guide.md) is a relay and does not forward the SDK device's display or audio output to G2. Both methods display Spaces through structured data exported by Muse.
 
-アプリ内の中継選択には共通機能のアイコンと比較ヒント、Gadgetのチャットには画像受信のみの状態、音声設定には選択中の認証方式を表示します。接続確認とMuseからの応答確認を区別します。比較は参考実装の範囲であり、利用者が拡張した中継の動作保証ではありません。
+The relay selector shows shared-feature icons and comparison hints. Gadget chat indicates when only image reception is available; voice settings show the selected authentication method. A successful connection check is distinct from receiving a Muse reply. This comparison covers the reference implementations, not every custom relay.
 
-Soniox接続方法は[公式WebSocket認証仕様](https://docs.soniox.com/authentication/websocket-authentication)に従います。APIキー入力方式は本人が設定したキーだけを使用し、共有アプリには含めません。保存場所・送信先はアプリ内ヒントと[データの流れ](data.md)を参照してください。
+Soniox connections follow the [official WebSocket authentication contract](https://docs.soniox.com/authentication/websocket-authentication). Direct API-key mode uses the owner's key, never a key bundled in the shared app. See the in-app hints and [data flow](data.md) for storage and destinations.

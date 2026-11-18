@@ -1,0 +1,28 @@
+name: 日本語｜設定・使い方の質問
+description: どこを設定・操作すればよいか尋ねる
+body:
+  - type: markdown
+    attributes:
+      value: |
+        このIssueは公開されます。URL全体、トークン、設定JSON、実際の会話は載せないでください。
+        [ガイド](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/)を見てもわからない点を記載できます。
+        GitHub登録なしで送るには[要望受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback)を使ってください。
+  - type: textarea
+    id: question
+    attributes:
+      label: 何をしたいですか・どこで止まりましたか
+      placeholder: 例：Gistの設定後、アプリのどの項目へ戻ればよいかわからない
+    validations:
+      required: true
+  - type: dropdown
+    id: relay
+    attributes:
+      label: 中継方式
+      options:
+        - 選択前・わからない
+        - GitHub Gist
+        - Muse Gadget SDK
+  - type: textarea
+    id: tried
+    attributes:
+      label: 試した操作（任意）

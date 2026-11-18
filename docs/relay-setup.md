@@ -1,206 +1,208 @@
-# 中継を設定する
+# Set up a relay
 
-配布されるMuse Relayは全員同じアプリです。利用者ごとの中継を自分で用意するか、下の依頼文をMuseへ渡して作成します。接続先と資格情報はアプリ内で設定します。
+[English](relay-setup.md) · [日本語](relay-setup.ja.md)
+
+Everyone receives the same Muse Relay app. Build your own relay, or give Muse the instructions below. Configure the endpoint and credentials in the app.
 
 ```mermaid
 flowchart LR
-  A[共通アプリを開く] --> B[中継方式を選ぶ]
-  B --> C[Museに実装を依頼<br/>または自分で構築]
-  C --> D[アプリに接続設定を入力]
-  D --> E[接続を確認]
-  E --> F[テキスト・音声・スペースを使う]
+  A[Open the shared app] --> B[Choose a relay]
+  B --> C[Ask Muse to implement it<br/>or build it yourself]
+  C --> D[Enter connection settings]
+  D --> E[Check the connection]
+  E --> F[Use text, voice, and Spaces]
 ```
 
-## 1. 方式を選ぶ
+## 1. Choose a method
 
-| 方式 | 用意するもの | アプリへ入力するもの |
+| Method | What you provide | What you enter in the app |
 |---|---|---|
-| GitHub Gist | 自分のGist、トークン、Muse側の受信処理 | Gist IDまたはURL、GitHubトークン |
-| Muse Gadget SDK | 自分のHTTPS中継、SDK対応機器、SDKトークン、Museとのペアリング | 中継URL、スマートフォン用接続キー |
+| GitHub Gist | Your Gist, token, and Muse-side handler | Gist ID or URL, GitHub token |
+| Muse Gadget SDK | Your HTTPS relay, SDK-compatible device, SDK token, and Muse pairing | Relay URL, phone connection key |
 
-Gadget方式の画面では、参考機器として「ATOM S3」を表示します。中継は [アプリとの契約](protocol.md) に合わせ、利用者のSDK対応機器・配置先で実装できます。同梱のサーバーやwatcherを使うこと、利用者ごとにEHPKを作り直すことは必須ではありません。
+The Gadget UI names ATOM S3 as the reference device. Implement the relay for your own SDK-compatible device and hosting while preserving the [app contract](protocol.md). You do not have to use the bundled server/watcher or rebuild an EHPK for each user.
 
-## 2. Museへ依頼する
+## 2. Ask Muse to implement it
 
-アプリで中継方式・音声・マイク・画像を選んでから「Museに渡す設定手順」をコピーします。生成文はその時点の選択を反映します。変更後はコピーし直してください。`docs/protocol.md` もMuseへ渡します。個人のURL・トークンは生成文に含みません。
+Choose the relay, voice mode, microphone, and image setting in the app, then copy the setup instructions for Muse. The generated text reflects those choices; copy it again after changing them. Also provide `docs/protocol.md`. Generated instructions do not contain your private URLs or tokens.
 
-| 選択した設定 | Museに渡る処理条件 |
+| Selection | Instructions for Muse |
 |---|---|
-| Gist / Muse Gadget SDK | 選んだ方式の入口・出口だけを使用 |
-| Museで文字起こし | WAVをMuseへ。Gistは`transcript`、Gadgetは必要に応じてMuse返信内に文字起こしを表示 |
-| Soniox | 音声はSonioxへ、確定テキストだけMuseへ。Whisper処理を重ねない |
-| G2 / スマートフォンのマイク | 選んだ音源で録音を確認 |
-| 画像オフ / オン | テキストのみ / 依頼された画像出力を使用。アバターは別途依頼した場合のみ。どちらもスペース本文だけで内容が分かること |
+| Gist / Muse Gadget SDK | Use only the selected method's input/output |
+| Muse transcription | Send WAV to Muse. Gist uses `transcript`; Gadget may include a labeled transcript in the Muse reply when needed |
+| Soniox | Audio goes to Soniox; only final text goes to Muse. Do not transcribe again with Whisper |
+| G2 / phone microphone | Verify recording from the selected source |
+| Images off / on | Text only / requested image output. Export an avatar only when separately requested. Space text must remain understandable without images |
 
-アプリからコピーできない場合は、下の依頼文の「現在の設定」を選択値へ置き換えます。
+If you cannot copy from the app, replace the current-settings placeholders below with your selected values.
 
-### Gist用の依頼文
-
-```text
-Muse RelayのGist中継を、私の環境に作成してください。
-配布済みのEvenHubアプリは変更せず、添付のdocs/protocol.mdのGist入出力を実装してください。
-同梱のadapters/gistは任意の参考実装です。自分で同じ入出力を実装しても構いません。
-現在の設定: 音声=<MuseまたはSoniox>、マイク=<G2またはスマートフォン>、録音対象=<すべて/自分/他の人>、画像=<オフまたはオン>、Soniox認証=<APIキー入力/一時キー発行サーバー>。
-G2の話者選択はアプリ側で対象外と不明の音声を無音化します。スマートフォンのマイクは全音声です。除外された発言を推測して復元しないでください。
-この選択に合わせて実装・確認し、選んでいない音声処理や画像の有効化は求めないでください。
-
-準備:
-- 私のGitHub Gistを再利用し、新規作成時のみg2muse-relay.jsonの初期値を{"messages":[]}にしてください。
-- トークンは利用可能な安全な資格情報入力・保存機能で受け取り、チャット本文・コード・Gistには含めないでください。
-- 私がアプリに入力するGist IDと、トークンの入力方法を案内してください。
-
-入口:
-- muse-relay-request-<id>.jsonを新規依頼として読み取ります。
-- 形式は{protocol:"muse-relay/1",id,kind:"chat"|"space",text,created_at,space_id?,space_action?}です。
-- 音声はaudio_file/audio_mime/audio_name、画像はimage_file/image_mime/image_nameを参照します。
-- 参照先ファイルの内容はbase64です。音声の標準形式は16kHz・16bit・monoのWAVです。
-- AIを定期起動せず、軽い監視処理で新規依頼があるときだけMuseの処理を起動してください。
-
-処理:
-- 同じidを重複処理しないよう、実行前のclaimと処理結果を永続化してください。
-- 途中で停止して結果が不明な依頼を無条件に再実行しないでください。
-- 音声設定がMuseなら、WAVをMuse側のWhisper互換モデル等で文字起こしし、元の依頼IDと同じidのYou発言を更新してください。Muse回答のreply_toもその依頼IDにします。参考watcherではハンドラーのtranscriptへ返します。
-- 音声設定がSonioxなら、確定テキストをそのまま使い、再度文字起こししないでください。APIキー入力方式なら追加サーバーは不要です。本人がアプリへ入力するため、Museがキーを受け取ったりGistへ保存したりしないでください。一時キー方式を選んだ場合のみ指定された発行先を使用し、長期キーはそのサーバーに保存します。
-- スペースを別途依頼した場合のみMuseで作成または調整し、layout:"list"を基本に、長い読み物は"cards"で書き出してください。
-- 各項目にbutton・slider・choice・microphoneの組み込みcontrolを選ぶか、読取用ならcontrolを省略してください。項目IDを各処理に対応付け、タップ・上下スワイプ・ダブルタップで使えるようにしてください。HTMLや外部Webウィジェットは使いません。
-- kind:"space"でspace_actionがなければ読取用更新だけです。space_action:{item_id,type,value?}があるときだけ、選んだ項目の処理を1回実行し、現在値と本文を更新して公開してください。sliderは数値、choiceは選択ID、buttonとmicrophoneはvalueなし。microphoneは選択済み音声方式での入力です。
-
-出口:
-- g2muse-relay.jsonへ{messages:[{id,from,type,text,ts,reply_to?}]}を書き出します。tsはUnix秒です。
-- 画像オンの場合だけ、画像返信にimage_fileとmime_type、またはimage:{mime,name,data_base64}を使います。画像の説明文は任意です。オフならテキストだけを書き出してください。
-- muse-relay-spaces.jsonへ{spaces:[{id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}]}を書き出します。
-- 画像オンで、アバターを別途依頼した場合だけ、ホーム用にMuseで設定済みの自分のアバター画像を特定して読み込み、muse-relay-profile.jsonへ{profile:{name?,avatar:{mime,name?,data_base64},updated_at?}}を書き出してください。同じGist内のbase64ファイルを指すavatar_file+mime_typeでも構いません。PNG/JPEG/WebP、デコード後250000バイト以下です。見つからなければ未設定とし、別のアバターで代用しないでください。参考watcherはハンドラーのprofileを同形式で受け取り、別ファイルへ保存します。
-- profileを省略した通常の返信は既存プロフィールを変更しません。解除する場合だけ{profile:{}}を書き出してください。
-- スペースの更新は一覧全体の置換です。残すスペースも含め、IDは維持してください。
-- 参考watcherのスペース出力はテキストと操作部品です。画像オンの独自エクスポーターならカードへimage添付、またはPNGのbase64ファイルを指すimage_fileを追加できます。画像だけに必要情報を置かないでください。
-- g2muse-relay.jsonの更新者を1つにし、保持する他のメッセージを消さないでください。
-- 保存期間と、処理済み依頼・音声・画像の清掃を設定してください。Gist履歴には残り得ることも案内してください。
-
-完了時:
-- アプリ用の接続設定を案内してください。秘密情報は安全な入力先へ渡してください。
-- まず私が送信したテキスト1件と対応する返信を確認してください。録音・スペース・画像は私がその操作を依頼した場合だけ確認し、接続設定だけで新たなスペースやアバターを作らないでください。
-- 受付・文字起こし・Museの返信・G2での表示を区別して、実際に確認した範囲を知らせてください。
-```
-
-### Muse Gadget SDK用の依頼文
+### Instructions for Gist
 
 ```text
-Muse RelayのMuse Gadget SDK中継を、私の環境に作成してください。
-配布済みのEvenHubアプリは変更せず、添付のdocs/protocol.mdのアプリHTTP入出力を実装してください。
-機器は私が指定するSDK対応機器を使います。自宅へ置いたまま、外出先のスマートフォンとG2から使える構成にしてください。
-同梱のserver/とfirmware/は任意の参考実装です。私の機器やホスティングに合わせて構成できます。
-現在の設定: 音声=<MuseまたはSoniox>、マイク=<G2またはスマートフォン>、録音対象=<すべて/自分/他の人>、画像=<オフまたはオン>、Soniox認証=<APIキー入力/一時キー発行サーバー>。
-G2の話者選択はアプリ側で対象外と不明の音声を無音化します。スマートフォンのマイクは全音声です。除外された発言を推測して復元しないでください。
-既存の接続があれば再利用し、この選択に合わせて実装・確認してください。
+Implement a Gist relay for Muse Relay in my environment.
+Keep the distributed EvenHub app unchanged and implement the Gist input/output in the attached docs/protocol.md.
+The bundled adapters/gist is an optional reference. You may implement the same contract yourself.
+Current settings: voice=<Muse or Soniox>, microphone=<G2 or phone>, recorded speakers=<all/me/others>, images=<off or on>, Soniox authentication=<API key input/temporary-key server>.
+G2 speaker selection silences excluded and unknown audio in the app. The phone microphone records all audio. Do not infer or reconstruct excluded speech.
+Implement and verify these choices. Do not require unselected voice services or enable images unnecessarily.
 
-準備:
-- 自分用のHTTPS接続先を用意し、機器側が外向きに接続する構成にしてください。
-- スマートフォンの接続先を機器の家庭内LAN IPにはしないでください。
-- 公式Muse Gadget SDKを使い、SDKトークンとMuseとのペアリングを設定してください。
-- スマートフォン・機器・Museの更新用資格情報を分け、安全な入力・保存機能で管理してください。
-- SDKトークンをアプリ用のHTTPキーとして使わないでください。
+Preparation:
+- Reuse my GitHub Gist. Only when creating a new Gist, initialize g2muse-relay.json to {"messages":[]}.
+- Receive and store tokens through an available secure credential mechanism; never put them in chat text, source code, or the Gist.
+- Tell me which Gist ID and credential-entry method to use in the app.
 
-アプリの入口と出口:
-- GET /v1/snapshot: {messages,spaces,profile?,device?,capabilities?}を返します。
-- POST /v1/requests: {id,kind,text,created_at,space_id?,space_action?,audio?,image?}を受け取ります。
-- GET /v1/files/:name: 必要な添付を{mime,name,data_base64}で返します。
-- スマートフォンとの通信はAuthorization: Bearerによる認証と、アプリのOriginに合うCORSを設定してください。
-- 添付・文字数・機器のメモリーに合う上限を守り、対応できない入力は明確に拒否してください。
+Input:
+- Read new requests from muse-relay-request-<id>.json.
+- Format: {protocol:"muse-relay/1",id,kind:"chat"|"space",text,created_at,space_id?,space_action?}.
+- Resolve audio_file/audio_mime/audio_name and image_file/image_mime/image_name.
+- Referenced files contain base64. Standard audio is 16 kHz, 16-bit mono WAV.
+- Use a lightweight watcher. Invoke Muse only for new requests, rather than periodically launching an AI process.
 
-Muse・機器側:
-- 公式SDKで依頼をMuseへ渡し、依頼IDと返信IDを照合してください。
-- 別のMuse会話をこのアプリへ流さないでください。
-- サーバーの受付や機器への受渡しだけで、Museの返信完了と扱わないでください。
-- 受渡し後に切断した依頼を無条件に再実行しないでください。
-- スペースを別途依頼した場合のみMuseで作成または調整し、layout:"list"を基本に、長い読み物は"cards"で生成してください。未確認のSpaces APIは仮定しないでください。
-- 各項目にbutton・slider・choice・microphoneのcontrolを選び、項目IDを処理に対応付けてください。キーボード・ポインター・外部ページ・長押しは不要にします。
-- kind:"space"でspace_actionがなければ読取用更新だけです。space_action:{item_id,type,value?}があるときだけ宣言済みの操作を行い、結果の値・本文を更新して公開してください。sliderは数値、choiceは選択ID、buttonとmicrophoneはvalueなしです。
-- 音声設定がMuseなら、WAVをMuse側で処理してください。参考サーバーはACKに一致するSDKのmessage.userにdisplay_text/text/contentがあると、元の依頼IDのYou発言を更新します。Muse回答のreply_toもその依頼IDにします。POST /v1/messagesはMuse返信専用です。SDKから文字起こしが届かなければ入力欄は「音声メッセージ」となります。アプリ側で確定文を得たい場合はSonioxを選択してください。
-- 音声設定がSonioxなら、音声はアプリからSonioxへ直接送られ、Museには確定テキストだけ届きます。再度文字起こししないでください。APIキー方式なら利用者がアプリへ入力し、追加の発行サーバーは不要です。一時キー方式は中継の/v1/soniox-tokenまたは指定された発行先と専用認証を使います。キーを依頼文やGistへ入れないでください。
+Processing:
+- Persist a claim before execution and save the result to avoid processing an ID twice.
+- Do not blindly replay a request whose outcome became unknown after interruption.
+- In Muse voice mode, transcribe WAV with a Muse-side Whisper-compatible model or equivalent. Update the You message using the original request ID; the Muse reply's reply_to must use that ID too. The reference watcher takes the handler's transcript field.
+- In Soniox mode, use final text directly. Direct API-key mode needs no additional server; I enter the key in the app, so Muse must not receive it or store it in Gist. Only use the selected issuer when temporary-key mode is chosen; its long-lived key stays on that server.
+- Create or adjust Spaces only if separately requested. Prefer layout:"list"; use "cards" for long reading.
+- Choose built-in button, slider, choice, or microphone controls per item, or omit control for read-only content. Map item IDs to handlers and support tap, up/down swipe, and double-tap. Do not use HTML or external web widgets.
+- A kind:"space" request without space_action only refreshes readable content. Execute an item once only when space_action:{item_id,type,value?} is present, then publish its current value and content. Sliders send numbers, choices send option IDs, and buttons/microphone omit value. Microphone input uses the selected voice mode.
 
-同梱サーバーを採用する場合のMuse出力:
-- POST /v1/messagesをMuse用キーで呼び、{id:"muse_export_<unique-id>",type:"text"|"image",text?,ts?,reply_to?,image?}を送ります。textはテキスト投稿で必須、画像投稿では省略できます。
-- 画像オンの場合だけ、ローカル写真や生成画像を読み込み、image:{mime,name,data_base64}にします。PNG/JPEG/WebP、デコード後250000バイト以下です。同じidで更新できます。URLやファイルパスだけを返さないでください。画像オフならテキストだけを書き出してください。
-- G2への画像は「画像を読込→POST /v1/messages→EvenHubアプリ→G2」で送ります。SDKのdisplay.draw_file / display.draw_urlはSDK機器の画面向けであり、G2の描画には使いません。
-- capabilities.imagesはアプリからMuseへの画像入力可否です。falseでもMuseからの画像出力はできます。
-- 現在の書き出しは、Muse用キーでGET /v1/spacesを呼ぶと{spaces:[...]}で取得できます。
-- 1件の追加・更新は、同じMuse用キーでPUT /v1/spaces/:idへ{id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}を送ります。本文のidをURLに合わせます。操作結果はこの方法で対象だけを更新してください。
-- 画像オンで、アバターを別途依頼した場合だけ、ホーム用にMuseで設定済みの自分のアバター画像を特定して読み込み、Muse用キーでPUT /v1/profileへ{name?,avatar:{mime,name?,data_base64},updated_at?}を送ってください。PNG/JPEG/WebP、デコード後250000バイト以下です。未確認の取得APIやURLだけの指定は使わず、見つからなければ未設定とし、別のアバターで代用しないでください。
-- profileのPUTは全体置換です。avatar_fileはサーバーの読取用なので書込には使いません。解除する場合は{}を送ってください。
-- 画像オンならカードへimage添付も追加できます。参考Workerでは全スペースで合計8枚まで保存できます。必要な情報は本文にも含めてください。
-- 一覧全体を入れ替えるときだけPUT /v1/spacesへ{spaces:[...]}を送ります。残すスペースも含めてください。
-- /device/*は同梱ファームウェア向けの契約です。別の機器実装ならアプリ側の契約を保って内部を変更できます。
+Output:
+- Write {messages:[{id,from,type,text,ts,reply_to?}]} to g2muse-relay.json. ts is Unix seconds.
+- Only when images are on, use image_file plus mime_type, or image:{mime,name,data_base64}, for image replies. Captions are optional. Otherwise export text only.
+- Write {spaces:[{id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}]} to muse-relay-spaces.json.
+- Only with images on and a separate avatar request, locate and read Muse's existing configured avatar. Export {profile:{name?,avatar:{mime,name?,data_base64},updated_at?}} to muse-relay-profile.json, or use avatar_file plus mime_type for a base64 file in the same Gist. Use PNG/JPEG/WebP, at most 250000 decoded bytes. If unavailable, leave it unset; do not substitute another avatar. The reference watcher accepts handler.profile in this format and stores a separate image file.
+- Omitting profile in an ordinary reply preserves the existing profile. Write {profile:{}} only to clear it.
+- Space updates replace the entire list. Include Spaces to retain and preserve their IDs.
+- The reference watcher's Space output contains text and controls. A custom exporter with images enabled may add an image attachment or image_file pointing to a PNG base64 file. Do not put essential information only in images.
+- Keep one writer for g2muse-relay.json and retain unrelated messages that should remain.
+- Set retention and cleanup for processed requests, audio, and images. Explain that Gist history may retain deleted content.
 
-完了時:
-- アプリに入力するHTTPS URLとスマートフォン用接続キーの設定方法を案内してください。
-- まず私が送信したテキスト1件と対応する返信を確認してください。録音・スペースは私が依頼した場合だけ確認し、接続設定だけで作成しないでください。未選択の音声サービスは追加しないでください。
-- 画像は有効かつ私が依頼した場合のみ確認してください。
-- 外出先からの通信と実機表示は、実際に確認できた場合だけ成功と報告してください。
+Completion:
+- Provide app connection instructions; deliver secrets only through a secure destination.
+- First verify one text message I sent and its matching reply. Verify recording, Spaces, or images only when I request those actions. Connection setup alone must not create a Space or avatar.
+- Distinguish acceptance, transcription, Muse completion, and G2 display, and report only what was actually verified.
 ```
 
-## 3. アプリへ接続設定を入力する
+### Instructions for Muse Gadget SDK
+
+```text
+Implement a Muse Gadget SDK relay for Muse Relay in my environment.
+Keep the distributed EvenHub app unchanged and implement the app HTTP contract in the attached docs/protocol.md.
+Use the SDK-compatible device I specify. Keep it at home while my phone and G2 can be used away from home.
+The bundled server/ and firmware/ are optional references; adapt the implementation to my device and hosting.
+Current settings: voice=<Muse or Soniox>, microphone=<G2 or phone>, recorded speakers=<all/me/others>, images=<off or on>, Soniox authentication=<API key input/temporary-key server>.
+G2 speaker selection silences excluded and unknown audio in the app. The phone microphone records all audio. Do not infer or reconstruct excluded speech.
+Reuse existing connections where available, and implement/verify the selected settings.
+
+Preparation:
+- Provide my own HTTPS endpoint; the device must connect outbound.
+- Do not use the device's home LAN IP as the phone's relay endpoint.
+- Use the official Muse Gadget SDK, SDK token, and Muse pairing.
+- Separate phone, device, and Muse-writer credentials, using secure input and storage.
+- Do not use the SDK token as the app's HTTP key.
+
+App input/output:
+- GET /v1/snapshot returns {messages,spaces,profile?,device?,capabilities?}.
+- POST /v1/requests accepts {id,kind,text,created_at,space_id?,space_action?,audio?,image?}.
+- GET /v1/files/:name returns required attachments as {mime,name,data_base64}.
+- Use Authorization: Bearer and CORS matching the app's Origin.
+- Enforce attachment, text, and device-memory limits. Explicitly reject unsupported input.
+
+Muse and device side:
+- Pass requests to Muse through the official SDK and correlate request/reply IDs.
+- Do not expose unrelated Muse conversations in this app.
+- Server acceptance or device delivery is not a completed Muse response.
+- Do not blindly resend a request after disconnecting following delivery.
+- Create or adjust Spaces only if separately requested. Prefer layout:"list", or "cards" for long reading. Do not assume an unverified Spaces API.
+- Map button, slider, choice, and microphone controls to item handlers. Do not require a keyboard, pointer, external page, or long press.
+- kind:"space" without space_action only refreshes readable data. Only act on declared space_action:{item_id,type,value?}, then republish the resulting values/content. Sliders use numbers, choices use option IDs; buttons/microphone omit value.
+- In Muse voice mode, process WAV in Muse. The reference relay updates the original You message when an ACK-matching SDK message.user contains display_text/text/content. Set the Muse reply's reply_to to the original request ID. POST /v1/messages is for Muse replies only. If the SDK provides no transcript, the input remains labeled as a voice message. Use Soniox if final text must be obtained in the app.
+- In Soniox mode, audio goes directly from the app to Soniox and Muse receives final text only. Do not transcribe again. With API-key mode, I enter the key in the app and no additional issuer is required. Temporary-key mode uses /v1/soniox-token or the selected custom issuer and its own authentication. Never put keys in instructions or Gist.
+
+Muse output when using the bundled server:
+- POST /v1/messages with the Muse key and {id:"muse_export_<unique-id>",type:"text"|"image",text?,ts?,reply_to?,image?}. Text posts require text; image posts may omit it.
+- Only with images on, read a local photo or generated image into image:{mime,name,data_base64}. PNG/JPEG/WebP, at most 250000 decoded bytes. Reuse the same id for updates. Do not return only a URL or file path. With images off, export text only.
+- G2 images follow: read image → POST /v1/messages → EvenHub app → G2. SDK display.draw_file/display.draw_url target the SDK device display, not G2.
+- capabilities.images describes image input from the app to Muse. Muse image output works even when it is false.
+- Read current exports using the Muse key with GET /v1/spaces, returning {spaces:[...]}.
+- Add/update one Space with the same key: PUT /v1/spaces/:id with {id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}. Match the body id to the URL. Use this route for action results so other Spaces remain intact.
+- Only with images on and a separate avatar request, locate and read Muse's existing configured avatar, then PUT /v1/profile with the Muse key and {name?,avatar:{mime,name?,data_base64},updated_at?}. Use PNG/JPEG/WebP up to 250000 decoded bytes. Do not assume an unverified API or send only a URL. If unavailable, leave it unset rather than substitute another avatar.
+- Profile PUT replaces the whole profile. avatar_file is a server-generated read reference, not writer input. Send {} to clear it.
+- With images on, cards may include image attachments. The reference Worker retains at most 8 images across all Spaces. Keep essential information in text too.
+- Use PUT /v1/spaces with {spaces:[...]} only to replace the complete list, including all Spaces to retain.
+- /device/* is the bundled firmware contract. Another device implementation may change internals while preserving the app contract.
+
+Completion:
+- Provide the HTTPS URL and instructions for setting the phone connection key.
+- First verify one text message I sent and its matching reply. Verify recording/Spaces only if requested; do not create them as a side effect of connection setup. Do not add unselected voice services.
+- Verify images only when enabled and requested.
+- Claim away-from-home access and physical G2 display only if actually verified.
+```
+
+## 3. Enter app connection settings
 
 ```mermaid
 flowchart TD
-  A[接続設定] --> B{選んだ方式}
-  B -->|Gist| C[Gist ID / URL<br/>GitHubトークン]
-  B -->|Gadget| D[HTTPS中継URL<br/>スマートフォン用キー]
-  C --> E[音声と画像]
+  A[Connection settings] --> B{Selected method}
+  B -->|Gist| C[Gist ID / URL<br/>GitHub token]
+  B -->|Gadget| D[HTTPS relay URL<br/>Phone key]
+  C --> E[Voice and images]
   D --> E
-  E --> F[接続を確認]
-  F --> G{読取成功?}
-  G -->|はい| H[保存してチャットを開く]
-  G -->|いいえ| I[表示された接続先・認証・エラーを確認]
+  E --> F[Check connection]
+  F --> G{Read successful?}
+  G -->|Yes| H[Save and open chat]
+  G -->|No| I[Check endpoint, authentication, and error]
   I --> F
 ```
 
-| 音声設定 | 追加設定 | 音声の送信先 |
+| Voice setting | Additional setup | Audio destination |
 |---|---|---|
-| 中継先で文字起こし | Gistは利用者のハンドラー、GadgetはSDK経由でMuseが処理 | 送信時に音声ファイルを中継へ。録音中の字幕は表示しない |
-| Soniox・APIキーを入力（両方式） | アプリの音声設定に本人のSoniox APIキーを入力。Gistの新規設定はこの方式 | Sonioxへ直接送信。途中の文字をG2へ表示し、確定テキストをMuseへ |
-| Soniox・一時キー発行サーバー（両方式） | 発行URLと認証。Gadgetでは既存の中継設定を再利用可能 | 音声の経路は同じ。長期キーは発行サーバーに保存 |
+| Transcribe at the relay | Gist: your handler. Gadget: Muse via SDK | Upload the audio file when sending; no captions during recording |
+| Soniox: enter API key, either relay | Enter your own key in app voice settings. New Gist setups use this mode | Audio directly to Soniox; interim text on G2, final text to Muse |
+| Soniox: temporary-key server, either relay | Issuer URL and authentication. Gadget may reuse its relay settings | Same audio path; the long-lived key stays on the issuer |
 
-「Sonioxへの接続を確認」は1秒の無音データを使い、認証を含むセッションの完了を確認します。マイクやMuseは使いません。単にキー入力済み／サーバー設定済みでは確認済みと表示しません。既存の一時キー方式は更新後も維持されます。
+The Soniox connection check completes an authenticated session using one second of silence. It uses neither the microphone nor Muse. Entering a key or configuring a server alone does not count as verification. Existing temporary-key configurations remain unchanged after an update.
 
-画像は必要な場合だけオンにします。APIキー方式ではEvenの設定と端末バックアップにキーを保存します。端末へ保存しない場合は一時キー方式を選びます。接続設定JSONを読み込む場合も、スマートフォン用の設定だけを使用します。
+Enable images only when needed. Direct API-key mode stores the key in Even settings and the device backup; use temporary-key mode if you do not want it stored on the device. Import only phone connection settings, not a device/server configuration JSON.
 
-## 4. 最初の確認
+## 4. First checks
 
-| 操作 | 確認する表示 |
+| Action | What to verify |
 |---|---|
-| 「接続を確認」 | 中継から読み取れたこと |
-| 短いテキストを送る | 自分の発言とMuseの返信 |
-| 選んだマイクで1回録音して送る | Museの音声処理と返信、またはSonioxの途中表示と確定結果。Gadgetの文字起こしはMuse返信内に明示する |
-| 「スペース」を開く | Museが指定したリスト／カード |
-| 項目を選ぶ | 本文、ボタン、値の調整、選択肢または録音 |
-| 操作を送る | 送信中→中継受付→Museが公開する結果 |
-| 画像オンの場合、Museに画像を依頼して受信画像を開く | EvenHubアプリ経由でG2に画像を表示 |
+| Check connection | The relay is readable |
+| Send a short text | Your message and Muse's reply |
+| Record once using the selected microphone | Muse voice processing/reply, or Soniox interim/final text. Gadget may include a labeled transcript in the Muse reply |
+| Open Spaces | Muse's exported list/cards |
+| Select an item | Text, a button, value adjustment, choices, or recording |
+| Submit an action | Sending → relay acceptance → Muse's published result |
+| With images enabled, ask Muse for an image and open it | Image displayed on G2 through the EvenHub app |
 
-「接続を確認」の成功はMuseの応答やG2実機表示の確認とは別です。スペースが空なら、Museへ対象の作成・エクスポートを依頼します。
+A connection check does not verify a Muse response or physical G2 rendering. If Spaces are empty, ask Muse to create/export the intended content.
 
-### スペースの操作条件
+### Space interaction requirements
 
-スマートフォンでグラスに表示するスペースを選びます。以後の閲覧と切替はグラスから操作できます。
+Select Spaces for the glasses on your phone. You can then browse and switch from G2.
 
 ```mermaid
 flowchart LR
-  A[ホーム / スペース] --> B[スペース一覧]
-  B -->|タップ| C[項目リスト]
-  C -->|選択| D[本文 / ボタン / 値 / マイク]
-  D -->|ダブルタップ| C
-  C -->|ダブルタップ| B
-  M[Contextual Menu] -->|リスト・カード切替| C
+  A[Home / Spaces] --> B[Spaces list]
+  B -->|Tap| C[Item list]
+  C -->|Select| D[Text / button / value / microphone]
+  D -->|Double-tap| C
+  C -->|Double-tap| B
+  M[Contextual Menu] -->|Switch list/cards| C
 ```
 
-部品定義・送信データ・確認付きボタン・スライダー範囲などは [スペースの仕様](spaces.md) と [JSON例](../examples/spaces.json) をMuseに渡してください。マイクはその行をタップしたときだけ開始します。スライダーはタップで値を送るまで変更を確定せず、ダブルタップで中止できます。アプリ内の「スペース操作を試す」で送信せず練習できます。
+Give Muse the [Space contract](spaces.md) and [JSON example](../examples/spaces.json) for controls, payloads, confirmation buttons, and slider bounds. A microphone starts only when its row is tapped. A slider does not submit until you tap; double-tap cancels. Use the in-app Space practice to try the controls without sending.
 
-## 参考実装を使う場合
+## Reference implementations
 
-| 対象 | 手順 |
+| Component | Instructions |
 |---|---|
-| Gist監視処理 | [watcherの設定](../adapters/gist/README.md) |
-| HTTPS中継 | [ローカル設定UIと配備例](server.md) |
-| ATOM S3 | [ファームウェアとUSB設定](atoms3.md) |
-| 独自実装 | [アプリとの入出力仕様](protocol.md) |
+| Gist watcher | [Watcher setup](../adapters/gist/README.md) |
+| HTTPS relay | [Local configuration UI and deployment examples](server.md) |
+| ATOM S3 | [Firmware and USB setup](atoms3.md) |
+| Custom implementation | [App input/output contract](protocol.md) |
 
-G2Museの既存メッセージは読み取れますが、旧watcherはMuse Relayの依頼ファイルに対応させる必要があります。参考ATOM構成でのMuseへの画像入力は初期無効です。画像返信と画像付きスペースの表示は別経路です。Gistの履歴保持、Muse / Soniox側のデータ管理は各サービスと利用者の設定に従います。
+Existing G2Muse messages are readable, but its watcher needs adaptation for Muse Relay request files. Image input to Muse through the reference ATOM is disabled by default. Image replies and image cards use separate output paths. Gist history and Muse/Soniox data handling follow those services and the user's settings.

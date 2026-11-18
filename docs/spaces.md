@@ -1,93 +1,95 @@
-# スペースの表示と操作
+# Displaying and operating Spaces
 
-## 作成を依頼して登録する
+[English](spaces.md) · [日本語](spaces.ja.md)
 
-スマートフォンの「スペース」→「追加」から始めます。アプリで希望を選び、Muse がスペースと中継への書き出しを作ります。
+## Request creation and add a Space
+
+On your phone, open **Spaces → Add**. Choose what you need; Muse creates the Space and its relay export.
 
 ```mermaid
 flowchart LR
-  A[スペース → 追加] --> B[Museに作成を依頼]
-  B --> C[例・表示形式・部品を選択]
-  C --> D[依頼文を作る]
-  D --> E[コピー / チャットの下書きへ]
-  E --> F[利用者が Muse へ送信]
-  F --> G[受信を確認 → 更新して受信]
-  G --> H[追加 → 完了]
+  A[Spaces → Add] --> B[Ask Muse to create]
+  B --> C[Choose example, layout, and controls]
+  C --> D[Create instructions]
+  D --> E[Copy / Add to chat draft]
+  E --> F[User sends to Muse]
+  F --> G[Check received → Refresh]
+  G --> H[Add → Done]
 ```
 
-| 手順 | 操作 |
+| Step | Action |
 | --- | --- |
-| 例を選ぶ | 「予定」「集中タイマー」「音声メモ」から始め、名前と用途を編集 |
-| 表示と部品を選ぶ | リスト／カード、ボタン・スライダー・選択肢・マイクを選ぶ |
-| 依頼文を確認 | 「依頼文を作る」で内容を確認。「編集」で戻れる |
-| Muse へ渡す | コピーして Muse に貼り付けるか、「チャットの下書きへ」で追加してから送信。下書きへの追加だけでは送らない |
-| 書き出しを受信 | Muse 側で作成・書き出しが済んだら「受信を確認」→「更新して受信」 |
-| 登録 | 受信済みスペースの「追加」→「完了」。スマートフォンと G2 の一覧に表示 |
+| Choose an example | Start with a schedule, focus timer, or voice memo, then edit its name and purpose |
+| Choose layout and controls | List/cards and buttons, sliders, choices, or microphone |
+| Review instructions | Generate the instructions; use Edit to return |
+| Give them to Muse | Copy into Muse, or add to the chat draft and then send. Adding a draft does not send it |
+| Receive the export | After Muse creates and exports it, check received Spaces and refresh |
+| Add to the app | Add a received Space, then choose Done. It appears on your phone and G2 |
 
-例は作成依頼のひな形です。選ぶだけでタイマーや予定の処理が完成するわけではありません。実際の内容と動作は Muse 側で作成します。すでに書き出し済みなら「追加」→「受信済みから追加」から進めます。
+Examples are request templates. Selecting one does not implement a timer or schedule; Muse supplies the actual content and behavior. If an export already exists, choose **Add → Add from received**.
 
-## 並べ替えと登録解除
+## Reorder and remove
 
-| 操作 | 結果 |
+| Action | Result |
 | --- | --- |
-| 「並べ替え・削除」→ ↑／↓ | 登録済みスペースを上下に移動。スマートフォンと G2 に同じ順序を保存 |
-| 「削除」→ 確認画面で「削除」 | このアプリの登録を解除。Muse のスペースと中継の書き出しは残る |
-| 「追加」→「受信済みから追加」 | 登録解除したスペースも再追加可能 |
+| Reorder/remove → ↑/↓ | Move registered Spaces up or down; save the same order for phone and G2 |
+| Remove → confirm Remove | Remove this app's registration. The Muse Space and relay export remain |
+| Add → Add from received | Add a removed Space again |
 
-表示順と登録はこのアプリの設定です。Muse の元データや中継の並び順を書き換えません。
+Registration and display order are app settings. They do not rewrite the original Muse data or the relay's order.
 
-## Muse が書き出す表示と操作
+## What Muse exports
 
-Museが [JSON例](../examples/spaces.json) の `layout` と各項目の `control` に希望を反映します。スマートフォンとG2は同じ定義を表示します。
+Muse expresses the desired layout and controls using `layout` and each item's `control` in the [JSON example](../examples/spaces.json). The phone and G2 use the same definitions.
 
 ```mermaid
 flowchart LR
-  M["Muse\n部品・値・処理の対応を定義"] --> E["自分の中継\nspaces JSON"]
-  E --> L["G2 / スマートフォン\nリスト または カード"]
-  L -->|"明示的な操作\nspace_action + request id"| R["自分の中継"]
+  M["Muse\nDefine controls, values, and action mappings"] --> E["Your relay\nspaces JSON"]
+  E --> L["G2 / phone\nList or cards"]
+  L -->|"Explicit action\nspace_action + request id"| R[Your relay]
   R --> M
-  M -->|"処理結果・現在値を更新"| E
+  M -->|Update results and current values| E
 ```
 
-| 表示 | 指定 | G2での動き |
+| Layout | Declaration | G2 behavior |
 |---|---|---|
-| リスト（初期値） | `"layout":"list"` | 複数行に項目名・現在値。スワイプで選択、タップで開く／操作 |
-| カード | `"layout":"cards"` | 1項目ずつ表示。スワイプで項目切替 |
+| List, default | `"layout":"list"` | Multiple item names/current values. Swipe to select; tap to open or act |
+| Cards | `"layout":"cards"` | One item at a time. Swipe between items |
 
-G2のContextual Menuから「リスト表示」「カード表示」へ切替できます。この上書きは起動中だけ有効です。リストが18項目を超えると「次の項目」「前の項目」を表示します。スペースの本文にはアプリ名・時計の専用行を設けません。ホームの日付・時計とは別の表示です。
+Use G2's Contextual Menu to switch between list and cards. This override lasts only for the current app session. Lists over 18 items show next/previous-item entries. Space content does not reserve a row for the app name or clock; the home date/clock is separate.
 
-| 部品 | `control` | 選択後の操作 |
+| Control | `control` | Action after selection |
 |---|---|---|
-| 読み物・画像 | 省略 | タップで本文の次ページ、ダブルタップで戻る |
-| ボタン | `{"type":"button","label":"要約する"}` | タップで1回送信 |
-| 確認付きボタン | `{"type":"button","label":"完了にする","confirm":"この項目を完了にしますか？"}` | もう一度タップで実行。ダブルタップで中止 |
-| スライダー | `{"type":"slider","min":5,"max":60,"step":5,"value":25,"unit":"分"}` | 上スワイプで増加、下で減少。タップで送信、ダブルタップで破棄 |
-| 選択肢 | `{"type":"choice","options":[{"id":"short","title":"短く"},{"id":"full","title":"詳しく"}],"value":"short"}` | スワイプで選び、タップで送信 |
-| マイク | `{"type":"microphone"}` | タップで録音開始、タップで送信、ダブルタップで中止 |
+| Reading or image | Omit | Tap for the next text page; double-tap to return |
+| Button | `{"type":"button","label":"Summarize"}` | Tap to submit once |
+| Confirmed button | `{"type":"button","label":"Complete","confirm":"Mark this item complete?"}` | Tap again to execute; double-tap to cancel |
+| Slider | `{"type":"slider","min":5,"max":60,"step":5,"value":25,"unit":"min"}` | Swipe up to increase, down to decrease; tap to submit, double-tap to discard |
+| Choice | `{"type":"choice","options":[{"id":"short","title":"Brief"},{"id":"full","title":"Detailed"}],"value":"short"}` | Swipe to choose, then tap to submit |
+| Microphone | `{"type":"microphone"}` | Tap to start; tap to send; double-tap to cancel |
 
-どの部品にも `"disabled":true` を指定できます。スライダーは有限数、範囲±1,000,000、刻み0.000001以上、最大10,000段階、範囲を刻みで割り切れることが条件です。選択肢は1〜12件。ボタンの確認文は300文字までです。未知・不正な部品はアプリで「未対応」と表示し実行しません。
+Any control may set `"disabled":true`. Sliders require finite numbers within ±1,000,000, a step of at least 0.000001, no more than 10,000 steps, and a range evenly divisible by the step. Choices have 1–12 options. Button confirmation text is limited to 300 characters. Unknown or invalid controls show as unsupported and cannot execute.
 
-マイクは既存の音声設定を使います。Muse方式はWAV、Soniox方式は確定テキストを、選んだ項目に紐付けて送ります。スペースを開いただけでは録音しません。
+Microphone controls use the existing voice settings. Muse mode sends WAV; Soniox mode sends final text, associated with the selected item. Merely opening a Space does not start recording.
 
 ```mermaid
 stateDiagram-v2
-  スペース一覧 --> 項目リスト: タップ
-  項目リスト --> 読み物: タップ
-  項目リスト --> 値の調整: スライダーをタップ
-  値の調整 --> 項目リスト: ダブルタップ／送信後に戻る
-  読み物 --> 項目リスト: ダブルタップ
-  項目リスト --> スペース一覧: ダブルタップ
+  Spaces --> Items: Tap
+  Items --> Reading: Tap
+  Items --> Adjust: Tap slider
+  Adjust --> Items: Double-tap / return after sending
+  Reading --> Items: Double-tap
+  Items --> Spaces: Double-tap
 ```
 
-## 入り口と出口
+## Input and output
 
-| 用途 | Gist | HTTPS中継 |
+| Purpose | Gist | HTTPS relay |
 |---|---|---|
-| Museの出力 | `muse-relay-spaces.json` | Muse用キーで `PUT /v1/spaces/:id`（1件）または `PUT /v1/spaces`（全件置換） |
-| 利用者の操作 | `muse-relay-request-<id>.json` | スマートフォン用キーで `POST /v1/requests` |
-| 結果 | spacesの現在値・本文を更新、返信に `reply_to` | 同左 |
+| Muse output | `muse-relay-spaces.json` | Muse key: `PUT /v1/spaces/:id` for one Space or `PUT /v1/spaces` to replace all |
+| User action | `muse-relay-request-<id>.json` | Phone key: `POST /v1/requests` |
+| Result | Update Space values/content; set reply `reply_to` | Same |
 
-スライダー送信の例:
+Example slider submission:
 
 ```json
 {
@@ -95,15 +97,15 @@ stateDiagram-v2
   "kind":"space",
   "space_id":"daily",
   "space_action":{"item_id":"focus","type":"slider","value":30},
-  "text":"集中時間: 30",
+  "text":"Focus time: 30",
   "created_at":1794880000
 }
 ```
 
-`space_action` のない `kind:"space"` は閲覧用データの更新のみです。ボタンとマイクでは `value` を付けず、選択肢は選んだID、スライダーは数値を渡します。マイクの音声添付は通常チャットと同じ形式です。
+A `kind:"space"` request without `space_action` only refreshes readable data. Buttons and microphone omit `value`; choices send the selected ID and sliders send a number. Microphone attachments use the same format as chat audio.
 
-Muse側は `space_id` と `item_id` を自分の処理へ対応付けます。IDは安定させ、再配置だけで意味を変えません。同じ依頼IDを重複実行せず、処理が済んだらスペースの現在値・本文を再公開します。HTTPS中継では、Muse用キーで `GET /v1/spaces` から現在の書き出しを読めます。処理結果は `PUT /v1/spaces/:id` で対象だけを更新します。アプリは「送信中」「中継が受け付けました」「失敗」を区別します。受付は処理完了を意味せず、確定値を楽観的に変更しません。送信失敗のG2再試行では同じ依頼IDを使います。
+Muse maps `space_id` and `item_id` to its own handlers. Keep IDs stable; reordering must not change their meaning. Do not execute a request ID twice. Republish current values/content after processing. For HTTPS, the Muse key can read current exports through `GET /v1/spaces`; update only the affected Space with `PUT /v1/spaces/:id`. The app distinguishes sending, accepted by relay, and failure. Acceptance is not completion, and the app does not optimistically change confirmed values. G2 retries after a send failure reuse the request ID.
 
-既存の中継は `layout`・`control`・`space_action` を保持する実装へ更新してください。参照実装はNode、Worker、Gist watcherに対応し、共有検証は [protocol/space-controls.mjs](../protocol/space-controls.mjs) にあります。ATOMはSDK本文を中継するため、操作部品は中継とMuse側で処理します。独自ハンドラーは宣言済みの操作を検証してから実行します。
+Existing relays must preserve `layout`, `control`, and `space_action`. Node, Worker, and the Gist watcher support this contract; shared validation is in [protocol/space-controls.mjs](../protocol/space-controls.mjs). ATOM forwards the SDK body, so control processing belongs in the relay and Muse. Custom handlers must validate declared actions before executing them.
 
-スペースの作成依頼は「スペース → 追加」、中継全体の設定手順は設定画面からコピーできます。操作練習は「設定 → 使い方 → スペース操作を試す」です。HTML・JavaScript・外部ページの埋め込みは使いません。
+Create Space instructions from **Spaces → Add**, and copy overall relay instructions from Settings. Practice through **Settings → Help → Try Space controls**. The app does not embed HTML, JavaScript, or external pages.

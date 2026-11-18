@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: GitHub登録なしで要望・質問を送る
+  - name: Send feedback without a GitHub account
     url: https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback
-    about: 非公開で受付。公開Issueへの匿名要約は任意の同意がある場合だけです。
-  - name: 設定・操作ガイド
+    about: Private intake. An anonymized public Issue summary requires your optional consent.
+  - name: Setup and controls guide
     url: https://muse-relay-guide.spicy-cup-4319.chatgpt.site/
-    about: 中継方式を選び、画面の順に設定します。
+    about: Choose a relay method and follow the setup screens. English and Japanese are available.
+  - name: 日本語で要望・質問を送る（GitHub登録不要）
+    url: https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback
+    about: ガイドで日本語を選択できます。非公開で受付し、同意がある場合だけ匿名要約を公開Issueにします。

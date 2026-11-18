@@ -1,194 +1,196 @@
-# HTTPS中継の参考実装
+# HTTPS relay reference implementation
 
-この文書は、同梱の `server/` を使う場合の任意の手順です。配布するEvenHubアプリは全利用者共通で、中継は各利用者が構築するかMuseに実装を依頼します。利用者ごとのEHPK作成や、この参考サーバーの採用は必須ではありません。
+[English](server.md) · [日本語](server.ja.md)
 
-[設定チュートリアル](relay-setup.md) → [アプリとの入出力契約](protocol.md) → 必要に応じてこの手順、の順で進めます。
+These optional instructions use the bundled `server/`. The distributed EvenHub app is shared by all users. Each user builds their relay or asks Muse to implement it. Neither a separate EHPK per user nor this reference server is required.
 
-| 配置先 | 参考実装 |
+Start with the [setup tutorial](relay-setup.md), then the [app input/output contract](protocol.md), and use this guide when needed.
+
+| Hosting | Reference |
 |---|---|
-| Node.js を常時起動する自分のサーバー | この文書の Node + HTTPS 構成 |
+| Your always-on Node.js server | Node + HTTPS in this guide |
 | Cloudflare Worker / Sites | [Worker + D1 + R2](../server/cloudflare/README.md) |
 
-どちらも同じアプリ側の入出力と役割別認証を使用します。
+Both use the same app contract and role-specific authentication.
 
-以下は、SDK対応機器の一例としてATOM S3を自宅に置き、スマートフォンとG2を外へ持ち出す構成です。URL・トークン・利用機器は各利用者が設定します。
+This example leaves an ATOM S3, one possible SDK device, at home while you take your phone and G2 outside. Every user configures their own URL, tokens, and hardware.
 
 ```mermaid
 flowchart LR
-  G2[G2] <-->|Bluetooth| Phone[スマートフォン<br/>Muse Relay]
-  Phone <-->|HTTPS / スマートフォン用キー| Relay[自分の中継サーバー]
-  ATOM[自宅 ATOM S3] -->|HTTPS / ATOM用キー<br/>ジョブ取得・返信送信| Relay
-  ATOM <-->|Muse Gadget SDK<br/>ペアリング済みの接続| Muse[Muse]
-  Muse -->|HTTPS / Muse更新用キー| Relay
-  Phone -->|短時間キーを取得| Relay
-  Phone -.->|Sonioxを選択した場合だけ<br/>音声ストリーム| Soniox[Soniox]
+  G2[G2] <-->|Bluetooth| Phone[Phone<br/>Muse Relay]
+  Phone <-->|HTTPS / phone key| Relay[Your relay server]
+  ATOM[ATOM S3 at home] -->|HTTPS / ATOM key<br/>Fetch jobs and return replies| Relay
+  ATOM <-->|Muse Gadget SDK<br/>Paired connection| Muse[Muse]
+  Muse -->|HTTPS / Muse writer key| Relay
+  Phone -->|Request temporary key| Relay
+  Phone -.->|Audio stream<br/>Only when Soniox is selected| Soniox[Soniox]
 ```
 
-自宅ルーターへのポート開放は不要です。ATOM は外向きに通信します。スマートフォンに自宅の LAN IP を設定しても外出先からは利用できません。
+ATOM initiates outbound connections; no home-router port forwarding is needed. A home LAN IP entered on the phone will not work away from home.
 
-## 1. 参考実装の設定画面を開く
+## 1. Open the reference setup UI
 
-Node.js 22 以降で、プロジェクトのルートから実行します。
+With Node.js 22 or later, run from the project root:
 
 ```sh
 node server/setup.mjs
 ```
 
-[ローカル設定画面](http://127.0.0.1:8788) を開きます。
+Open the [local setup page](http://127.0.0.1:8788).
 
-| 画面 | 操作 | 結果 |
+| Step | Action | Result |
 |---|---|---|
-| ① 接続先 | 自分の公開 HTTPS URL を入力し、Evenアプリのローカル接続を許可 | 外出先からの接続先と可変ポートへの対応を設定 |
-| ② 音声 | Sonioxの一時キー方式を使う場合だけ API キーを入力 | サーバーだけに保存 |
-| ③ 保存 | 「設定を保存」 | 3つの接続キーを生成 |
-| ④ 接続する | 対象ごとの「設定をコピー」 | スマートフォン・ATOM・Museへ設定 |
+| 1. Endpoint | Enter your public HTTPS URL and allow the Even app's local connection | Configures outside access and variable local ports |
+| 2. Audio | Enter a Soniox API key only if using server-issued temporary keys | Stored only on the server |
+| 3. Save | Save settings | Generates three connection keys |
+| 4. Connect | Copy settings for each target | Configure the phone, ATOM, and Muse |
 
-設定は `.local/relay-config.json` に所有者のみ読み書きできる権限で保存します。スマートフォン用のコピーには Muse / ATOM / Soniox の長期キーを含めません。生成キーをチャットや Git に貼り付けず、対応する設定画面へ入力します。
+Settings are saved to `.local/relay-config.json` with owner-only read/write permissions. The phone export excludes long-term Muse, ATOM, and Soniox keys. Enter generated keys into their corresponding settings screens; do not paste them into chats or Git.
 
-Even アプリ内の Muse Relay で「接続設定」→「サーバー側の接続設定」を開き、「このアプリの接続元（Origin）」を確認します。ブラウザーのプレビューとは異なる場合があります。
+In Muse Relay inside Even, open connection settings → server-side connection settings and check this app's Origin. It may differ from the browser preview.
 
-| アプリに表示された Origin | 設定画面の操作 |
+| Origin shown in the app | Setup action |
 |---|---|
-| `http://127.0.0.1:54914` など、起動ごとにポートが変わる | 「Evenアプリのローカル接続を許可」をオン |
-| `null` | 「追加の許可 Origin」へ `null` を入力 |
-| 固定の HTTPS Origin | 「追加の許可 Origin」へ表示された値を入力 |
+| `http://127.0.0.1:54914`, or another port that changes on startup | Enable local connections from the Even app |
+| `null` | Add `null` to additional allowed Origins |
+| A fixed HTTPS Origin | Add that exact value to additional allowed Origins |
 
-`http://127.0.0.1:*` は明示した場合だけ有効な予約値です。正規の `http://127.0.0.1` Origin とその有効なポートだけを許可し、`localhost`・別ホスト・HTTPS・パス付きの値は対象外です。一般の `*` は使えません。Node の設定例は `"allowedOrigins":["http://127.0.0.1:*"]`、環境変数では `ALLOWED_ORIGINS=http://127.0.0.1:*` です。中継の接続先自体は HTTPS を使います。
+`http://127.0.0.1:*` is a reserved opt-in value. It allows only canonical `http://127.0.0.1` Origins with valid ports, excluding `localhost`, other hosts, HTTPS, and paths. A general `*` is not allowed. Node example: `"allowedOrigins":["http://127.0.0.1:*"]`; environment variable: `ALLOWED_ORIGINS=http://127.0.0.1:*`. The relay endpoint itself still uses HTTPS.
 
-一致しない Origin は HTTP 403 `origin_not_allowed` です。許可された Origin でも各データAPIには役割別キーが必要です。
+An unmatched Origin returns HTTP 403 `origin_not_allowed`. Even allowed Origins need role-specific keys for every data API.
 
-## 2. 起動する
+## 2. Start the server
 
-ローカル確認:
+For local verification:
 
 ```sh
 node server/index.mjs
 ```
 
-`127.0.0.1:8787` で待ち受けます。`/health` は認証なしの稼働確認だけを返します。メッセージとスペースには接続キーが必要です。
+It listens on `127.0.0.1:8787`. `/health` returns only unauthenticated health information. Messages and Spaces require a connection key.
 
-この参考構成を外出先で使うには、利用者が用意する常時稼働サーバーとHTTPSが必要です。設定画面はローカルの設定ファイルを作るもので、ホスティングの契約や配備は行いません。HTTPのNodeサーバーをインターネットへ直接公開しないでください。
+To use this reference configuration away from home, supply an always-on server and HTTPS. The setup UI creates a local configuration file; it does not provision or deploy hosting. Do not expose the Node HTTP server directly to the internet.
 
-### Docker + Caddy の例
+### Docker + Caddy example
 
-1. 自分のサーバーにこのプロジェクトと `.local/relay-config.json` を配置します。
-2. サーバー上の秘密設定ファイルをコンテナの Node ユーザーだけが読めるようにします: `sudo chown 1000:1000 .local/relay-config.json`、`sudo chmod 600 .local/relay-config.json`。
-3. DNS をサーバーへ向け、ホスト側で 80 / 443 を許可します。
-4. サーバー上で以下を実行します。
+1. Place this project and `.local/relay-config.json` on your server.
+2. Restrict the secret file to the container's Node user: `sudo chown 1000:1000 .local/relay-config.json`, then `sudo chmod 600 .local/relay-config.json`.
+3. Point DNS to the server and allow host ports 80 / 443.
+4. Run on the server:
 
 ```sh
 RELAY_HOST=relay.example.com docker compose -f server/compose.yaml up -d --build
 ```
 
-Caddy が HTTPS を終端し、Node は内部ネットワークだけに公開されます。家庭内の ATOM へ向けたポート開放は行いません。このコマンドはこのリポジトリの実装確認では実行していません。
+Caddy terminates HTTPS; Node is exposed only on the internal network. Do not forward ports to ATOM at home. This command was not run as part of this repository's implementation checks.
 
-環境変数で渡す場合は [設定例](../server/.env.example) を参照してください。`.env` を自動読込しないため、Node の `--env-file` またはホスティングの環境変数設定を使います。
+For environment variables, see the [example configuration](../server/.env.example). `.env` is not loaded automatically; use Node's `--env-file` or your hosting environment settings.
 
-## 3. 接続する
+## 3. Connect
 
 ```mermaid
 flowchart TD
-  A[設定画面: スマートフォン用をコピー] --> B[Muse Relay: Muse Gadget SDK を選ぶ]
-  B --> C[接続設定を読み込む]
-  C --> D[接続を確認]
-  D --> E{ATOM オンライン?}
-  E -->|はい| F[短いテキストを送る]
-  E -->|いいえ| G[ATOM の Wi-Fi・中継URL・キーを確認]
+  A[Setup: copy phone settings] --> B[Muse Relay: choose Muse Gadget SDK]
+  B --> C[Import connection settings]
+  C --> D[Check connection]
+  D --> E{ATOM online?}
+  E -->|Yes| F[Send a short text]
+  E -->|No| G[Check ATOM Wi-Fi, relay URL, and key]
   G --> D
-  F --> H[Muse の返信が表示される]
+  F --> H[Muse reply appears]
 ```
 
-「接続確認」はサーバーの読み取りです。Museへの依頼を送信しません。ATOM の接続表示は直近45秒以内の通信を示し、Museとのペアリング成功までは意味しません。
+The connection check reads the server; it does not send a Muse request. ATOM's online indicator means it communicated within the last 45 seconds, not that Muse pairing succeeded.
 
-## スペース
+## Spaces
 
-Muse の Spaces を直接読む公開 Gadget API は確認できていません。利用者が Muse にスペースを作らせ、その内容を読取用カードとして中継へ出力する構成です。アプリはスペース名やカードを表示・選択します。
+No public Gadget API for reading Muse Spaces directly has been verified. The user asks Muse to create a Space and export its content as readable cards to the relay. The app displays and selects Space names and cards.
 
-Muse に設定する内容:
+Configure Muse with:
 
-| 項目 | 値 |
+| Item | Value |
 |---|---|
-| 読み取り | `GET https://relay.example.com/v1/spaces` |
-| 1件の追加・更新 | `PUT https://relay.example.com/v1/spaces/news` |
-| 認証 | `Authorization: Bearer <Muse更新用キー>` |
-| 内容 | 下記の1件分の JSON。URLと本文の `id` は一致させる |
-| 操作範囲 | 設定済みスペースの読取用エクスポート |
+| Read | `GET https://relay.example.com/v1/spaces` |
+| Add/update one | `PUT https://relay.example.com/v1/spaces/news` |
+| Authentication | `Authorization: Bearer <Muse-writer-key>` |
+| Body | One Space as below; URL and body `id` must match |
+| Scope | Readable export of configured Spaces |
 
 ```json
 {
   "id": "news",
-  "title": "ニュース",
+  "title": "News",
   "updated_at": 1794880000,
   "items": [{
     "id": "today",
-    "title": "今日",
-    "text": "Muse がスペースから生成した表示用テキスト"
+    "title": "Today",
+    "text": "Display text generated by Muse from the Space"
   }]
 }
 ```
 
-最大20スペース・各50カードです。1件の更新では他のスペースを保持します。一括で入れ替える場合は `PUT /v1/spaces` へ `{spaces:[...]}` を送ります。操作指定のないアプリの更新要求は、設定済みIDの再出力だけを Muse に依頼します。
+Limits are 20 Spaces and 50 cards each. Updating one preserves the others. To intentionally replace the whole list, send `{spaces:[...]}` to `PUT /v1/spaces`. An app refresh request without an action asks Muse only to re-export the configured ID.
 
-カードはタップで開く・ページ送り、上下スワイプで項目切替、ダブルタップで一覧へ戻る操作だけで読める内容にします。画像設定がオフでも本文だけで内容が分かるようにし、外部リンクや音声入力を必須にしません。画像を使う場合はアプリでもオンにし、カードの `image:{mime,name,data_base64}` を加えます。参考Workerでは全スペースの画像を合計8枚まで保存できます。
+Cards must be readable with taps to open/page, vertical swipes to change items, and a double tap to return to the list. Keep text useful with images off; do not require external links or voice input. For images, enable them in the app and add `image:{mime,name,data_base64}` to a card. The reference Worker stores at most eight images across all Spaces.
 
-Muse方式の音声で文字起こしも表示したい場合は、Muse返信内に文字起こしであることを明記します。`POST /v1/messages` の送信者はサーバーが `Muse` に固定するため、同APIで `You` の文字起こしを追加することはできません。Soniox方式ではアプリから確定テキストが送られ、Muse側の再文字起こしは不要です。
+To show a transcript produced by Muse processing, label it as a transcript in Muse's reply. `POST /v1/messages` fixes the sender to `Muse`, so that route cannot add a `You` transcript. Soniox sends final text from the app and does not need Muse to transcribe it again.
 
-## 参考実装の通信仕様
+## Reference transport
 
-アプリとの必須境界と参考実装の内部接続の違いは [公開プロトコル](protocol.md#アプリのhttp境界と参考実装の管理口) を参照してください。
+See the [public protocol](protocol.md#app-http-boundary-and-reference-management-routes) for the distinction between the required app boundary and internal reference routes.
 
-| 呼び出し元 | 方法・パス | 用途 |
+| Caller | Method / path | Purpose |
 |---|---|---|
-| スマートフォン | `GET /v1/snapshot` | メッセージ・スペース・ATOMの接続状態 |
-| スマートフォン | `POST /v1/requests` | テキスト・WAV・スペース更新要求 |
-| スマートフォン | `GET /v1/files/:name` | 添付データ |
-| スマートフォン | `POST /v1/soniox-token` | Sonioxの一時キー発行 |
-| Muse | `POST /v1/messages` | テキスト・画像返信の追加または同じIDの更新 |
-| Muse | `GET /v1/spaces` | 現在書き出しているスペース一覧 |
-| Muse | `PUT /v1/spaces/:id` | 1件の追加・更新 |
-| Muse | `PUT /v1/spaces` | スペース一覧の一括置換 |
-| Muse | `PUT /v1/profile` | Museの名前と設定済みアバターを置換 |
-| ATOM | `GET /device/jobs` | 次の要求を1件リース |
-| ATOM | `GET /device/jobs/:id/request` | SDKに送るJSON本文。Content-Length付き |
-| ATOM | `POST /device/events` | ACK・返信データ・heartbeat・エラー |
+| Phone | `GET /v1/snapshot` | Messages, Spaces, and ATOM connection state |
+| Phone | `POST /v1/requests` | Text, WAV, and Space refresh requests |
+| Phone | `GET /v1/files/:name` | Attachment data |
+| Phone | `POST /v1/soniox-token` | Issue a temporary Soniox key |
+| Muse | `POST /v1/messages` | Add text/image replies or update the same ID |
+| Muse | `GET /v1/spaces` | Current exported Spaces |
+| Muse | `PUT /v1/spaces/:id` | Add/update one Space |
+| Muse | `PUT /v1/spaces` | Replace all Spaces |
+| Muse | `PUT /v1/profile` | Replace Muse's name and configured avatar |
+| ATOM | `GET /device/jobs` | Lease one next request |
+| ATOM | `GET /device/jobs/:id/request` | JSON body for the SDK, with Content-Length |
+| ATOM | `POST /device/events` | ACK, reply data, heartbeat, and errors |
 
-Deviceイベントは `{job_id,session_id,event_id,type,...}`。`session_id` はジョブの専用Muse会話ID、`event_id` は再送時も同じIDを使います。ACKには同じ `result.session_id` と `is_thread:true` が必要です。専用会話と自分の発言境界の照合は [公開プロトコル](protocol.md#atom--中継) に従います。
+Device events use `{job_id,session_id,event_id,type,...}`. `session_id` is the job's dedicated Muse chat ID. Keep `event_id` unchanged on retries. The ACK needs matching `result.session_id` and `is_thread:true`. Follow the [public protocol](protocol.md#atom-and-relay) for dedicated-session and own-user-boundary correlation.
 
-| type | 追加フィールド |
+| type | Additional fields |
 |---|---|
-| `muse_ack` | `body`: SDKのACK JSON文字列またはオブジェクト |
-| `muse_event` | `body`: NDJSONの完全な行またはイベントオブジェクト |
-| `muse_chunk` | `body_base64`: NDJSONの生バイト。UTF-8文字の途中でも可 |
-| `heartbeat` | なし。30秒以内に送信 |
-| `error` | `error`: 資格情報を含まない短い説明 |
+| `muse_ack` | `body`: SDK ACK JSON string or object |
+| `muse_event` | `body`: complete NDJSON line or event object |
+| `muse_chunk` | `body_base64`: raw NDJSON bytes, including splits within UTF-8 characters |
+| `heartbeat` | None; send at least every 30 seconds |
+| `error` | `error`: short description without credentials |
 
-応答は `{ok:true,terminal:boolean}`。`terminal:true` ならその要求の購読を終了します。サーバーはACKのIDに関連付けられた返信のみ採用し、他のMuse会話を表示しません。
+The response is `{ok:true,terminal:boolean}`. Stop the request's subscription on `terminal:true`. The server accepts only replies correlated to the ACK's IDs and does not display other Muse conversations.
 
-要求の受付・ATOMへの受渡し・Museの返信完了は別の状態です。本文の受渡し後に切断した要求は自動で再送せず、結果不明のメッセージを残します。再送前にMuse側を確認します。要求は15分で期限切れ、リースは180秒です。
+Request acceptance, delivery to ATOM, and Muse reply completion are separate states. Disconnection after handing over the body does not trigger automatic replay; the server records an unknown outcome. Check Muse before retrying. Requests expire after 15 minutes; leases last 180 seconds.
 
-### ホームのアバター
+### Home avatar
 
-| 手順 | 操作 |
+| Step | Action |
 |---|---|
-| 1 | Museに、自分の設定済みアバター画像を特定・読込してもらう。見つからなければ未設定のままにする |
-| 2 | Muse用キーで `PUT /v1/profile` へ `{name?,avatar:{mime,name?,data_base64},updated_at?}` を送る |
-| 3 | アプリの「画像」をオンにする。アプリが `snapshot.profile` と必要な添付を読み、G2ホームに表示する |
-| 解除 | Muse用キーで `PUT /v1/profile` に `{}` を送る |
+| 1 | Ask Muse to locate and read your configured avatar image. Leave it unset if unavailable |
+| 2 | With the Muse key, send `{name?,avatar:{mime,name?,data_base64},updated_at?}` to `PUT /v1/profile` |
+| 3 | Enable images in the app. It reads `snapshot.profile` and the attachment and displays the avatar on G2 home |
+| Clear | Send `{}` to `PUT /v1/profile` with the Muse key |
 
-PNG / JPEG / WebP、デコード後250,000バイト以下です。PUTは全体置換で、`avatar_file` は中継が生成する読取用の値です。外部URLの自動取得やATOMの画面描画は行いません。スマートフォン・ATOM用キーでは書き込めません。[図とJSON例](protocol.md#museのアバター--g2ホーム)
+PNG / JPEG / WebP, at most 250,000 decoded bytes. PUT replaces the whole profile; `avatar_file` is a server-generated read value. No external URL is fetched automatically, and this does not draw on ATOM's screen. Phone/device keys cannot write a profile. [Diagram and JSON](protocol.md#muse-avatar-on-g2-home)
 
-## 保存と上限
+## Storage and limits
 
-- 直近100メッセージ、200要求の処理記録。`.local/relay-state.json` へ原子的に保存します。
-- プロフィールは履歴件数とは別に1件保持します。更新・解除で未参照になった添付はNodeの状態から削除します。WorkerのR2は24時間の猶予・既存の上限付きGCに従います。
-- 単一プロセス用です。複数レプリカは共有トランザクションキューに置換してから運用します。
-- WAV は1.1MBまで。G2 のPCM音声では30秒をアプリ側上限にします。
-- Gadgetへの画像ファイル入力は未実機検証のため初期値は無効です。確認後のみ `GADGET_IMAGES_ENABLED=true` を使います。Museからの画像返信（`POST /v1/messages`）・Gist画像・スペースカード画像は別経路で表示できます。
-- Sonioxキーは有効60秒・1回使用・セッション150秒。発行は毎分5回までです。
-- メッセージ本文・資格情報をアクセスログへ出力しません。HTTPSホスト・プロキシ側のログ設定は利用者が管理します。
+- Keeps the latest 100 messages and 200 request records, saved atomically to `.local/relay-state.json`.
+- Stores one profile separately from history limits. Node removes attachments no longer referenced after profile replacement/clear. Worker R2 uses the 24-hour grace period and bounded garbage collection.
+- Node is a single-process reference. Replace its queue with shared transactional storage before using replicas.
+- WAV limit: 1.1 MB. The app caps Gadget recording at 30 seconds for G2 PCM audio.
+- Gadget image-file input is disabled by default because it has not been physically verified. Use `GADGET_IMAGES_ENABLED=true` only after verification. Muse image replies (`POST /v1/messages`), Gist images, and Space-card images are separate display paths.
+- Soniox temporary keys: 60 seconds to start, single use, 150-second session. Issuance is limited to five per minute.
+- Message bodies and credentials are not written to access logs. You manage HTTPS host/proxy logging separately.
 
-## 確認範囲
+## Verification scope
 
-`node --test tests/server.test.mjs` で、認証の分離、重複送信、ジョブの受渡し、別会話の除外、分割UTF-8、返信完了、期限切れ後の再実行防止、スペース永続化、Soniox要求形式を1つの通信テストで確認します。Muse / Sonioxへの実通信はこのテストに含めません。
+`node --test tests/server.test.mjs` checks role separation, duplicate requests, job delivery, unrelated-conversation rejection, split UTF-8, reply completion, prevention of replay after expiry, persisted Spaces, and Soniox request format in one transport integration test. It does not make live Muse or Soniox calls.
 
-参照: [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk)、[Soniox temporary API keys](https://docs.soniox.com/authentication/temporary-api-keys)。
+References: [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk), [Soniox temporary API keys](https://docs.soniox.com/authentication/temporary-api-keys).

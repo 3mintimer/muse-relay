@@ -1,11 +1,11 @@
-## 変更する操作・結果
+## Changed action and result
 
-<!-- どの操作で何が変わるか。関連する公開Issueがあればリンク。非公開受付票の本文や番号は貼らない。 -->
+<!-- Describe which action changes and how. Link a related public Issue if available. Do not paste private feedback text or receipt IDs. English or Japanese is welcome. 日本語でも記入できます。 -->
 
-## 確認したこと
+## Verification
 
-<!-- 変更に関係するコマンドと結果。実機、Simulator、ブラウザー、合成データを区別する。未確認点も記載。 -->
+<!-- List relevant commands and results. Distinguish physical hardware, Simulator, browser, and synthetic-data checks. State anything not verified. -->
 
-## 資料・互換性
+## Documentation and compatibility
 
-<!-- 設定・公開プロトコルの変更があれば、利用者に必要な移行と更新した資料を記載。なければ省略可。 -->
+<!-- For settings or public-protocol changes, describe required migration and updated docs. Omit if not applicable. -->

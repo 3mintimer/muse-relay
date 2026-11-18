@@ -1,45 +1,46 @@
-name: 操作で困った・不具合
-description: うまく動かない操作を知らせる
+name: Problem or bug
+description: Report an action that did not work as expected
 body:
   - type: markdown
     attributes:
       value: |
-        このIssueは公開されます。トークン、接続設定、会話、音声、写真、氏名は貼らないでください。
-        GitHub登録なし・非公開の受付を使う場合は、[ガイドの要望受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback)へ進んでください。
+        This Issue will be public. Do not paste tokens, connection settings, conversations, audio, photos, or names.
+        For a private submission without a GitHub account, use the [guide feedback form](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback).
+        [日本語のフォーム](https://github.com/3mintimer/muse-relay/issues/new?template=problem.ja.yml)
   - type: textarea
     id: operation
     attributes:
-      label: どの操作で困りましたか
-      placeholder: 例：ホームからスペースを開き、項目をタップしたとき
+      label: Which action caused the problem?
+      placeholder: For example, opening a Space from Home and tapping an item.
     validations:
       required: true
   - type: textarea
     id: result
     attributes:
-      label: 起きたこと・期待したこと
-      description: 操作順と、画面に出た短いエラーがあれば記載してください。実際の会話内容は不要です。
+      label: What happened, and what did you expect?
+      description: Include the steps and any short error shown on screen. Actual conversation content is unnecessary.
     validations:
       required: true
   - type: dropdown
     id: relay
     attributes:
-      label: 中継方式
+      label: Relay method
       options:
-        - わからない
+        - Not sure
         - GitHub Gist
         - Muse Gadget SDK
   - type: input
     id: version
     attributes:
-      label: アプリのバージョン（わかる場合）
-      placeholder: 設定画面のバージョン
+      label: App version (if known)
+      placeholder: Version shown in Settings
   - type: dropdown
     id: surface
     attributes:
-      label: 確認した画面・機器
+      label: Where did you check this?
       options:
-        - Even G2実機
-        - スマートフォンのEvenアプリ
-        - ブラウザー
+        - Physical Even G2
+        - Even app on a phone
+        - Browser
         - Simulator
-        - わからない
+        - Not sure

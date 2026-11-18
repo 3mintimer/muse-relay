@@ -1,184 +1,188 @@
-# スマートフォン画面
+# Phone UI
 
-設定はアプリ内のウィザードで行います。
+[English](ui.md) · [日本語](ui.ja.md)
+
+Configure the app through its setup wizard.
 
 ```mermaid
 flowchart LR
-  A[1 中継方式] --> B[2 接続設定]
-  B --> C[3 音声と画像]
-  C --> D[4 接続確認]
-  D --> E[チャット / スペース]
+  A[1 Relay method] --> B[2 Connection settings]
+  B --> C[3 Audio and images]
+  C --> D[4 Connection check]
+  D --> E[Chat / Spaces]
 ```
 
-| 画面 | 操作 |
+| Screen | Actions |
 |---|---|
-| 接続ウィザード | Gist / Muse Gadget SDK の選択、接続先とトークン入力、接続確認 |
-| Muse Gadget SDK の接続設定 | サーバーのセットアップ画面から接続設定 JSON を貼り付けて読み込み |
-| チャット | テキスト送信、音声録音、画像添付、グラス表示、端末内で非表示 |
-| スペース | Muse への作成依頼、受信済みスペースの登録、上下並べ替え・登録解除、項目を開く、更新依頼 |
-| 設定 | ライト / ダーク / システム、表示言語（9 言語）、音声処理、画像、更新間隔 |
-| 操作の練習 | スワイプ、タップ、長押し、ダブルタップを画面上で確認。通信なし |
-| スペース操作の練習 | タップ、スワイプ、ダブルタップの3操作を画面上で確認。通信なし |
-| 設定 → G2 表示 | 自動非表示までの時間、送信後のチャット復帰、Muse のアバター、復帰操作の練習 |
+| Connection wizard | Choose Gist / Muse Gadget SDK, enter endpoint/tokens, check the connection |
+| Muse Gadget SDK connection | Paste and import connection JSON from the server setup UI |
+| Chat | Send text, record audio, attach an image, show on glasses, hide locally |
+| Spaces | Ask Muse to create a Space, register received Spaces, reorder/unregister, open items, request a refresh |
+| Settings | Light / dark / system, display language (nine languages), audio processing, images, refresh interval |
+| Practice controls | Try swipe, tap, hold, and double tap on screen without network requests |
+| Practice Space controls | Try tap, swipe, and double tap without network requests |
+| Settings → G2 display | Auto-hide duration, return to chat after sending, Muse avatar, wake-control practice |
 
-## 設定とヒント
+## Settings and help
 
-設定を「接続」「音声と画像」「G2表示」「表示」「使い方」に分け、必要なグループだけ開きます。見出しに現在の選択を表示し、変更中は「未保存の変更」を表示します。補足は項目横の「？」から開くポップアップに配置します。閉じる／Escapeで元の操作へ戻り、設定や入力を維持します。
+Settings are grouped into connection, audio/images, G2 display, appearance, and usage. Open only the group you need. Headings show current selections; unsaved changes are marked. Supplemental help opens from the “?” next to a setting. Close it or press Escape to return without losing settings or input.
 
 ```mermaid
 flowchart LR
-  A[音声と画像：文字起こし先] --> B[Soniox：アプリから直接]
-  A --> H[中継先で文字起こし] --> I[送信時に音声ファイルを中継へ]
-  B --> C{Soniox接続方法}
-  C --> D[APIキーを入力]
-  C --> E[一時キー発行サーバー]
-  D --> F[Sonioxへの接続を確認]
+  A[Audio and images: transcription destination] --> B[Soniox: directly from the app]
+  A --> H[Transcribe at relay] --> I[Send audio file on submission]
+  B --> C{Soniox connection}
+  C --> D[Enter API key]
+  C --> E[Temporary-key server]
+  D --> F[Check Soniox connection]
   E --> F
-  F --> G[設定を保存]
+  F --> G[Save settings]
 ```
 
-| 状態 | 表示・次の操作 |
+| State | Display / next action |
 |---|---|
-| 新しいGist接続でSonioxを選ぶ | APIキー入力欄を表示。追加サーバーは不要 |
-| 既存の一時キー方式 | 既存の接続を維持。Gadgetは中継設定を再利用 |
-| キー未入力 | 入力欄の近くに必要な項目を表示 |
-| キー入力済み | 接続は未確認。確認ボタンから無音データで検証 |
-| 認証失敗 | APIキーの確認を案内し、再試行可能 |
-| 確認完了 | Soniox接続確認済み。キーや接続方式を変えると未確認へ戻る |
-| 中継先を変更して保存 | 接続グループを開いて確認へ誘導 |
-| 中継方式の選択（初回設定・設定 → 接続） | 選択肢の直下に「データの流れ」を常時表示。方式を切り替えると保存前に図も切り替わる。機能の比較は「？」で開く |
+| Select Soniox for a new Gist connection | Shows API-key input; no additional server needed |
+| Existing temporary-key setup | Preserves the existing connection; Gadget reuses relay settings |
+| Missing key | Shows the required field beside the input |
+| Key entered | Connection remains unverified; the check button verifies with silent audio |
+| Authentication failure | Prompts you to check the API key and allows retry |
+| Check completed | Shows verified Soniox connection; changing the key or method resets verification |
+| Save a different relay endpoint | Opens the connection group and guides you to check it |
+| Relay selection in setup or Settings → Connection | Always shows the data-flow diagram below the options; switching methods updates it before saving. “?” opens feature comparison |
 
-初回のMuse向け依頼文は、音声と画像の選択後に生成します。接続設定・スペース作成・アバター取得は別の依頼文です。[機能比較](relay-comparison.md)
+Initial Muse instructions are generated after selecting audio and images. Connection setup, Space creation, and avatar export have separate prompts. [Feature comparison](relay-comparison.md)
 
-## 録音する話者
+## Recording speakers
 
-設定 → 音声と画像 → G2 グラス → 録音対象。接続ウィザードにも同じ選択を表示します。
+Settings → Audio and images → G2 glasses → Recording target. The setup wizard provides the same selection.
 
-| 選択 | 音声の扱い |
+| Selection | Audio handling |
 | --- | --- |
-| すべて（そのまま） | 初期値。自分・他の人・判定不明をそのまま使用 |
-| 自分のみ | SDK が `self` と判定した音声を使用 |
-| 他の人のみ | SDK が `other` と判定した音声を使用 |
+| Everyone, unchanged | Default. Uses self, others, and unknown speakers unchanged |
+| Only me | Uses audio the SDK classifies as `self` |
+| Only others | Uses audio the SDK classifies as `other` |
 
-Muse での文字起こしと Soniox の両方、チャットとスペースのマイクに適用。絞り込み時は対象外・判定不明の部分を無音化し、録音の時間間隔を維持します。対象の音声が足りない場合は送信せず、再録音または「すべて」への変更を案内します。既存の設定を開いた場合も初期値は「すべて」です。
+Applies to both Muse and Soniox transcription, and to chat and Space microphones. Filtering silences excluded and unknown segments while preserving recording timing. If too little target audio is detected, the app does not send; it asks you to record again or select everyone. Existing settings also default to everyone.
 
-スマートフォンのマイクはすべての音声を使用します。G2 用の選択は保存し、マイクを G2 へ戻したときに復元します。[SDK の話者判定](https://www.npmjs.com/package/@evenrealities/even_hub_sdk) はフレームごとの推定で、スマートフォンや旧ホストでは `unknown` になります。
+The phone microphone uses all audio. The app preserves the G2 selection and restores it when switching back to G2. [SDK speaker classification](https://www.npmjs.com/package/@evenrealities/even_hub_sdk) is estimated per frame; phone microphones and older hosts report `unknown`.
 
-## スペースの追加・管理
+## Add and manage Spaces
 
-| 画面の順序 | 操作 |
+| Screen sequence | Action |
 | --- | --- |
-| スペース → 追加 → Museに作成を依頼 | 「例から始める」で予定／集中タイマー／音声メモを選び、名前・用途を編集 |
-| 表示形式・追加する操作 | リスト／カードと、ボタン・スライダー・選択肢・マイクを選択 |
-| 依頼文を作る | 内容を確認してコピー、または「チャットの下書きへ」。自動送信しない |
-| 受信を確認 → 更新して受信 | Muse が中継へ書き出したスペースを取得 |
-| 追加 → 完了 | 選んだスペースをスマートフォンと G2 の一覧へ登録 |
-| 並べ替え・削除 → ↑／↓ | 登録順を変更。G2 にも同じ順序を反映 |
-| 並べ替え・削除 → 削除 | 確認後にアプリの登録だけを解除。Muse と中継の原本は残る |
+| Spaces → Add → Ask Muse to create | Start from a schedule, focus timer, or voice-note example, then edit name/purpose |
+| Layout and controls | Choose list/cards and buttons, sliders, choices, or microphones |
+| Generate instructions | Review and copy, or move to the chat draft. Nothing is sent automatically |
+| Check received → Refresh | Fetch the Spaces exported by Muse to the relay |
+| Add → Done | Register selected Spaces in the phone and G2 lists |
+| Reorder/remove → ↑ / ↓ | Change registration order; G2 uses the same order |
+| Reorder/remove → Remove | Confirm to unregister only in the app; Muse and relay originals remain |
 
-登録解除後は「追加 → 受信済みから追加」で戻せます。例の選択は Muse への依頼文を作る操作で、アプリだけでスペースの処理を生成・実行するものではありません。[表示部品と操作の詳細](spaces.md)
+After unregistering, restore a Space with Add → Add from received. Selecting an example generates instructions for Muse; the app itself does not create or run the Space's processing. [Display controls and interactions](spaces.md)
 
-## 接続状態の表示
+## Connection status
 
-「中継に接続済み」「機器 オンライン」「G2 接続済み」は別々に表示します。接続確認は中継の応答を確かめる操作です。Muse の返答と実際のグラス表示は、設定後の送受信で確認します。
+Relay connected, device online, and G2 connected are separate indicators. The connection check verifies a relay response. Confirm a Muse reply and actual glasses display by sending and receiving after setup.
 
-入力途中の文章と設定は、通信状態の更新や言語切替で消さない構成です。接続先を変更した場合は、接続確認後に保存します。コピーする Muse 向け設定手順にトークンは含めません。
+Network-status updates and language changes preserve drafts and settings. After changing an endpoint, check the connection before saving. Copied Muse setup instructions contain no tokens.
 
-起動時は設定を読み込んでから操作画面を表示します。グラスの接続状態と設定保存は独立し、Evenアプリへの保存と端末バックアップのみの保存を区別します。読み込みに失敗した場合は、バックアップの利用状態と「設定を再読み込み」を表示します。
+Startup loads settings before showing controls. Glasses connectivity and settings persistence are separate; the UI distinguishes saving through Even from a device-backup-only save. On load failure it shows backup status and a reload-settings action.
 
-## 表示
+## Display
 
-テーマ CSS を使用し、フォントは OS 標準のサンセリフ、日本語は Hiragino / Yu Gothic / Noto Sans JP の順で利用可能なものへフォールバックします。Even 本体のテーマ・言語との同期は仮定しません。「システム」は OS / WebView の配色設定です。
+Theme CSS uses the system sans-serif font, with Japanese fallbacks through Hiragino / Yu Gothic / Noto Sans JP. Synchronization with the Even device's theme or language is not assumed. “System” follows OS/WebView color settings.
 
-G2 の画像・音声・操作はアプリ本体が担当します。ブラウザでの UI 確認は、Even 内 WebView と実機の確認を兼ねません。
+The app handles G2 images, audio, and interaction. Browser UI checks do not substitute for checks in the Even WebView and on physical glasses.
 
-G2のホームメニューでは、上1行にスマートフォンの現在の日付・曜日と24時間表記の時刻を表示します。毎分更新し、選択中のメニュー項目は保持します。自動非表示・録音・Contextual Menu中は時計の更新を止め、ホームへ戻ると現在時刻で表示します。
+G2 home's top row shows the phone's current date, weekday, and 24-hour time. It updates every minute while preserving the selected menu item. Clock updates pause during auto-hide, recording, and the Contextual Menu; returning home shows the current time.
 
-| ホームの領域 | 表示 |
+| Home region | Content |
 | --- | --- |
-| 上部 | 日付・曜日・時計 |
-| メニュー | チャット・スペース・録音。アバターがある場合は左側に配置 |
-| 右側 | Muse で使用中のアバター。画像が有効で受信済みの場合だけ表示 |
+| Top | Date, weekday, clock |
+| Menu | Chat, Spaces, record; placed on the left when an avatar is present |
+| Right | The avatar used in Muse, only when received and images are enabled |
 
-アバターの設定は「設定 → G2 表示 → Museにアバターを依頼」です。依頼文をコピーして Muse に貼り付けるか、チャットの下書きへ追加してから送信します。Muse に既存のアバターを書き出させる手順で、新しい画像の生成は依頼しません。画像がオフなら「画像を有効にする」を選び、「設定を保存」します。Muse の書き出し後に更新するとホームへ反映します。
+Use Settings → G2 display → Ask Muse for avatar. Copy the instructions into Muse, or add them to a chat draft before sending. This asks Muse to export the existing avatar, not generate a new image. If images are off, enable them and save settings. Refresh after Muse exports to update home.
 
-未受信・取得失敗時はアバターなしでメニューを使えます。個人のアバターは利用者の中継から取得し、共通ビルドや公開資料には含めません。
+The menu remains usable without an avatar when none has arrived or loading fails. Personal avatars come from the user's relay and are not included in the shared build or public documentation.
 
-チャットやスペースの本文にはアプリ名・時計を表示しません。本文を上端から表示し、本文ページは7行です。画像は288×144のまま上部へ配置します。本文の送信者やカード見出しも7行に含めてページ分割し、最終行を切り落としません。
+Chat and Space body pages omit the app name and clock. Text begins at the top and uses seven lines per body page. Images remain 288×144 at the top. Sender labels and card headings count within the seven lines, so pagination does not cut off the last line.
 
 ```mermaid
 flowchart TD
-  H[ホーム] --> C[チャット]
-  H --> S[スペース一覧]
-  H --> V[録音]
-  S --> D[スペース本文]
-  C -->|ダブルタップ| H
-  D -->|ダブルタップ| S
-  S -->|ダブルタップ| H
-  H -->|ダブルタップ| E[OS の終了確認]
+  H[Home] --> C[Chat]
+  H --> S[Space list]
+  H --> V[Record]
+  S --> D[Space content]
+  C -->|Double tap| H
+  D -->|Double tap| S
+  S -->|Double tap| H
+  H -->|Double tap| E[OS exit confirmation]
   C -. Contextual Menu .-> S
   D -. Contextual Menu .-> C
 ```
 
-Contextual Menu は現在の画面で必要な操作だけを表示します。ホームでは「更新」、閲覧中はチャット／スペースへの切替・録音・更新、チャット本文ではさらに「このメッセージを隠す」を表示します。終了はOSの標準項目を使います。
+The Contextual Menu shows only actions relevant to the current screen. Home offers refresh; reading screens offer switching to chat/Spaces, recording, and refresh; chat also offers hiding the current message. Exit uses the standard OS item.
 
-| グラスの画面 | タップ | 上下スワイプ | ダブルタップ |
+| Glasses screen | Tap | Vertical swipe | Double tap |
 |---|---|---|---|
-| ホーム | チャット・スペース・録音を開始 | 選択を移動 | 終了確認 |
-| スペース一覧 | 選択スペースを開く | 選択を移動 | ホームへ戻る |
-| スペース本文 | 次のページへ。最後は先頭へ | 前後の項目へ | スペース一覧へ戻る |
-| チャット本文 | 次のページへ | 前後のメッセージへ | ホームへ戻る |
-| 処理中 | 重複実行しない | 移動しない | 表示を戻す。録音準備中なら中止 |
-| 更新失敗 | 再試行 | 移動しない | 元の画面へ戻る |
-| 処理完了 | 元の画面へ戻る | 移動しない | 元の画面へ戻る |
+| Home | Open Chat, Spaces, or recording | Move selection | Exit confirmation |
+| Space list | Open selected Space | Move selection | Return home |
+| Space content | Next page; last wraps to first | Previous/next item | Return to Space list |
+| Chat content | Next page | Previous/next message | Return home |
+| Processing | Does not duplicate execution | No navigation | Return display; cancel if preparing to record |
+| Refresh failed | Retry | No navigation | Return to previous screen |
+| Processing complete | Return to previous screen | No navigation | Return to previous screen |
 
-長押し開始の録音は離すと送信、メニューから開始した録音はタップで送信します。G2の下端にも該当する操作を表示します。準備中・送信中・完了・失敗をG2に表示し、メッセージやスペースがない場合も空の理由と戻り方を表示します。スペースの閲覧に録音操作は必要ありません。Museには、短い見出しと自己完結した読取用カードでスペースを作成する条件を渡します。
+For hold-started recording, release to send. For menu-started recording, tap to send. The G2 footer shows the applicable action. G2 shows preparing, sending, complete, and failed states; empty chats/Spaces explain why and how to return. Reading Spaces does not require recording. Muse receives instructions to create short headings and self-contained readable cards.
 
-| グラスに新しい画像が届いたとき | 表示 |
+| When a new image arrives | Display |
 |---|---|
-| ホーム・画像がオン | 新着メッセージ／画像ページを開く。タップで本文へ |
-| ホーム・画像がオフ | 画像メッセージのキャプション、または「画像」を表示 |
-| 録音の準備中・録音中・閲覧中 | 操作中の表示を維持 |
+| Home, images on | Opens the new message/image page; tap for text |
+| Home, images off | Shows its caption or “Image” |
+| Preparing to record, recording, or reading | Preserves the current interaction |
 
-Contextual Menu の開閉通知（4→選択→5）は、アプリを終了する通知として扱いません。メニュー表示中はページを描き換えず、閉じた後に選択した操作を実行します。Even内ではWebViewが非表示でも操作・受信を維持し、終了はシステム終了通知で処理します。[公式仕様](https://hub.evenrealities.com/docs/build/contextual-menu)
+Contextual Menu notifications (4 → selection → 5) are not app-exit events. Pages are not redrawn while it is open; the selected action runs after it closes. Inside Even, interaction and receiving continue while the WebView is hidden; the system exit event handles termination. [Official specification](https://hub.evenrealities.com/docs/build/contextual-menu)
 
-## G2 表示の自動非表示と復帰
+## G2 auto-hide and wake
 
 ```mermaid
 stateDiagram-v2
-  表示中 --> 非表示: 設定した時間が経過
-  非表示 --> 表示中: Ring・タッチパッドの最初の操作
-  非表示 --> 録音: 長押し
-  録音 --> チャット: 離して送信成功
-  チャット --> 非表示: 設定した時間が経過
+  Visible --> Hidden: Configured time elapses
+  Hidden --> Visible: First Ring or touchpad input
+  Hidden --> Recording: Hold
+  Recording --> Chat: Release and send successfully
+  Chat --> Hidden: Configured time elapses
 ```
 
-| 設定・状態 | 動作 |
+| Setting / state | Behavior |
 |---|---|
-| 自動で非表示 | オフ（初期値）／5／10／15／20／25／30秒 |
-| 表示中の操作 | アプリが受け取った操作から数え直す。受信・定期更新では延長しない |
-| 録音準備・録音・送信・OSメニュー | 時間を数えず、完了後から数え直す |
-| 非表示 | 本文・フッター・リスト・画像を消す。受信は続け、新着だけでは表示を戻さない |
-| 最初のタップ・スワイプ・ダブルタップ | 直前の画面に戻す。見えていない項目は実行しない |
-| 長押し | 表示を戻してチャットのマイクを開始。離すと送信 |
-| スマートフォンの「表示を戻す」 | グラスの操作と同じ画面に復帰 |
-| 送信後にチャットへ戻る | 初期値オン。テキスト・チャット音声の送信成功後にチャットを表示。失敗・中止・スペースへの入力は対象外 |
+| Auto-hide | Off by default, or 5 / 10 / 15 / 20 / 25 / 30 seconds |
+| Input while visible | Restarts from inputs delivered to the app; receiving and polling do not extend it |
+| Preparing, recording, sending, OS menu | Pauses the timer and restarts after completion |
+| Hidden | Clears body, footer, lists, and images. Receiving continues; new content alone does not wake the display |
+| First tap, swipe, or double tap | Restores the previous screen without activating an unseen item |
+| Hold | Wakes the display and starts the chat microphone; release to send |
+| Restore display on the phone | Returns to the same screen as glasses input |
+| Return to chat after sending | On by default. Shows chat after successfully sending text or chat audio; excludes failure, cancellation, and Space input |
 
-ネイティブリスト内の選択移動はSDK内部で処理され、各スワイプはアプリへ通知されません。その間も設定時間は進みます。タップなどアプリに届く操作で数え直します。非表示中の復帰操作は空のテキストコンテナで受け取ります。表示時間・チャット復帰の設定は既存の設定保存に含み、非表示状態自体は次回起動に持ち越しません。
+Native-list selection changes are handled inside the SDK; each swipe is not delivered to the app. The timer continues during those movements and restarts on delivered inputs such as taps. While hidden, an empty text container receives wake input. Duration and return-to-chat settings are persisted; the hidden state itself is not restored on next startup.
 
-設定内の「復帰操作を試す」では、空画面 → タップ → 本文の切替を通信せずに練習できます。
+From **v0.3.6 Beta**, a reply to a chat request you sent wakes the automatically hidden display once and opens that reply. The timeout starts again after it appears. Unrelated messages and receipt status updates keep the display asleep. When a chat has another page, the footer shows both the single tap for the next page and the double-tap for Home.
 
-## チャットの入力と回答
+The wake-control practice in settings lets you try blank screen → tap → content without network requests.
 
-| 領域 | 表示 |
+## Chat input and reply
+
+| Region | Content |
 |---|---|
-| 上2行 | 自分の入力・取得できた文字起こし。文字輝度1 |
-| 下6行 | Museの回答。文字輝度4（最大）。タップで次のページ |
-| 下端 | ページ数と操作案内。文字輝度4 |
-| 画像のページ | 上に入力、中央に288×144画像、下に本文を開く案内 |
+| Top two lines | Your input or received transcript; text brightness 1 |
+| Lower six lines | Muse reply; text brightness 4 (maximum). Tap for the next page |
+| Footer | Page count and control hints; text brightness 4 |
+| Image page | Input above, 288×144 image in the center, and a hint below to open the text |
 
-初期値は「入力と回答」です。設定の「G2 表示 → チャット表示」、またはチャットのContextual Menuで「1件ずつ」へ切り替えられます。長い入力の併記は2行に収めて末尾を「…」にし、「1件ずつ」では全文をページ送りで読めます。回答に入力が併記されている間は、その入力だけの重複ページをスワイプで経由しません。
+The default is input and reply together. Switch to one at a time in Settings → G2 display → Chat layout, or in chat's Contextual Menu. Long input is truncated to two lines with “…”; one-at-a-time mode lets you page through the full text. While input is shown beside its reply, swiping skips the duplicate input-only page.
 
-入力と回答は `You.id` と `Muse.reply_to` で対応付けます。Gadgetから独立して届いた写真など、対応IDがない投稿に別の質問を添えません。旧形式だけのGistは並び順で対応付けます。文字起こしがまだ返っていない音声は「音声メッセージ」と表示し、未取得の発話内容は作りません。
+Input/reply pairing uses `You.id` and `Muse.reply_to`. An independently published Gadget photo without a matching ID is not given an unrelated question. Legacy-only Gist data is paired by order. Audio without a returned transcript is labeled “Voice message”; missing speech content is never invented.
 
-文字輝度は[SDKのtextColor](https://www.npmjs.com/package/@evenrealities/even_hub_sdk)で指定します。回答・スペース本文・操作案内は4、標準リストも既定の最大輝度です。G2全体の明るさはOS側の設定に従います。
+Text brightness uses [SDK textColor](https://www.npmjs.com/package/@evenrealities/even_hub_sdk). Replies, Space content, and hints use 4; native lists retain their default maximum brightness. Overall G2 brightness follows OS settings.

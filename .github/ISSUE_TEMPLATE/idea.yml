@@ -1,24 +1,25 @@
-name: こう使いたい・改善案
-description: 使いたい場面や、減らしたい手順を知らせる
+name: Idea or improvement
+description: Describe what you want to do or which steps you want to reduce
 body:
   - type: markdown
     attributes:
       value: |
-        このIssueは公開されます。開発の知識やコードは不要です。個人情報、会話、接続キーは含めないでください。
-        非公開で送る場合は[ガイドの要望受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback)を使えます。
+        This Issue will be public. No coding or development knowledge is needed. Do not include personal information, conversations, or connection keys.
+        To send privately, use the [guide feedback form](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback).
+        [日本語のフォーム](https://github.com/3mintimer/muse-relay/issues/new?template=idea.ja.yml)
   - type: textarea
     id: use
     attributes:
-      label: どんな場面で、何をしたいですか
-      placeholder: 例：外出中に、選んだスペースの次の予定だけ確認したい
+      label: What do you want to do, and in which situation?
+      placeholder: For example, check only the next event in a selected Space while away from home.
     validations:
       required: true
   - type: textarea
     id: current
     attributes:
-      label: 今の操作で困ること（任意）
-      description: 実現方法がわからなくても、そのまま記載できます。
+      label: What is difficult with the current steps? (optional)
+      description: You do not need to know how to implement a solution.
   - type: textarea
     id: outcome
     attributes:
-      label: どうなれば使いやすいですか（任意）
+      label: What would make this easier to use? (optional)
