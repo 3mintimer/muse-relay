@@ -1,10 +1,12 @@
 import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import { AudioInputSource, AudioSpeakerRole } from '@evenrealities/even_hub_sdk';
+import { getTextWidth } from '@evenrealities/pretext';
 import type { AppController, AppState, Attachment, Message, Relay, RelayRequest, Settings, SpaceItem, SpaceControl, MuseProfile } from './types';
 import { defaults, validateSettings } from './config';
 import { GistRelay } from '../relay/gist';
 import { GadgetRelay } from '../relay/gadget';
-import { Glasses, paginate, type GlassMenuItem, type GlassTextStyle } from './glasses';
+import { Glasses, glassBodyRows, type GlassMenuItem, type GlassTextStyle } from './glasses';
+import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, resizeImage, wav } from './media';
 import { SonioxStream } from './soniox';
 import { LOCAL_STATE_KEY, StateStorage, type SavedState } from './persistence';
@@ -12,6 +14,50 @@ import { resolveLocale, translate } from './i18n';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from './chat';
+
+type GlassPage={body:string;footer:string;image?:boolean};
+
+const trackAt=(position:number,slots:number)=>`[${'-'.repeat(position)}O${'-'.repeat(slots-position-1)}]`;
+const sliderSlots=(()=>{
+  let slots=1;
+  // An odd track has an exact middle cell; its total width never depends on the value.
+  for(let candidate=3;candidate+2<=G2_TEXT_LIMIT;candidate+=2){
+    if([0,(candidate-1)/2,candidate-1].some(position=>getTextWidth(trackAt(position,candidate))>576))break;
+    slots=candidate;
+  }
+  return slots;
+})();
+function sliderTrack(value:number,min:number,max:number):string{
+  const position=Math.max(0,Math.min(sliderSlots-1,Math.round((value-min)/(max-min)*(sliderSlots-1))));
+  return trackAt(position,sliderSlots);
+}
+
+/** Count and fill pages together: a translated final-page hint can use different rows. */
+function bodyPages(body:string,footer:(index:number,total:number)=>string,input?:string,image=false):GlassPage[]{
+  const lines=wrapLines(body),offset=image?1:0;
+  const maxRows=glassBodyRows('',input),minimum=paginate(body,maxRows).length;
+  for(let count=minimum;count<=lines.length;){
+    const total=count+offset,pages:GlassPage[]=image?[{body:'',footer:footer(0,total),image:true}]:[];
+    let cursor=0;
+    for(let index=0;index<count;index++){
+      const hint=footer(index+offset,total),rows=glassBodyRows(hint,input);
+      // Reserve one complete line for every remaining page, including the final hint.
+      const limit=Math.min(cursor+rows,lines.length-(count-index-1));
+      const content:string[]=[];let length=0;
+      while(cursor<limit){
+        const line=lines[cursor]!,added=line.length+(content.length?1:0);
+        if(content.length&&length+added>G2_TEXT_LIMIT)break;
+        content.push(line);length+=added;cursor++;
+      }
+      pages.push({body:content.join('\n'),footer:hint});
+    }
+    if(cursor===lines.length)return pages;
+    if(count===lines.length)break;
+    // Long transcripts may contain thousands of hard lines; avoid trying every count.
+    count=Math.min(lines.length,count+Math.max(1,Math.ceil((lines.length-cursor)/maxRows)));
+  }
+  throw new Error('G2 text pagination');
+}
 
 export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBridge>}={}): AppController {
   const state:AppState={persistence:'loading',settingsLoadFailed:false,settings:{...defaults},snapshot:{messages:[],spaces:[]},connected:false,glasses:false,displaySleeping:false,busy:false,
@@ -23,7 +69,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   type ControlTarget={spaceId:string;itemId:string;title:string;control:SpaceControl};
   let spaceEditor:{target:ControlTarget;value?:number|string}|undefined,recordingSpace:ControlTarget|undefined;
   let readJob:Promise<void>|undefined,contextualOpen=false,pendingMenuAction:(()=>Promise<void>)|undefined;
-  let feedback:{kind:'busy'|'done'|'error';body:string;retry?:()=>Promise<void>;back?:()=>Promise<void>;waitForReply?:boolean}|undefined;
+  let feedback:{kind:'busy'|'done'|'error';body:string;retry?:()=>Promise<void>;back?:()=>Promise<void>;waitForReply?:boolean;page?:number}|undefined;
   let actionSerial=0,renderSerial=0,voiceStatus='',recordingMode:'hold'|'toggle'='toggle';
   let capture:Uint8Array[]=[],captureBytes=0,voiceBusy=false,voiceSending=false,recordingTimeout:ReturnType<typeof setTimeout>;
   let selectedAudioBytes=0,classifiedAudioBytes=0;
@@ -153,8 +199,32 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     return control.label||text('実行','Run');
   }
   function spaceRow(item:SpaceItem):string{
-    const value=item.control?controlValue(item.control):item.text.replace(/\s+/g,' ').slice(0,24);
+    const value=item.control?controlValue(item.control):item.text.replace(/\s+/g,' ');
     return `${item.control?.disabled?'– ':''}${item.title}${value?' · '+value:''}`;
+  }
+  const nextBack=()=>text('タップ: 次へ · 2回: 戻る','Tap: next · Double-tap: back');
+  function feedbackPages():GlassPage[]{
+    const last=feedback?.kind==='busy'?text('ダブルタップ: 戻る','Double-tap: back')
+      :feedback?.retry?text('タップ: 再試行 · 2回: 戻る','Tap: retry · Double-tap: back'):text('タップ: 戻る','Tap: back');
+    return bodyPages(feedback?.body||'',(index,total)=>`${total>1?`${index+1}/${total} · `:''}${index<total-1?nextBack():last}`);
+  }
+  function editorPages():GlassPage[]{
+    const {target,value}=spaceEditor!,control=target.control;
+    let body=`${target.title}\n\n${control.type==='button'?control.confirm||'':''}`;
+    if(control.type==='slider'){
+      const level=Number(value);
+      body=`${target.title}\n\n${level}${control.unit?' '+control.unit:''}\n${sliderTrack(level,control.min,control.max)}\n${control.min} — ${control.max}\n${text('スワイプ: 値を調整','Swipe: adjust value')}`;
+    }
+    return bodyPages(body,(index,total)=>index===total-1
+      ?control.type==='button'?text('タップ: 実行 · 2回: 中止','Tap: run · Double-tap: cancel'):text('タップ: 送信 · 2回: 中止','Tap: send · Double-tap: cancel')
+      :`${index+1}/${total} · ${text('タップ: 次へ · 2回: 中止','Tap: next · Double-tap: cancel')}`);
+  }
+  function controlPages(item:SpaceItem):GlassPage[]{
+    return bodyPages(`${item.title}\n${item.text}\n\n${controlValue(item.control!)}`,(index,total)=>{
+      const hint=index<total-1?nextBack():item.control!.disabled
+        ?text('利用できません · 2回: 戻る','Unavailable · Double-tap: back'):text('タップ: 選択 · 2回: 戻る','Tap: select · Double-tap: back');
+      return `${total>1?`${index+1}/${total} · `:''}${hint}`;
+    });
   }
   async function spaceBack(){
     spaceEditor=undefined;feedback=undefined;page=0;
@@ -338,13 +408,19 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(!glasses.ready||!active||contextualOpen)return;
     // Keep an event-capturing page alive, with no text, footer, list border or image.
     if(state.displaySleeping){await show(' ',' ');return;}
-    if(state.recording){await show((recordingSpace?recordingSpace.title+'\n':'')+(state.transcript||text('録音中…','Recording…')),recordingMode==='hold'
-      ?text('離す: 送信 · 2回タップ: 中止','Release: send · Double-tap: cancel')
-      :text('タップ: 送信 · 2回タップ: 中止','Tap: send · Double-tap: cancel'),undefined,{bodyColor:state.transcript&&!recordingSpace?1:4});return;}
+    if(state.recording){
+      const footer=recordingMode==='hold'?text('離す: 送信 · 2回タップ: 中止','Release: send · Double-tap: cancel')
+        :text('タップ: 送信 · 2回タップ: 中止','Tap: send · Double-tap: cancel');
+      const rows=glassBodyRows(footer),body=(recordingSpace?recordingSpace.title+'\n':'')+(state.transcript||text('録音中…','Recording…'));
+      // Keep one stable body region throughout capture and show its newest complete lines.
+      const tail=paginate(wrapLines(body).slice(-rows).join('\n'),rows).at(-1)!;
+      await show(tail,footer,undefined,{bodyColor:state.transcript&&!recordingSpace?1:4});return;
+    }
     if(voiceBusy){await show(voiceStatus,voiceSending?text('送信完了を待っています','Waiting for delivery'):text('ダブルタップ: 中止','Double-tap: cancel'));return;}
-    if(feedback){await show(feedback.body,feedback.kind==='busy'?text('ダブルタップ: 戻る','Double-tap: back')
-      :feedback.retry?text('タップ: 再試行 · 2回: 戻る','Tap: retry · Double-tap: back')
-        :text('タップ: 戻る','Tap: back'));return;}
+    if(feedback){
+      const pages=feedbackPages();feedback.page=Math.min(feedback.page||0,pages.length-1);
+      await show(pages[feedback.page]!.body,pages[feedback.page]!.footer);return;
+    }
     if(screen==='home'){
       menuActions=[showChat,showSpaces,()=>api.toggleRecording()];
       const dateTime=new Date().toLocaleString(resolveLocale(state.settings.language),{
@@ -387,13 +463,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         menuActions=control.options.map(option=>()=>dispatchSpaceAction(spaceRequest(target,option.id)));
         await glasses.list(state,control.options.map(option=>`${option.id===value?'✓ ':''}${option.title}`),text('タップ: 送信 · 2回: 中止','Tap: send · Double-tap: cancel'),contextualMenu());return;
       }
-      if(control.type==='slider'){
-        const level=Number(value),fill=Math.round((level-control.min)/(control.max-control.min)*16);
-        await show(`${paginate(target.title,2)[0]}\n\n${level}${control.unit?' '+control.unit:''}\n[${'='.repeat(fill)}${'-'.repeat(16-fill)}]\n${control.min} — ${control.max}\n${text('スワイプ: 値を調整','Swipe: adjust value')}`,text('タップ: 送信 · 2回: 中止','Tap: send · Double-tap: cancel'));return;
-      }
-      if(control.type==='button'){
-        const pages=paginate(`${target.title}\n\n${control.confirm||''}`,7);page=Math.min(page,pages.length-1);
-        await show(pages[page],page===pages.length-1?text('タップ: 実行 · 2回: 中止','Tap: run · Double-tap: cancel'):`${page+1}/${pages.length} · ${text('タップ: 次へ · 2回: 中止','Tap: next · Double-tap: cancel')}`);return;
+      if(control.type==='slider'||control.type==='button'){
+        const pages=editorPages();page=Math.min(page,pages.length-1);
+        await show(pages[page]!.body,pages[page]!.footer);return;
       }
     }
     if(screen==='space'){
@@ -401,15 +473,22 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(!space){await showSpaces();return;}
       if(!item){await show(`${space.title}\n${text('項目はありません','No items yet')}`,text('ダブルタップ: スペース一覧','Double-tap: spaces'));return;}
       spaceItemId=item.id;
-      if(item.control){await show(`${item.title}\n${paginate(item.text,4)[0]}\n\n${controlValue(item.control)}`,item.control.disabled?text('利用できません · 2回: 戻る','Unavailable · Double-tap: back'):text('タップ: 選択 · 2回: 戻る','Tap: select · Double-tap: back'));return;}
-      const pages=paginate(`${space.title} / ${item.title}\n${item.text}`,7),hasImage=state.settings.images&&Boolean(item.image||item.image_file),total=pages.length+(hasImage?1:0);if(page>=total)page=0;
-      let image=state.settings.images&&page===0?item.image:undefined;
-      if(state.settings.images&&page===0&&!image&&item.image_file&&relay){
+      if(item.control){
+        const pages=controlPages(item);page=Math.min(page,pages.length-1);
+        await show(pages[page]!.body,pages[page]!.footer);return;
+      }
+      const hasImage=state.settings.images&&Boolean(item.image||item.image_file);
+      const pages=bodyPages(`${space.title} / ${item.title}\n${item.text}`,(index,total)=>
+        `${spaceItem+1}/${space.items.length} · ${index+1}/${total} · ${index<total-1?nextBack():text('ダブルタップ: 戻る','Double-tap: back')}`,undefined,hasImage);
+      if(page>=pages.length)page=0;
+      const current=pages[page]!;
+      let image=current.image?item.image:undefined;
+      if(current.image&&!image&&item.image_file&&relay){
         await show(text('画像を読み込み中…','Loading image…'),text('ダブルタップ: 戻る','Double-tap: back'));
         image=await imageAttachment(item.image_file,'image/png');item.image=image;
       }
       if(frame!==renderSerial)return;
-      await show(hasImage&&page===0?`${space.title} / ${item.title}\n${text('タップして本文を表示','Tap to read text')}`:pages[page-(hasImage?1:0)],`${spaceItem+1}/${space.items.length} · ${page+1}/${total}`,image);return;
+      await show(current.body,current.footer,image);return;
     }
     if(screen==='message'){
       const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
@@ -417,22 +496,21 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
       const m=exchange?.reply||selected,waiting=Boolean(exchange&&!exchange.reply);
       const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
-      const inputPages=exchange?paginate(translate(state.settings.language,'あなた: {text}','You: {text}',{text:messageText(exchange.input)}),2):[];
-      const input=inputPages.length>1?Array.from(inputPages[0]!).slice(0,-2).join('')+'…':inputPages[0];
+      const input=exchange?excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:messageText(exchange.input)}),2):undefined;
       const stamp=new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
       const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${m.from}: ${messageText(m)}`:`${m.from} · ${stamp}\n${messageText(m)}`;
-      const pages=paginate(body,exchange?6:7),hasImage=!waiting&&state.settings.images&&Boolean(m.image||m.image_file),total=pages.length+(hasImage?1:0);if(page>=total)page=0;
-      let image=hasImage&&page===0?m.image:undefined;
-      if(hasImage&&page===0&&!image&&m.image_file&&relay){
+      const hasImage=!waiting&&state.settings.images&&Boolean(m.image||m.image_file);
+      const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
+        ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
+      if(page>=pages.length)page=0;
+      const current=pages[page]!;
+      let image=current.image?m.image:undefined;
+      if(current.image&&!image&&m.image_file&&relay){
         await show(text('画像を読み込み中…','Loading image…'),text('ダブルタップ: 戻る','Double-tap: back'));
         image=await imageAttachment(m.image_file,m.mime_type||'image/png');m.image=image;
       }
       if(frame!==renderSerial)return;
-      const imageCaption=exchange?text('タップして本文を表示','Tap to read text'):`${m.from} · ${stamp}\n${text('タップして本文を表示','Tap to read text')}`;
-      const hint=page<total-1?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home')
-        :text('2回タップ: ホーム','Double-tap: home');
-      await show(hasImage&&page===0?imageCaption:pages[page-(hasImage?1:0)],`${page+1}/${total} · ${hint}`,image,
-        {input,bodyColor:!waiting&&m.from==='You'?1:4});
+      await show(current.body,current.footer,image,current.image?undefined:{input,bodyColor:!waiting&&m.from==='You'?1:4});
       if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&exchange?.reply&&!state.readIds.includes(exchange.reply.id)){
         state.readIds.push(exchange.reply.id);emit();saveSoon();
       }
@@ -735,7 +813,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
     if(type===0){
       if(state.recording){fire(act(()=>stopRecording(false),undefined,undefined,false));return;}if(voiceBusy)return;
-      if(feedback){if(feedback.kind==='busy')return;const retry=feedback.retry,back=feedback.back;feedback=undefined;fire(retry?retry():act(back||render));return;}
+      if(feedback){
+        const pages=feedbackPages(),index=feedback.page||0;
+        if(index<pages.length-1){feedback.page=index+1;fire(render());return;}
+        if(feedback.kind==='busy')return;
+        const retry=feedback.retry,back=feedback.back;feedback=undefined;fire(retry?retry():act(back||render));return;
+      }
       if(e.listEvent){
         if(['home','spaces','space-list','space-control'].includes(screen)){
           const action=menuActions[e.listEvent.currentSelectItemIndex??0];
@@ -743,9 +826,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         }return;
       }
       if(screen==='space-control'&&spaceEditor){const {target,value}=spaceEditor;
-        if(target.control.type==='button'&&page<paginate(`${target.title}\n\n${target.control.confirm||''}`,7).length-1){page++;fire(act(render));return;}
+        if((target.control.type==='button'||target.control.type==='slider')&&page<editorPages().length-1){page++;fire(act(render));return;}
         fire(act(()=>dispatchSpaceAction(spaceRequest(target,value)),undefined,undefined,false));return;}
-      if(screen==='space'&&currentSpaceItem()?.control){fire(act(()=>activateSpaceItem(spaceId,spaceItemId),undefined,undefined,false));return;}
+      if(screen==='space'&&currentSpaceItem()?.control){
+        if(page<controlPages(currentSpaceItem()!).length-1){page++;fire(act(render));return;}
+        fire(act(()=>activateSpaceItem(spaceId,spaceItemId),undefined,undefined,false));return;
+      }
       if(screen==='message'||screen==='space'){page++;fire(act(render));}return;
     }
     if(type===1||type===2){if(state.recording||voiceBusy)return;

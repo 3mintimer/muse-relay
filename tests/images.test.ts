@@ -55,8 +55,15 @@ function fixture(results: ImageRawDataUpdateResult[] = []) {
     },
   };
   const native = bridge as unknown as EvenAppBridge;
-  const glasses = new Glasses(() => {}, async () => native, async (_asset,dimensions) => dimensions
-    ?{...image,data_base64:Buffer.from(syntheticPng(dimensions.width,dimensions.height)).toString('base64')}:{...image});
+  const glasses = new Glasses(() => {}, async () => native,
+    async (_asset, {width, height}) => ({...image, data_base64: Buffer.from(syntheticPng(width, height)).toString('base64')}),
+    async (_asset, {width, height}) => {
+      const middle = Math.floor(height / 2);
+      return [0, middle].flatMap(y => [0, width / 2].map(x => {
+        const h = y ? height - middle : middle;
+        return {x, y, width: width / 2, height: h, bytes: syntheticPng(width / 2, h)};
+      }));
+    });
   glasses.bridge = native; glasses.ready = true;
   return { glasses, wire, rebuilds, textUpdates, page:()=>page,body: () => page.textObject?.find((item: any) => item.containerName === 'body')?.content };
 }
@@ -65,8 +72,8 @@ test('home avatar uses a right-side square and clock updates preserve its pixels
   const app=fixture(),items=['Chat','Spaces','Record voice'];
   await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:00',image);
   const page=app.page();assert.equal(page.containerTotalNum,4);
-  assert.deepEqual(page.imageObject.map((c:any)=>[c.xPosition,c.yPosition,c.width,c.height]),[[424,68,144,144]]);
-  assert.equal(page.listObject[0].width,400);assert.equal(page.listObject[0].isEventCapture,1);
+  assert.deepEqual(page.imageObject.map((c:any)=>[c.xPosition,c.yPosition,c.width,c.height]),[[432,72,144,144]]);
+  assert.equal(page.listObject[0].width,432);assert.equal(page.listObject[0].isEventCapture,1);
   assert.ok(page.textObject.every((c:any)=>c.isEventCapture===0));
   assert.equal(app.wire.length,1);assert.equal(app.wire[0]!.containerName,'avatar');
   await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:01',{...image});
@@ -74,49 +81,47 @@ test('home avatar uses a right-side square and clock updates preserve its pixels
   await app.glasses.show(state,'Chat');
   await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:02',image);assert.equal(app.wire.length,2);
   await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:03');
-  assert.equal(app.page().imageObject.length,0);assert.equal(app.page().listObject[0].width,560);
+  assert.equal(app.page().imageObject.length,0);assert.equal(app.page().listObject[0].width,576);
 });
 
-test('image transfers contain PNG bytes, skip unchanged accepted images, and resend after a layout rebuild', async () => {
+test('photo tiles fill the space above the gesture footer and are sent once per native layout', async () => {
   const app = fixture();
-  await app.glasses.show(state, '最初の本文', '1/2', { ...image });
-  assert.equal(app.wire.length, 1);
-  assert.ok(Array.isArray(app.wire[0]!.imageData), 'the SDK wire payload must contain a numeric array rather than base64');
-  assert.deepEqual(app.wire[0]!.imageData, Array.from(png), 'encoding must preserve every PNG byte');
-  assert.ok(app.wire[0]!.imageData.every((byte: unknown) => Number.isInteger(byte) && Number(byte) >= 0 && Number(byte) <= 255));
+  await app.glasses.show(state, 'Photo caption', '1/2', image, [], {input: 'You: A photo?'});
+  const page = app.page();
+  const footer = page.textObject[0];
+  assert.deepEqual([footer.containerName, footer.yPosition, footer.height, footer.isEventCapture], ['footer', 261, 27, 1]);
+  assert.equal(page.textObject.length, 1);
+  assert.equal(page.containerTotalNum, 5);
+  assert.deepEqual(page.imageObject.map((t: any) => [t.xPosition, t.yPosition, t.width, t.height]), [
+    [0, 0, 288, 130], [288, 0, 288, 130], [0, 130, 288, 131], [288, 130, 288, 131],
+  ]);
+  assert.equal(app.wire.length, 4);
+  for (const [i, payload] of app.wire.entries()) {
+    const tile = page.imageObject[i];
+    assert.equal(payload.containerID, tile.containerID);
+    assert.deepEqual(payload.imageData, Array.from(syntheticPng(tile.width, tile.height)));
+  }
+  await app.glasses.show(state, '', 'Updated footer', {...image});
+  assert.equal(app.wire.length, 4);
+  assert.equal(app.page().textObject[0].content, 'Updated footer');
 
-  await app.glasses.show(state, '更新された本文', '2/2', { ...image });
-  assert.equal(app.wire.length, 1, 'polling with a fresh attachment object must not retransmit unchanged accepted image data');
-  assert.equal(app.body(), '更新された本文');
-  assert.ok(app.textUpdates.length > 0, 'the text should still update');
-
-  await app.glasses.list(state, ['チャット']);
-  await app.glasses.show(state, '画像へ戻る', '', { ...image });
-  assert.deepEqual(app.rebuilds, ['image', 'list', 'image']);
-  assert.equal(app.wire.length, 2, 'a newly created image container needs its pixels sent again');
-  await app.glasses.show(state,'タップして本文を表示','1/2',{...image},[],{input:'あなた: 画像を見せて'});
-  assert.equal(app.wire.length,3,'paired image layout also transfers its image after rebuilding');
-  const {textObject,imageObject,containerTotalNum}=app.page();
-  assert.equal(containerTotalNum,4);
-  assert.equal(textObject.find((c:any)=>c.containerName==='input').textColor,1);
-  assert.equal(textObject.find((c:any)=>c.containerName==='body').textColor,4);
-  assert.equal(imageObject[0].yPosition,60);assert.equal(imageObject[0].height,144);
-  assert.equal(textObject.filter((c:any)=>c.isEventCapture===1).length,1);
+  await app.glasses.list(state, ['Chat']);
+  assert.deepEqual([app.page().listObject[0].xPosition, app.page().listObject[0].height], [0, 288]);
+  await app.glasses.show(state, '', '', image);
+  assert.equal(app.wire.length, 8);
+  assert.equal(app.page().imageObject[3].yPosition + app.page().imageObject[3].height, 288);
+  assert.equal(app.page().textObject.filter((c: any) => c.isEventCapture === 1).length, 1);
 });
 
-test('sendFailed retries once, preserves terminal failure, and leaves a later attempt usable', async () => {
-  const recovered = fixture([ImageRawDataUpdateResult.sendFailed, ImageRawDataUpdateResult.success]);
-  await recovered.glasses.show(state, '一時的な転送失敗', '', { ...image });
-  assert.equal(recovered.wire.length, 2, 'a transient transfer failure should have one bounded retry');
-  await recovered.glasses.show(state, '同じ画像', '', { ...image });
-  assert.equal(recovered.wire.length, 2, 'the successful retry should mark this image accepted');
-
-  const failed = fixture([ImageRawDataUpdateResult.sendFailed, ImageRawDataUpdateResult.sendFailed, ImageRawDataUpdateResult.success]);
-  await assert.rejects(failed.glasses.show(state, '転送失敗', '', { ...image }),
-    (error: unknown) => error instanceof Error && error.message === 'G2 image sendFailed');
-  assert.equal(failed.wire.length, 2, 'a failed retry must stop rather than loop');
-  await failed.glasses.show(state, 'もう一度表示', '', { ...image });
-  assert.equal(failed.wire.length, 3, 'a failed image must not be cached as accepted or block the queue');
+test('a transient tile failure gets one retry; another attempt resumes from the failed tile', async () => {
+  const ok = ImageRawDataUpdateResult.success, fail = ImageRawDataUpdateResult.sendFailed;
+  const app = fixture([ok, fail, fail, fail, ok]);
+  await assert.rejects(app.glasses.show(state, '', '', image), /G2 image sendFailed/);
+  assert.deepEqual(app.wire.map(p => p.containerID), [2, 3, 3]);
+  await app.glasses.show(state, '', '', image);
+  assert.deepEqual(app.wire.map(p => p.containerID), [2, 3, 3, 3, 3, 4, 5]);
+  await app.glasses.show(state, '', '', image);
+  assert.equal(app.wire.length, 7);
 });
 
 test('invalid-size and conversion failures keep their exact result and do not retry', async () => {

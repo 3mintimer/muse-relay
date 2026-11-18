@@ -1,18 +1,42 @@
-import { waitForEvenAppBridge, CreateStartUpPageContainer, RebuildPageContainer, TextContainerUpgrade, ImageRawDataUpdate, ImageRawDataUpdateResult, AudioInputSource, type EvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import { waitForEvenAppBridge, CreateStartUpPageContainer, RebuildPageContainer, TextContainerUpgrade, ImageRawDataUpdate, ImageRawDataUpdateResult, AudioInputSource, type EvenAppBridge, type EvenHubEvent, ListContainerProperty } from '@evenrealities/even_hub_sdk';
 import type { AppState, Attachment } from './types';
-import { imageBytes, resizeImage } from './media';
+import { glassImageTiles, imageBytes, resizeImage, type GlassImageTile } from './media';
+import { excerpt, G2_LINE_HEIGHT, lineBudget, wrapLines } from './glass-text';
 
 export interface GlassMenuItem { itemID:number; itemName:string; }
 export interface GlassTextStyle { bodyColor?:1|4; input?:string; }
 
-export function paginate(text: string, lines=7): string[] {
-  const pages:string[]=[];let page='',line='',width=0,count=0;
-  const flush=()=>{page+=(page?'\n':'')+line;line='';width=0;count++;if(count===lines){pages.push(page);page='';count=0;}};
-  for(const char of text){const w=/[^\u0000-\u00ff]/.test(char)?2:1;
-    if(char==='\n'){flush();continue;}
-    if(width+w>46)flush();line+=char;width+=w;}
-  if(line)flush();if(page)pages.push(page);return pages.length?pages:[' '];
+const WIDTH = 576;
+const HEIGHT = 288;
+const AVATAR_SIZE = 144;
+const settleImage = () => new Promise<void>(resolve => setTimeout(resolve, 500));
+
+function textBand(content: string | undefined, maxRows: number) {
+  if (!content?.trim()) return { content: '', height: 0 };
+  const fitted = excerpt(content, maxRows, WIDTH);
+  return { content: fitted, height: wrapLines(fitted, WIDTH).length * G2_LINE_HEIGHT };
 }
+
+function bands(footer: string, top?: string) {
+  const first = textBand(top, 2);
+  const last = textBand(footer, 3);
+  return { first, last, bodyHeight: HEIGHT - first.height - last.height };
+}
+
+export function glassBodyRows(footer: string, input?: string): number {
+  return lineBudget(bands(footer, input).bodyHeight);
+}
+
+function label(id: number, name: string, y: number, height: number, content: string, capture = false, color: 1|4 = 4) {
+  return { containerID: id, containerName: name, xPosition: 0, yPosition: y, width: WIDTH, height,
+    paddingLength: 0, borderWidth: 0, isEventCapture: capture ? 1 : 0, textColor: color, content: content || ' ' };
+}
+
+function sameImage(source: Attachment, next: Attachment): boolean {
+  return source.mime === next.mime && source.data_base64 === next.data_base64;
+}
+
+type GlassBitmap = GlassImageTile & { containerID: number; containerName: string };
 
 export class Glasses {
   bridge?: EvenAppBridge;
@@ -25,20 +49,28 @@ export class Glasses {
   private off?:()=>void;
   private onEvent:(e:EvenHubEvent)=>void;
   private bridgeFactory: typeof waitForEvenAppBridge;
-  private imageConverter:(asset:Attachment,dimensions?:{width:number;height:number})=>Promise<Attachment>;
-  private preparedImage?:{source:Attachment;png:Attachment;bytes:Uint8Array};
-  private preparedAvatar?:{source:Attachment;png:Attachment;bytes:Uint8Array};
-  private displayedImage?:Uint8Array;
-  constructor(onEvent:(e:EvenHubEvent)=>void, bridgeFactory = waitForEvenAppBridge,imageConverter=(asset:Attachment,dimensions?:{width:number;height:number})=>resizeImage(asset,true,dimensions)){
-    this.onEvent=onEvent;this.bridgeFactory=bridgeFactory;this.imageConverter=imageConverter;
+  private photo?: {source: Attachment; height: number; tiles: Promise<GlassImageTile[]>};
+  private avatar?: {source: Attachment; bytes: Promise<Uint8Array>};
+  private displayedImages = new Map<number, Uint8Array>();
+
+  private avatarConverter: (asset: Attachment, size: {width: number; height: number}) => Promise<Attachment>;
+  private photoConverter: typeof glassImageTiles;
+
+  constructor(onEvent: (e: EvenHubEvent) => void, bridgeFactory = waitForEvenAppBridge,
+    avatarConverter = (asset: Attachment, size: {width: number; height: number}) => resizeImage(asset, true, size),
+    photoConverter = glassImageTiles) {
+    this.avatarConverter = avatarConverter;
+    this.photoConverter = photoConverter;
+    this.onEvent = onEvent;
+    this.bridgeFactory = bridgeFactory;
   }
-  async run<T>(fn:(bridge:EvenAppBridge)=>Promise<T>):Promise<T>{
+  async run<T>(fn:(bridge:EvenAppBridge)=>Promise<T>, timeoutMs = 10000):Promise<T>{
     if(!this.bridge)throw new Error('Even app required');
     const bridge=this.bridge;
     const job=this.chain.then(()=>fn(bridge));this.chain=job.catch(()=>{});
     // Keep the underlying chain serialized even when the caller's deadline passes.
     let timer:ReturnType<typeof setTimeout>;
-    try{return await Promise.race([job,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error('G2 timeout')),10000);})]);}
+    try{return await Promise.race([job,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error('G2 timeout')),timeoutMs);})]);}
     finally{clearTimeout(timer!);}
   }
   async connect():Promise<void>{
@@ -55,8 +87,8 @@ export class Glasses {
     if(this.ready)return;
     await this.connect();
     const result=await this.run(b=>b.createStartUpPageContainer(CreateStartUpPageContainer.fromJson({containerTotalNum:1,textObject:[{
-      xPosition:0,yPosition:0,width:576,height:288,containerID:1,containerName:'body',
-      isEventCapture:1,paddingLength:8,content:' ',textColor:4,
+      xPosition:0,yPosition:0,width:WIDTH,height:HEIGHT,containerID:1,containerName:'body',
+      isEventCapture:1,paddingLength:0,content:' ',textColor:4,
     }]})));
     if(result!==0)throw new Error('G2 startup');this.ready=true;
   }
@@ -77,89 +109,107 @@ export class Glasses {
   }
   async exit():Promise<void>{await this.run(b=>b.shutDownPageContainer(1));}
   invalidateRender():void{++this.serial;}
-  invalidateImage():void{this.displayedImage=undefined;}
-  disconnect():void{this.invalidateRender();this.off?.();this.off=undefined;this.ready=false;this.preparedImage=undefined;this.preparedAvatar=undefined;this.invalidateImage();}
-  async show(state:AppState,body:string,footer='',image?:Attachment,menuItems:GlassMenuItem[]=[],style:GlassTextStyle={}):Promise<void>{
-    if(!this.ready)return;
-    const renderId=++this.serial;
-    const paired=style.input!==undefined;
-    const kind=`${image?'image':'text'}:${paired?'paired':'single'}:${state.settings.language}:${JSON.stringify(menuItems)}`;
-    let prepared:typeof this.preparedImage;
-    if(image){
-      prepared=this.preparedImage;
-      if(!prepared||prepared.source.mime!==image.mime||prepared.source.data_base64!==image.data_base64){
-        const png=await this.imageConverter(image);
-        prepared={source:image,png,bytes:imageBytes(png)};
-      }
-    }
-    if(renderId!==this.serial)return;
-    if(prepared)this.preparedImage=prepared;
-    const png=prepared?.png;
-    const page={containerTotalNum:(png?3:2)+(paired?1:0),textObject:[
-      ...(paired?[{xPosition:8,yPosition:0,width:560,height:58,containerID:12,containerName:'input',content:style.input||' ',isEventCapture:0,paddingLength:0,textColor:1}]:[]),
-      {xPosition:8,yPosition:paired?(png?208:64):(png?156:0),width:560,height:paired?(png?42:186):(png?94:250),containerID:1,containerName:'body',content:(png?paginate(body,paired?1:3)[0]:body.slice(0,950))||' ',isEventCapture:1,paddingLength:0,textColor:style.bodyColor??4},
-      {xPosition:8,yPosition:254,width:560,height:34,containerID:11,containerName:'footer',content:footer||' ',isEventCapture:0,paddingLength:0,textColor:4},
-    ],...(png?{imageObject:[{xPosition:144,yPosition:paired?60:4,width:288,height:144,containerID:2,containerName:'image'}]}:{}),menuObject:{menuItems}};
-    await this.run(async b=>{
-      if(renderId!==this.serial)return;
-      if(this.layout!==kind){if(!await b.rebuildPageContainer(RebuildPageContainer.fromJson(page)))throw new Error('G2 display');this.layout=kind;this.invalidateImage();}
-      else{for(const t of page.textObject){
-        if(renderId!==this.serial)return;
-        if(!await b.textContainerUpgrade(TextContainerUpgrade.fromJson({containerID:t.containerID,containerName:t.containerName,content:t.content,contentOffset:0,contentLength:0,textColor:t.textColor})))throw new Error('G2 display');
-      }}
-      if(prepared)await this.sendImage(b,prepared.bytes,renderId,'image');
-    });
+  invalidateImage(): void { this.displayedImages.clear(); }
+  disconnect(): void {
+    this.invalidateRender();
+    this.off?.(); this.off = undefined;
+    this.ready = false; this.layout = '';
+    this.photo = undefined; this.avatar = undefined;
+    this.invalidateImage();
   }
-  private async sendImage(b:EvenAppBridge,bytes:Uint8Array,renderId:number,name:string):Promise<void>{
-    if(renderId!==this.serial||this.displayedImage===bytes)return;
-    // Native page acknowledgement can precede completion on the BLE link.
-    await new Promise(resolve=>setTimeout(resolve,500));
-    if(renderId!==this.serial)return;
-    const payload=ImageRawDataUpdate.fromJson({containerID:2,containerName:name,imageData:bytes});
-    let result=await b.updateImageRawData(payload);
-    if(ImageRawDataUpdateResult.isSendFailed(result)){
-      await new Promise(resolve=>setTimeout(resolve,500));
-      if(renderId!==this.serial)return;
-      result=await b.updateImageRawData(payload);
+
+  private async photoTiles(image: Attachment, height: number): Promise<GlassImageTile[]> {
+    if (!this.photo || this.photo.height !== height || !sameImage(this.photo.source, image)) {
+      this.photo = { source: image, height, tiles: this.photoConverter(image, { width: WIDTH, height }) };
     }
-    if(!ImageRawDataUpdateResult.isSuccess(result))throw new Error(`G2 image ${result}`);
-    this.displayedImage=bytes;
+    const entry = this.photo;
+    try { return await entry.tiles; }
+    catch (e) { if (this.photo === entry) this.photo = undefined; throw e; }
   }
-  async list(state:AppState,items:string[],footer='',menuItems:GlassMenuItem[]=[],header?:string,avatar?:Attachment):Promise<void>{
-    if(!this.ready)return;
-    const renderId=++this.serial;
-    const hasHeader=header!==undefined;
-    let prepared:typeof this.preparedAvatar;
-    if(avatar){
-      prepared=this.preparedAvatar;
-      if(!prepared||prepared.source.mime!==avatar.mime||prepared.source.data_base64!==avatar.data_base64){
-        const png=await this.imageConverter(avatar,{width:144,height:144});
-        prepared={source:avatar,png,bytes:imageBytes(png)};
-      }
+
+  private async avatarBytes(image: Attachment): Promise<Uint8Array> {
+    if (!this.avatar || !sameImage(this.avatar.source, image)) {
+      this.avatar = { source: image, bytes: this.avatarConverter(image, { width: AVATAR_SIZE, height: AVATAR_SIZE }).then(imageBytes) };
     }
-    if(renderId!==this.serial)return;
-    if(prepared)this.preparedAvatar=prepared;
-    const kind=`list:${hasHeader}:${Boolean(prepared)}:${state.settings.language}:${JSON.stringify([items,menuItems])}`;
-    const textObject=[
-      ...(hasHeader?[{xPosition:8,yPosition:0,width:560,height:34,containerID:13,containerName:'header',content:header||' ',isEventCapture:0,paddingLength:0,textColor:4}]:[]),
-      {xPosition:8,yPosition:254,width:560,height:34,containerID:11,containerName:'footer',content:footer||' ',isEventCapture:0,paddingLength:0,textColor:4},
-    ];
-    await this.run(async b=>{
-      if(renderId!==this.serial)return;
-      if(this.layout!==kind){
-        if(!await b.rebuildPageContainer(RebuildPageContainer.fromJson({containerTotalNum:(hasHeader?3:2)+(prepared?1:0),
-          listObject:[{xPosition:8,yPosition:hasHeader?40:0,width:prepared?400:560,height:hasHeader?210:250,containerID:3,containerName:'list',isEventCapture:1,
-            itemContainer:{itemCount:items.length,itemWidth:0,isItemSelectBorderEn:1,itemName:items.map(x=>x.slice(0,60))}}],
-          textObject,
-          ...(prepared?{imageObject:[{xPosition:424,yPosition:68,width:144,height:144,containerID:2,containerName:'avatar'}]}:{}),
-          menuObject:{menuItems}})))throw new Error('G2 menu');
-        // Commit only after native accepted the layout; an earlier render may still be in flight.
-        this.layout=kind;this.invalidateImage();
-      }else for(const t of textObject){
-        if(renderId!==this.serial)return;
-        if(!await b.textContainerUpgrade(TextContainerUpgrade.fromJson({containerID:t.containerID,containerName:t.containerName,content:t.content,contentOffset:0,contentLength:0,textColor:t.textColor})))throw new Error('G2 display');
+    const entry = this.avatar;
+    try { return await entry.bytes; }
+    catch (e) { if (this.avatar === entry) this.avatar = undefined; throw e; }
+  }
+
+  async show(state: AppState, body: string, footer = '', image?: Attachment, menuItems: GlassMenuItem[] = [], style: GlassTextStyle = {}): Promise<void> {
+    if (!this.ready) return;
+    const renderId = ++this.serial;
+    // Photos have their own page. The following text page carries the exchange and caption.
+    const { first, last, bodyHeight } = bands(footer, image ? undefined : style.input);
+    const text: ReturnType<typeof label>[] = [];
+    let bitmaps: GlassBitmap[] = [];
+    if (image) {
+      const tiles = await this.photoTiles(image, bodyHeight);
+      bitmaps = tiles.map((tile, i) => ({ ...tile, containerID: 2 + i, containerName: 'photo' + i }));
+      if (!last.height) text.push(label(1, 'body', 0, HEIGHT, ' ', true));
+    } else {
+      if (first.height) text.push(label(12, 'input', 0, first.height, first.content, false, 1));
+      text.push(label(1, 'body', first.height, bodyHeight, excerpt(body, lineBudget(bodyHeight)), true, style.bodyColor));
+    }
+    if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content, Boolean(image)));
+    await this.paint(renderId, state, menuItems, text, [], bitmaps);
+  }
+
+  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment): Promise<void> {
+    if (!this.ready) return;
+    const renderId = ++this.serial;
+    const { first, last, bodyHeight } = bands(footer, header);
+    const text: ReturnType<typeof label>[] = [];
+    if (first.height) text.push(label(13, 'header', 0, first.height, first.content));
+    if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content));
+    const width = WIDTH - (avatar ? AVATAR_SIZE : 0);
+    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
+      itemContainer: { itemCount: items.length, itemWidth: 0, isItemSelectBorderEn: 1,
+        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24)) } });
+    const bitmaps: GlassBitmap[] = avatar ? [{ x: width, y: first.height + Math.floor((bodyHeight - AVATAR_SIZE) / 2),
+      width: AVATAR_SIZE, height: AVATAR_SIZE, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
+    await this.paint(renderId, state, menuItems, text, [list], bitmaps);
+  }
+
+  private async paint(renderId: number, state: AppState, menuItems: GlassMenuItem[], textObject: ReturnType<typeof label>[],
+    listObject: ListContainerProperty[], bitmaps: GlassBitmap[]): Promise<void> {
+    if (renderId !== this.serial) return;
+    const imageObject = bitmaps.map(({ x, y, width, height, containerID, containerName }) =>
+      ({ xPosition: x, yPosition: y, width, height, containerID, containerName }));
+    const layout = JSON.stringify([state.settings.language, listObject, imageObject, menuItems,
+      textObject.map(t => [t.containerID, t.yPosition, t.height, t.isEventCapture])]);
+    await this.run(async bridge => {
+      if (renderId !== this.serial) return;
+      if (layout !== this.layout) {
+        const page = RebuildPageContainer.fromJson({ containerTotalNum: textObject.length + listObject.length + imageObject.length,
+          textObject, listObject, imageObject, menuObject: { menuItems } });
+        if (!await bridge.rebuildPageContainer(page)) throw new Error('G2 display');
+        this.layout = layout;
+        this.invalidateImage();
+      } else {
+        for (const t of textObject) {
+          if (renderId !== this.serial) return;
+          const upgrade = TextContainerUpgrade.fromJson({ containerID: t.containerID, containerName: t.containerName,
+            content: t.content, contentOffset: 0, contentLength: 0, textColor: t.textColor });
+          if (!await bridge.textContainerUpgrade(upgrade)) throw new Error('G2 display');
+        }
       }
-      if(prepared)await this.sendImage(b,prepared.bytes,renderId,'avatar');
-    });
+      const pending = bitmaps.filter(tile => this.displayedImages.get(tile.containerID) !== tile.bytes);
+      if (!pending.length || renderId !== this.serial) return;
+      // The page acknowledgement can precede BLE readiness. Send each tile in order.
+      await settleImage();
+      for (const { containerID, containerName, bytes } of pending) {
+        if (renderId !== this.serial) return;
+        const payload = ImageRawDataUpdate.fromJson({ containerID, containerName, imageData: bytes });
+        let result = await bridge.updateImageRawData(payload);
+        if (ImageRawDataUpdateResult.isSendFailed(result)) {
+          await settleImage();
+          if (renderId !== this.serial) return;
+          result = await bridge.updateImageRawData(payload);
+        }
+        if (!ImageRawDataUpdateResult.isSuccess(result)) throw new Error(`G2 image ${result}`);
+        if (renderId === this.serial) this.displayedImages.set(containerID, bytes);
+      }
+    }, 10000 * Math.max(1, bitmaps.length));
   }
 }

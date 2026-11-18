@@ -1,14 +1,14 @@
 {
   "name": "muse-relay",
   "private": true,
-  "version": "0.3.7",
+  "version": "0.3.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/core.test.ts tests/navigation.test.ts tests/images.test.ts && node --test tests/server.test.mjs adapters/gist/watcher.test.mjs server/cloudflare/worker.test.mjs",
+    "test": "tsx --test tests/core.test.ts tests/navigation.test.ts tests/images.test.ts tests/glass-text.test.ts && node --test tests/server.test.mjs adapters/gist/watcher.test.mjs server/cloudflare/worker.test.mjs",
     "relay:setup": "node server/setup.mjs",
     "relay:start": "node server/index.mjs",
     "pack": "node scripts/pack.mjs",
@@ -23,7 +23,8 @@
     "vite": "^8.3.6"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "0.0.16"
+    "@evenrealities/even_hub_sdk": "0.0.16",
+    "@evenrealities/pretext": "0.1.4"
   },
   "license": "MIT"
 }

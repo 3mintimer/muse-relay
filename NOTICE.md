@@ -5,6 +5,7 @@ Muse Relay の新規コードは [MIT](LICENSE) です。Even Realities、Meta�
 | 対象 | 使用範囲 | ライセンス / 資料 |
 | --- | --- | --- |
 | Even Hub SDK | グラス・マイク・画像・端末ストレージ | [MIT / npm](https://www.npmjs.com/package/@evenrealities/even_hub_sdk)。写しは `public/licenses/even-hub-sdk.txt`、EHPKにも同梱 |
+| @evenrealities/pretext | G2 の文字幅と改行位置の計測 | [MIT / npm](https://www.npmjs.com/package/@evenrealities/pretext)。同梱の通知は `public/licenses/even-pretext.txt` |
 | Muse Gadget SDK | ATOM S3 の接続・ペアリング・暗号化通信 | [Apache-2.0 / source](https://github.com/facebookincubator/muse-gadget-sdk)。写しは `firmware/SDK-LICENSE` |
 | G2Muse | Gist リレーの着想、公開メッセージ仕様の参照 | [公開資料](https://github.com/GenomiskDiagnostik/G2Muse)。コードの転載なし |
 | EvenG2-Muse-Hub-M5 | SDK 中継方式を調べる際の参照 | [MIT / source](https://github.com/GOB52/EvenG2-Muse-Hub-M5)。コードの転載なし |

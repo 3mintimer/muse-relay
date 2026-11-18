@@ -1,9 +1,12 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { getTextWidth } from '@evenrealities/pretext';
 import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import { createController } from '../src/core/controller.ts';
 import { defaults } from '../src/core/config.ts';
-import { Glasses } from '../src/core/glasses.ts';
+import { Glasses, glassBodyRows } from '../src/core/glasses.ts';
+import { G2_LINE_HEIGHT, lineBudget, wrapLines } from '../src/core/glass-text.ts';
+import { locales } from '../src/core/i18n.ts';
 import type { AppState, RelayRequest, Settings, Snapshot } from '../src/core/types.ts';
 
 function deferred<T>() {
@@ -58,6 +61,18 @@ function fakeDisplay() {
     async shutDownPageContainer() { return true; },
   };
   return { bridge, frames, operations, text, items, containers:()=>structuredClone(page.textObject||[]), emit: (event: unknown) => eventHandler?.(event as EvenHubEvent) };
+}
+
+function bodyGeometry(app:ReturnType<typeof fakeDisplay>){
+  const containers=app.containers(),body=containers.find((c:any)=>c.containerName==='body');
+  const input=containers.find((c:any)=>c.containerName==='input'),footer=containers.find((c:any)=>c.containerName==='footer');
+  assert.ok(body,'a text page has a body');
+  const rows=lineBudget(body.height,body);
+  assert.equal(rows,glassBodyRows(footer?.content||'',input?.content));
+  assert.ok(wrapLines(body.content,body.width).length<=rows,'every body line fits its actual container');
+  assert.equal(body.yPosition,input?.height||0);
+  assert.equal(body.height+(input?.height||0)+(footer?.height||0),288,'the body uses all remaining height');
+  return {body,input,footer,rows};
 }
 
 async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false, settings:Partial<Settings>={}) {
@@ -195,15 +210,21 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   const part=(name:string)=>app.containers().find((c:any)=>c.containerName===name);
   assert.equal(part('input').textColor,1);assert.equal(part('body').textColor,4);assert.equal(part('footer').textColor,4);
   assert.match(part('input').content,/あなた:.*質問/s);assert.match(part('input').content,/…$/);
-  assert.equal(part('input').content.split('\n').length,2);assert.ok(part('body').content.split('\n').length<=6);
+  assert.equal(wrapLines(part('input').content).length,2);assert.equal(part('input').height,2*G2_LINE_HEIGHT);
+  const longInputBodyHeight=bodyGeometry(app).body.height;
   assert.match(part('footer').content,/タップ: 次のページ · 2回: ホーム/);
-  const question=part('input').content,first=part('body').content;
-  app.emit({sysEvent:{}});await settle();assert.equal(part('input').content,question);assert.notEqual(part('body').content,first);
-  app.emit({sysEvent:{}});await settle();assert.doesNotMatch(part('footer').content,/次のページ/,'the final page must not advertise a nonexistent next page');
+  const question=part('input').content,first=part('body').content,total=Number(part('footer').content.match(/^\d+\/(\d+)/)![1]),read=[first];
+  for(let index=1;index<total;index++){
+    app.emit({sysEvent:{}});await settle();assert.equal(part('input').content,question);
+    read.push(bodyGeometry(app).body.content);
+  }
+  assert.equal(read.join('\n'),wrapLines(`Muse: ${snapshot.messages[1]!.text}`).join('\n'),'paging keeps every reply line');
+  assert.doesNotMatch(part('footer').content,/次のページ/,'the final page must not advertise a nonexistent next page');
   assert.match(part('footer').content,/2回タップ: ホーム/);
   app.emit({sysEvent:{}});await settle();assert.equal(part('body').content,first,'the existing final-page wrap is preserved');
   app.emit({textEvent:{eventType:1}});await settle();assert.match(part('body').content,/次の回答/);
   assert.equal(part('input').content,'あなた: 次の質問');
+  assert.equal(part('input').height,G2_LINE_HEIGHT);assert.ok(bodyGeometry(app).body.height>longInputBodyHeight);
   assert.doesNotMatch(part('footer').content,/次のページ/,'a one-page answer only shows the home gesture');
   app.overlay(11);await settle();assert.equal(app.controller.state.settings.chatLayout,'single');assert.equal(part('input'),undefined);
   app.emit({textEvent:{eventType:2}});await settle();assert.match(app.text(),/次の質問/);assert.equal(part('body').textColor,1);
@@ -212,6 +233,53 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   await app.controller.showMessage('reply');t.mock.timers.tick(5000);await settle();
   assert.equal(app.text().trim(),'');assert.equal(part('input'),undefined,'auto-hide removes both chat panes');
   await app.controller.restoreDisplay();assert.equal(part('input').textColor,1);assert.equal(part('body').textColor,4);
+});
+
+test('all display languages page the complete reply using the actual input and footer geometry',async t=>{
+  const snapshot=fixture(),reply=Array.from({length:96},(_,i)=>`Line ${String(i+1).padStart(3,'0')}`).join('\n');
+  snapshot.messages=[{id:'ask',from:'You',type:'text',text:'Short input',ts:1},
+    {id:'reply',from:'Muse',type:'text',text:reply,reply_to:'ask',ts:2}];
+  const app=await appFixture(t,snapshot);
+  for(const [index,locale] of locales.entries()){
+    const long=index%2===1;
+    app.controller.state.snapshot.messages.find(m=>m.id==='ask')!.text=long?'A longer input '.repeat(30):'Short input';
+    await app.controller.saveSettings({...app.controller.state.settings,language:locale.code});
+    await app.controller.showMessage('reply');
+    const first=bodyGeometry(app),total=Number(first.footer.content.match(/^\d+\/(\d+)/)![1]);
+    assert.equal(first.input.height,(long?2:1)*G2_LINE_HEIGHT,locale.code);
+    assert.ok(total>=10,'exercise two-digit page counts');
+    const read:string[]=[];
+    for(let page=0;page<total;page++){
+      const frame=bodyGeometry(app);read.push(frame.body.content);
+      assert.match(frame.footer.content,new RegExp(`^${page+1}/${total}(?: |\\n)`),locale.code);
+      assert.doesNotMatch(frame.body.content,/…$/,'body pagination must not summarize a page');
+      if(page<total-1){app.emit({sysEvent:{}});await settle();}
+    }
+    assert.equal(read.join('\n'),wrapLines(`Muse: ${reply}`).join('\n'),locale.code);
+  }
+});
+
+test('photo pages omit input and captions until the following chat or Space text page',async t=>{
+  const original=Glasses.prototype.show,photos:Array<{body:string;footer:string;style:unknown}>=[];
+  t.mock.method(Glasses.prototype,'show',async function(this:Glasses,...args:Parameters<Glasses['show']>){
+    if(args[3]){photos.push({body:args[1],footer:args[2]||'',style:args[5]});return;}
+    await original.apply(this,args);
+  });
+  const snapshot=fixture(),asset={mime:'image/png',name:'synthetic.png',data_base64:'c3ludGhldGlj'};
+  snapshot.messages=[{id:'ask',from:'You',type:'text',text:'画像の質問',ts:1},
+    {id:'reply',from:'Muse',type:'image',text:'画像の説明をここで読む',reply_to:'ask',ts:2}];
+  const app=await appFixture(t,snapshot);
+  app.controller.state.snapshot.messages.find(m=>m.id==='reply')!.image=asset;
+  await app.controller.showMessage('reply');
+  assert.equal(photos.length,1);assert.equal(photos[0]!.body,'');assert.equal(photos[0]!.style,undefined);
+  assert.match(photos[0]!.footer,/^1\/2/);
+  app.emit({sysEvent:{}});await settle();
+  let frame=bodyGeometry(app);assert.match(frame.body.content,/画像の説明をここで読む/);assert.match(frame.input.content,/画像の質問/);
+  app.controller.state.snapshot.spaces[0]!.items[0]!.image=asset;
+  await app.controller.showSpace('test-space');
+  assert.equal(photos.length,2);assert.equal(photos[1]!.body,'');assert.equal(photos[1]!.style,undefined);
+  app.emit({sysEvent:{}});await settle();
+  frame=bodyGeometry(app);assert.match(frame.body.content,/テストカードの本文/);assert.equal(frame.input,undefined);
 });
 
 test('space lists operate buttons, sliders and choices with explicit sends and local cancel',async t=>{
@@ -237,6 +305,23 @@ test('space lists operate buttons, sliders and choices with explicit sends and l
   app.setSend(async()=>new Response('{}'));app.emit({sysEvent:{}});
   await until(()=>app.controller.state.spaceAction?.status==='sent','retry accepted');
   assert.equal(app.sent[2]!.id,app.sent[3]!.id,'ambiguous failure retries the same id');
+});
+
+test('slider track fills the display at a constant width and Space rows keep useful Latin descriptions',async t=>{
+  const snapshot=interactiveFixture(),description='a b c d e f g h i j k l m n o p q r s t';
+  snapshot.spaces[0]!.items[0]!.title='A';snapshot.spaces[0]!.items[0]!.text=description;
+  snapshot.spaces[0]!.items[2]!.control={type:'slider',min:0,max:100,step:50,value:50};
+  const app=await appFixture(t,snapshot);await app.controller.showSpace('test-space');
+  assert.ok(app.items()[0]!.includes(description),'the controller does not cut the subtitle at 24 characters');
+  await app.controller.activateSpaceItem('test-space','slider');
+  const track=()=>bodyGeometry(app).body.content.match(/^\[-*O-*\]$/m)![0];
+  const middle=track();app.emit({textEvent:{eventType:2}});await settle();const min=track();
+  app.emit({textEvent:{eventType:1}});await settle();app.emit({textEvent:{eventType:1}});await settle();const max=track();
+  const widths=[min,middle,max].map(value=>getTextWidth(value));
+  assert.ok(widths[0]!>550&&widths[0]!<=576);assert.deepEqual(widths,[widths[0],widths[0],widths[0]]);
+  assert.equal(min.indexOf('O'),1);assert.equal(max.indexOf('O'),max.length-2);
+  assert.equal(middle.indexOf('O'),(middle.length-1)/2,'the middle value uses the middle cell');
+  assert.equal(app.sent.length,0,'moving the thumb does not send');
 });
 
 test('phone slider keeps the relay receipt when the glasses reject the result display',async t=>{
@@ -278,15 +363,43 @@ test('space microphone keeps its target and cancellation never sends',async t=>{
 });
 
 test('contextual list switching keeps the parent list and long confirmations require the final page',async t=>{
-  const snapshot=interactiveFixture();snapshot.spaces[0]!.items[1]!.control={type:'button',confirm:Array.from({length:10},(_,i)=>`確認 ${i+1}`).join('\n')};
+  const snapshot=interactiveFixture(),confirm=Array.from({length:10},(_,i)=>`確認 ${i+1}`).join('\n');
+  snapshot.spaces[0]!.items[1]!.control={type:'button',confirm};
   const app=await appFixture(t,snapshot);await app.controller.showSpace('test-space');
   app.overlay(8);await until(()=>app.text().includes('予定の本文'),'contextual card view');
   app.overlay(9);await until(()=>app.items().length===5,'contextual items list');
   app.emit({listEvent:{}});await until(()=>app.text().includes('予定の本文'),'open text');
   app.emit({sysEvent:{eventType:3}});await until(()=>app.items().length===5,'return to the actual parent list');
   app.emit({listEvent:{currentSelectItemIndex:1}});await until(()=>app.text().includes('確認 1'),'show confirmation');
-  assert.equal(app.sent.length,0);app.emit({sysEvent:{}});await until(()=>app.text().includes('確認 10'),'next confirmation page');assert.equal(app.sent.length,0);
+  const read=[bodyGeometry(app).body.content];
+  while(!bodyGeometry(app).footer.content.includes('タップ: 実行')){
+    assert.equal(app.sent.length,0);app.emit({sysEvent:{}});await settle();read.push(bodyGeometry(app).body.content);
+  }
+  assert.equal(read.join('\n'),wrapLines(`要約\n\n${confirm}`).join('\n'));
+  assert.equal(app.sent.length,0);
   app.emit({sysEvent:{}});await until(()=>app.sent.length===1,'final tap runs the button');
+});
+
+test('long control cards and slider titles remain readable before a tap can send',async t=>{
+  const snapshot=interactiveFixture(),card=Array.from({length:25},(_,i)=>`詳細 ${i+1}`).join('\n'),title=Array.from({length:12},(_,i)=>`Title${i+1}`).join('\n');
+  snapshot.spaces[0]!.items[1]!.text=card;snapshot.spaces[0]!.items[2]!.title=title;
+  const app=await appFixture(t,snapshot);await app.controller.showSpace('test-space','run');
+  const read=[bodyGeometry(app).body.content];
+  while(!bodyGeometry(app).footer.content.includes('タップ: 選択')){
+    assert.equal(app.sent.length,0);app.emit({sysEvent:{}});await settle();read.push(bodyGeometry(app).body.content);
+  }
+  assert.equal(read.join('\n'),wrapLines(`要約\n${card}\n\n実行`).join('\n'));
+  assert.equal(app.sent.length,0);app.emit({sysEvent:{}});await until(()=>app.sent.length===1&&!app.controller.state.busy,'card sends after its last page');
+  await app.controller.activateSpaceItem('test-space','slider');
+  const sliderRead=[bodyGeometry(app).body.content];
+  assert.ok(!bodyGeometry(app).footer.content.includes('タップ: 送信'),'a long title requires more than one page');
+  while(!bodyGeometry(app).footer.content.includes('タップ: 送信')){
+    assert.equal(app.sent.length,1);app.emit({sysEvent:{}});await settle();sliderRead.push(bodyGeometry(app).body.content);
+  }
+  const track=sliderRead.join('\n').match(/^\[-*O-*\]$/m)![0];
+  assert.equal(sliderRead.join('\n'),wrapLines(`${title}\n\n25 分\n${track}\n5 — 60\nスワイプ: 値を調整`).join('\n'));
+  assert.equal(app.sent.length,1);app.emit({sysEvent:{}});await until(()=>app.sent.length===2,'slider sends after its last page');
+  assert.deepEqual(app.sent[1]!.space_action,{item_id:'slider',type:'slider',value:25});
 });
 
 test('long space lists expose every item and reject a changed control before sending',async t=>{
@@ -358,6 +471,37 @@ test('space microphone filters audio before Soniox and keeps the selected item',
   await app.controller.toggleRecording();
   assert.equal(app.sent[0]!.text,'買い物メモ');assert.equal(app.sent[0]!.audio,undefined);
   assert.deepEqual(app.sent[0]!.space_action,{item_id:'mic',type:'microphone'});
+});
+
+test('live recording shows the latest recognized lines without rebuilding its layout',async t=>{
+  const original=globalThis.WebSocket;
+  let socket:Socket|undefined;
+  class Socket{
+    static OPEN=1;readyState=1;bufferedAmount=0;
+    onopen?:()=>void;onmessage?:(event:{data:string})=>void;onclose?:()=>void;
+    constructor(){socket=this;queueMicrotask(()=>this.onopen?.());}
+    send(){}
+    close(){this.readyState=3;this.onclose?.();}
+  }
+  globalThis.WebSocket=Socket as unknown as typeof WebSocket;t.after(()=>{globalThis.WebSocket=original;});
+  const app=await appFixture(t,fixture(),true),microphone:boolean[]=[];
+  app.bridge.audioControl=async(open=false)=>{microphone.push(open);return true;};
+  await app.controller.saveSettings({...app.controller.state.settings,voice:'soniox'});
+  await app.controller.toggleRecording();
+  const geometry=()=>app.containers().map((c:any)=>[c.containerName,c.xPosition,c.yPosition,c.width,c.height]);
+  const initial=geometry(),rebuilds=app.operations.filter(op=>op==='rebuild:text').length;
+  for(const length of [1,32,40]){
+    const transcript=Array.from({length},(_,i)=>`発話 ${i+1}`).join('\n');
+    socket!.onmessage?.({data:JSON.stringify({tokens:[{text:transcript,is_final:false}]})});
+    t.mock.timers.tick(400);await settle();
+    const frame=bodyGeometry(app);
+    assert.equal(frame.input,undefined);assert.match(frame.body.content,new RegExp(`発話 ${length}$`));
+    if(length>frame.rows)assert.doesNotMatch(frame.body.content,/(?:^|\n)発話 1(?:\n|$)/,'old lines scroll out rather than hiding new words');
+    assert.deepEqual(geometry(),initial);assert.equal(app.operations.filter(op=>op==='rebuild:text').length,rebuilds);
+    assert.deepEqual(microphone,[true],'transcript updates do not restart the microphone');
+  }
+  app.emit({sysEvent:{eventType:3}});await settle();
+  assert.equal(app.controller.state.recording,false);assert.deepEqual(microphone,[true,false]);assert.equal(app.sent.length,0);
 });
 
 test('display timeout keeps receiving in background and the first gesture only restores the prior screen',async t=>{

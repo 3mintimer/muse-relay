@@ -15,7 +15,7 @@ export function wav(pcm: Uint8Array[]): Uint8Array {
   let offset=44;for(const b of pcm){out.set(b,offset);offset+=b.byteLength;}return out;
 }
 
-export async function resizeImage(asset: Attachment, glasses=false, dimensions={width:288,height:144}): Promise<Attachment> {
+async function decodeImage(asset: Attachment): Promise<HTMLImageElement> {
   if (!['image/jpeg','image/png','image/webp'].includes(asset.mime) || asset.data_base64.length>30_000_000) throw new Error('Unsupported image');
   const img=new Image();
   // Load events also work in WebViews whose Image.decode() implementation rejects data URLs.
@@ -26,6 +26,18 @@ export async function resizeImage(asset: Attachment, glasses=false, dimensions={
     try{img.src=`data:${asset.mime};base64,${asset.data_base64}`;}catch{finish(new Error('Image decode'));}
   });
   if(!img.width||!img.height)throw new Error('Image decode');
+  return img;
+}
+
+function grayscale(ctx: CanvasRenderingContext2D, width:number, height:number): void {
+  const pixels=ctx.getImageData(0,0,width,height);
+  for(let i=0;i<pixels.data.length;i+=4){const gray=Math.round((pixels.data[i]!*0.299+pixels.data[i+1]!*0.587+pixels.data[i+2]!*0.114)/17)*17;
+    pixels.data[i]=pixels.data[i+1]=pixels.data[i+2]=gray;pixels.data[i+3]=255;}
+  ctx.putImageData(pixels,0,0);
+}
+
+export async function resizeImage(asset: Attachment, glasses=false, dimensions={width:288,height:144}): Promise<Attachment> {
+  const img=await decodeImage(asset);
   try{
   const maxW=glasses?dimensions.width:1024,maxH=glasses?dimensions.height:1024;
   const scale=Math.min(maxW/img.width,maxH/img.height,1);
@@ -35,11 +47,47 @@ export async function resizeImage(asset: Attachment, glasses=false, dimensions={
   ctx.fillStyle=glasses?'black':'white';ctx.fillRect(0,0,canvas.width,canvas.height);
   const width=Math.round(img.width*scale),height=Math.round(img.height*scale);
   ctx.drawImage(img,(canvas.width-width)/2,(canvas.height-height)/2,width,height);
-  if(glasses){const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
-    for(let i=0;i<pixels.data.length;i+=4){const gray=Math.round((pixels.data[i]!*0.299+pixels.data[i+1]!*0.587+pixels.data[i+2]!*0.114)/17)*17;
-      pixels.data[i]=pixels.data[i+1]=pixels.data[i+2]=gray;pixels.data[i+3]=255;}ctx.putImageData(pixels,0,0);}
+  if(glasses)grayscale(ctx,canvas.width,canvas.height);
   const mime=glasses?'image/png':'image/jpeg';
   return {mime,name:glasses?'glasses.png':'image.jpg',data_base64:canvas.toDataURL(mime,0.8).split(',')[1]!};
+  }catch{throw new Error('Image conversion');}
+}
+
+export interface GlassImageTile {
+  x:number;
+  y:number;
+  width:number;
+  height:number;
+  bytes:Uint8Array;
+}
+
+/** Fit one photo to the G2 viewport, then crop encoded PNGs in row-major order. */
+export async function glassImageTiles(asset: Attachment, viewport: {width:number;height:number}): Promise<GlassImageTile[]> {
+  const {width,height}=viewport;
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>576||height>288)throw new Error('Image conversion');
+  const img=await decodeImage(asset);
+  try{
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+    const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Image conversion');
+    ctx.fillStyle='black';ctx.fillRect(0,0,width,height);
+    // Photo viewing can enlarge small inputs; resizeImage keeps its no-upscale behavior.
+    const scale=Math.min(width/img.width,height/img.height);
+    const drawWidth=Math.max(1,Math.round(img.width*scale)),drawHeight=Math.max(1,Math.round(img.height*scale));
+    ctx.drawImage(img,(width-drawWidth)/2,(height-drawHeight)/2,drawWidth,drawHeight);
+    grayscale(ctx,width,height);
+    const columns=Math.ceil(width/288),rows=Math.ceil(height/144),tiles:GlassImageTile[]=[];
+    for(let row=0;row<rows;row++)for(let column=0;column<columns;column++){
+      // Balanced integer boundaries cover every pixel without a tiny final strip.
+      const x=Math.floor(column*width/columns),y=Math.floor(row*height/rows);
+      const tileWidth=Math.floor((column+1)*width/columns)-x,tileHeight=Math.floor((row+1)*height/rows)-y;
+      const tile=document.createElement('canvas');tile.width=tileWidth;tile.height=tileHeight;
+      const tileCtx=tile.getContext('2d');if(!tileCtx)throw new Error('Image conversion');
+      // Copy the final pixels rather than resampling individual tiles at their seams.
+      tileCtx.putImageData(ctx.getImageData(x,y,tileWidth,tileHeight),0,0);
+      const bytes=imageBytes({mime:'image/png',name:'glasses.png',data_base64:tile.toDataURL('image/png').split(',')[1]!});
+      tiles.push({x,y,width:tileWidth,height:tileHeight,bytes});
+    }
+    return tiles;
   }catch{throw new Error('Image conversion');}
 }
 
