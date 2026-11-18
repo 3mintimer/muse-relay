@@ -1,0 +1,16 @@
+menu "Muse Relay"
+    config MUSE_RELAY_COMPACT_NOISE
+        bool "Use bounded Noise buffers for a headless relay"
+        depends on !MUSE_ENABLED && !SPIRAM && !HOMEHUB_TUNNEL
+        default n
+        help
+            Receive standard 16 KiB chat frames with 17 KiB inbound scratch.
+            Smaller outbound buffers retain internal RAM for the HTTPS relay.
+
+    config MUSE_RELAY_ALLOW_HTTP
+        bool "Allow plain HTTP on a trusted private test network"
+        default n
+        help
+            Keep disabled for normal use. HTTPS validates the server certificate.
+            Enable only for a temporary local integration test without real secrets.
+endmenu

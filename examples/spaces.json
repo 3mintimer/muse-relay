@@ -1,0 +1,14 @@
+{
+  "spaces": [{
+    "id": "daily",
+    "title": "今日",
+    "layout": "list",
+    "items": [
+      {"id":"schedule","title":"予定","text":"10:00 打ち合わせ\n14:00 図書館"},
+      {"id":"summarize","title":"今日を要約","text":"予定とメモから要約を作成","control":{"type":"button","label":"要約する"}},
+      {"id":"focus","title":"集中時間","text":"次の集中時間を設定","control":{"type":"slider","min":5,"max":60,"step":5,"value":25,"unit":"分"}},
+      {"id":"detail","title":"要約の長さ","text":"","control":{"type":"choice","value":"short","options":[{"id":"short","title":"短く"},{"id":"full","title":"詳しく"}]}},
+      {"id":"note","title":"メモを追加","text":"話した内容をこのスペースに追加","control":{"type":"microphone"}}
+    ]
+  }]
+}

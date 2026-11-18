@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Muse Relay — 中継サーバー設定</title>
+<style>
+:root{color-scheme:light dark;--bg:#eee;--surface:#fff;--text:#232323;--muted:#595959;--input:#e4e4e4;--button:#232323;--on:#fff;--danger:#a12828}@media(prefers-color-scheme:dark){:root{--bg:#232323;--surface:#2e2e2e;--text:#eee;--muted:#bdbdbd;--input:#1c1c1c;--button:#eee;--on:#232323;--danger:#ffa9a9}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Kaku Gothic ProN',sans-serif}main{max-width:720px;margin:auto;padding:24px 16px 60px}h1{font-size:20px;font-weight:500;margin:0 0 24px}h2{font-size:17px;font-weight:500;margin:0 0 12px}.card{padding:20px;background:var(--surface);border-radius:8px;margin:16px 0}p,small{color:var(--muted)}p{font-size:14px}label{display:block;margin:16px 0 6px}input,textarea{display:block;width:100%;padding:12px;border:1px solid transparent;border-radius:6px;background:var(--input);color:var(--text);font:inherit}textarea{min-height:88px;resize:vertical}button{min-height:44px;padding:10px 16px;border:0;border-radius:6px;background:var(--button);color:var(--on);font:inherit;cursor:pointer}button.secondary{background:var(--input);color:var(--text)}button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--text);outline-offset:3px}.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:14px}.node{padding:12px;background:var(--input);border-radius:6px}.step{display:inline-grid;place-items:center;width:26px;height:26px;background:#fdf99e;color:#232323;border-radius:50%;margin-right:8px}.actions{display:flex;gap:8px;flex-wrap:wrap}#status{white-space:pre-wrap}#status.error{color:var(--danger)}[hidden]{display:none!important}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--input);font-size:13px;border-radius:6px}.exports{display:grid;grid-template-columns:1fr 1fr;gap:12px}.export{padding:16px;background:var(--input);border-radius:6px}.export h3{font-weight:500;font-size:16px;margin:0 0 8px}.export p{margin-top:0}@media(max-width:480px){.exports{grid-template-columns:1fr}.card{padding:16px}}
+</style>
+<main>
+<h1>Muse Relay — 中継サーバー設定</h1>
+<div class="flow" aria-label="G2からスマートフォン、HTTPS中継、自宅のATOM S3、Museの順に接続"><span class="node">G2 / スマートフォン</span><span aria-hidden="true">→</span><span class="node">HTTPS 中継</span><span aria-hidden="true">←</span><span class="node">自宅の ATOM S3</span><span aria-hidden="true">↔</span><span class="node">Muse</span></div>
+<form id="setup">
+<section class="card"><h2><span class="step">1</span>接続先</h2>
+<label for="url">公開 HTTPS URL</label><input id="url" type="url" placeholder="https://relay.example.com" required autocomplete="off">
+<p>この画面は設定ファイルを作成します。サーバーの公開は利用するホスティングで行います。</p>
+<label><input id="allow-even-local" type="checkbox" checked style="display:inline;width:auto"> Evenアプリのローカル接続を許可</label><p>起動時にポート番号が変わっても再設定は不要です。接続キーによる認証は必要です。</p>
+<label for="origins">追加の許可 Origin</label><textarea id="origins" placeholder="https://your-app-origin.example"></textarea><p>1行に1つ。Even WebView が Origin: null を送る場合だけ、null を追加します。</p>
+<details><summary>ホスティング認証（任意）</summary><label for="gateway">ホスティング用接続キー</label><input id="gateway" type="password" autocomplete="new-password" maxlength="1024" placeholder="未設定"><p>ホスティングから追加の接続キーを発行された場合に使います。各端末の接続設定へ含めます。</p><label><input id="clear-gateway" type="checkbox" style="display:inline;width:auto"> 保存済みホスティング用接続キーを削除する</label></details>
+</section>
+<section class="card"><h2><span class="step">2</span>音声</h2><p>Muse の音声処理は追加設定なし。Soniox のリアルタイム文字起こしを使う場合のみ入力します。</p>
+<label for="soniox">Soniox サーバー API キー（任意）</label><input id="soniox" type="password" autocomplete="new-password" placeholder="未設定"><p>このMacの設定ファイルへ保存します。アプリへ渡すのは短時間だけ有効なキーです。</p><label><input id="clear-soniox" type="checkbox" style="display:inline;width:auto"> 保存済み Soniox キーを削除する</label>
+</section>
+<section class="card"><h2><span class="step">3</span>保存</h2><p>スマートフォン・ATOM S3・Muse用に別々の接続キーを生成します。保存済みのキーは維持します。</p><button type="submit">設定を保存</button></section>
+</form>
+<p id="status" role="status" aria-live="polite"></p>
+<section id="exports" class="card" hidden><h2><span class="step">4</span>接続する</h2><div class="exports">
+<div class="export"><h3>スマートフォン</h3><p>Muse Relay の「接続設定を読み込む」へ貼り付けます。</p><button data-copy="phone">設定をコピー</button></div>
+<div class="export"><h3>ATOM S3</h3><p>ファームウェアのローカル設定に入力します。</p><button data-copy="device">設定をコピー</button></div>
+<div class="export"><h3>Muse</h3><p>返信・画像・スペースの更新用。Muse の安全な資格情報設定で使います。</p><button data-copy="muse">設定をコピー</button></div>
+<div class="export"><h3>中継サーバー</h3><p>ホスト側で使用する秘密設定ファイルです。Gitへ追加しません。</p><button id="download">設定ファイルを保存</button></div>
+</div><p>接続キーをチャットや公開リポジトリへ貼り付けないでください。</p><button id="check" class="secondary">ローカルサーバーの起動手順</button><pre id="command" hidden>node server/index.mjs
+
+公開HTTPSの手順: docs/server.md</pre></section>
+</main>
+<script>
+const csrf='__CSRF__';const $=id=>document.getElementById(id);const status=(text,error=false)=>{$('status').textContent=text;$('status').classList.toggle('error',error)};
+async function call(path,options={}){const response=await fetch(path,{...options,headers:{'x-setup-token':csrf,'content-type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(data.error);return data}
+call('/config').then(config=>{$('url').value=config.publicUrl;$('allow-even-local').checked=config.allowedOrigins.includes('http://127.0.0.1:*')||!config.configured;$('origins').value=config.allowedOrigins.filter(origin=>origin!=='http://127.0.0.1:*').join('\n');$('soniox').placeholder=config.sonioxConfigured?'保存済み（変更する場合だけ入力）':'未設定';$('gateway').placeholder=config.gatewayConfigured?'保存済み（変更する場合だけ入力）':'未設定';$('exports').hidden=!config.configured}).catch(error=>status(error.message,true));
+$('setup').addEventListener('submit',async event=>{event.preventDefault();try{const result=await call('/configure',{method:'POST',body:JSON.stringify({publicUrl:$('url').value,allowedOrigins:$('origins').value,allowEvenLocal:$('allow-even-local').checked,sonioxApiKey:$('soniox').value,clearSoniox:$('clear-soniox').checked,gatewayToken:$('gateway').value,clearGateway:$('clear-gateway').checked})});$('soniox').value='';$('gateway').value='';$('clear-soniox').checked=false;$('clear-gateway').checked=false;const saved=await call('/config');$('soniox').placeholder=saved.sonioxConfigured?'保存済み（変更する場合だけ入力）':'未設定';$('gateway').placeholder=saved.gatewayConfigured?'保存済み（変更する場合だけ入力）':'未設定';$('exports').hidden=false;status('保存しました。接続先ごとの設定を下からコピーできます。')}catch(error){status(error.message,true)}});
+for(const button of document.querySelectorAll('[data-copy]'))button.addEventListener('click',async()=>{try{const data=await call('/export');await navigator.clipboard.writeText(JSON.stringify(data[button.dataset.copy],null,2));status('コピーしました。対象の設定画面へ貼り付けてください。')}catch(error){status(error.message,true)}});
+$('download').addEventListener('click',async()=>{try{const data=await call('/export');const blob=new Blob([JSON.stringify(data.server,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='relay-config.private.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('秘密設定ファイルを保存しました。サーバーの .local/relay-config.json に配置してください。')}catch(error){status(error.message,true)}});
+$('check').addEventListener('click',()=>{$('command').hidden=!$('command').hidden});
+</script></html>

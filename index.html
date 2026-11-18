@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ja" data-even-theme="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Muse Relay</title>
+    <script>
+      try {
+        const theme = localStorage.getItem('muse-relay-theme');
+        if (['system', 'light', 'dark'].includes(theme)) document.documentElement.dataset.evenTheme = theme;
+      } catch { /* Storage may be unavailable in a WebView. */ }
+    </script>
+  </head>
+  <body class="even-ui">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,33 @@
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      PUBLIC_URL: https://${RELAY_HOST:?Set RELAY_HOST to your server domain}
+      RELAY_STATE_FILE: /data/relay-state.json
+    volumes:
+      - ../.local/relay-config.json:/app/.local/relay-config.json:ro
+      - relay-data:/data
+    # Intentionally not published. Caddy is the external entry point.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      RELAY_HOST: ${RELAY_HOST:?Set RELAY_HOST to your server domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - relay
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:

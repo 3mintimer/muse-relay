@@ -1,0 +1,155 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "22b97f67-3eb9-48cb-b175-22f36d43a292",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "feedback_limits": {
+      "name": "feedback_limits",
+      "columns": {
+        "bucket": {
+          "name": "bucket",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "feedback_limits_expiry": {
+          "name": "feedback_limits_expiry",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "feedback_receipts": {
+      "name": "feedback_receipts",
+      "columns": {
+        "receipt": {
+          "name": "receipt",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "share": {
+          "name": "share",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'new'"
+        },
+        "issue_url": {
+          "name": "issue_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "feedback_receipts_created": {
+          "name": "feedback_receipts_created",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "feedback_receipts_status_created": {
+          "name": "feedback_receipts_status_created",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "feedback_kind": {
+          "name": "feedback_kind",
+          "value": "\"feedback_receipts\".\"kind\" IN ('idea', 'problem', 'question')"
+        },
+        "feedback_share": {
+          "name": "feedback_share",
+          "value": "\"feedback_receipts\".\"share\" IN (0, 1)"
+        },
+        "feedback_message_length": {
+          "name": "feedback_message_length",
+          "value": "length(\"feedback_receipts\".\"message\") BETWEEN 10 AND 4000"
+        },
+        "feedback_status": {
+          "name": "feedback_status",
+          "value": "\"feedback_receipts\".\"status\" IN ('new', 'reviewed', 'issue', 'closed')"
+        },
+        "feedback_issue_consent": {
+          "name": "feedback_issue_consent",
+          "value": "\"feedback_receipts\".\"issue_url\" IS NULL OR \"feedback_receipts\".\"share\" = 1"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

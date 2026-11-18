@@ -1,0 +1,41 @@
+{
+  "package_id": "com.threemintimer.muserelay",
+  "edition": "202601",
+  "name": "Muse Relay",
+  "version": "0.3.5",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connect to your configured relay and optionally Soniox for live transcription."
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Record a voice message from your G2 when you start recording."
+    },
+    {
+      "name": "phone-microphone",
+      "desc": "Record from your phone when selected as the microphone."
+    },
+    {
+      "name": "album",
+      "desc": "Attach a photo you select when images are enabled."
+    },
+    {
+      "name": "camera",
+      "desc": "Attach a photo from your phone camera when images are enabled."
+    }
+  ],
+  "supported_languages": [
+    "en",
+    "zh",
+    "ja",
+    "es",
+    "fr",
+    "de",
+    "it",
+    "ko"
+  ]
+}

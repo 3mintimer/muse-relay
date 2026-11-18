@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>Muse Relay — ATOM S3 設定</title>
+  <link rel="stylesheet" href="setup.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+<main>
+  <header><h1>ATOM S3 設定</h1><span>Muse Relay</span></header>
+  <p>ファームウェアを書き込んだ ATOM S3 を USB で接続します。Chrome または Edge のデスクトップ版で開いてください。</p>
+  <section aria-labelledby="connection-heading">
+    <h2 id="connection-heading">USB 接続</h2>
+    <div class="actions"><button id="connect" type="button">機器を選ぶ</button><button id="disconnect" type="button" class="secondary" disabled>切断</button></div>
+    <p id="connection" role="status">未接続</p>
+  </section>
+  <form id="settings">
+    <section aria-labelledby="relay-heading">
+      <h2 id="relay-heading">中継サーバー</h2>
+      <label>設定ファイル<input id="config-file" type="file" accept=".json,application/json"></label>
+      <p class="hint">サーバーの設定画面で書き出した機器用 JSON を読み込めます。</p>
+      <label>HTTPS URL<input id="relay-url" type="url" autocomplete="off" placeholder="https://relay.example.com"></label>
+      <label>機器用トークン<input id="relay-token" type="password" autocomplete="new-password" spellcheck="false"></label>
+      <p class="hint">アプリ用トークンとは別の機器用トークンを設定します。</p>
+      <details>
+        <summary>追加のサーバー認証（任意）</summary>
+        <label>追加の認証トークン<input id="gateway-token" type="password" maxlength="1024" autocomplete="new-password" spellcheck="false"></label>
+        <p class="hint">サーバーが追加認証を求める場合だけ入力します。空欄なら現在の設定を変更しません。</p>
+        <label><input id="clear-gateway" type="checkbox">保存済みの追加認証を解除する</label>
+      </details>
+    </section>
+    <section aria-labelledby="sdk-heading">
+      <h2 id="sdk-heading">Muse Gadget SDK</h2>
+      <label>SDK トークン<input id="sdk-token" type="password" autocomplete="new-password" spellcheck="false"></label>
+      <p class="hint">初回または変更時だけ入力します。保存すると機器が再起動します。</p>
+    </section>
+    <button id="save" type="submit" disabled>機器に保存</button>
+    <button id="status" type="button" class="secondary" disabled>接続状態を確認</button>
+    <p id="result" role="status" aria-live="polite"></p>
+  </form>
+  <p class="hint">この画面はトークンを USB で機器に渡します。ブラウザーの保存領域やサーバーには送信しません。中継設定だけを変更した場合は、保存後に USB 電源を入れ直します。</p>
+  <p class="hint">Muse アプリの Devices でペアリングし、家庭の Wi-Fi を指定します。確認を求められたら ATOM S3 前面のボタンを短く押します。</p>
+</main>
+</body>
+</html>
