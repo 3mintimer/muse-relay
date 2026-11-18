@@ -36,6 +36,12 @@ export function chatText(message:Message):string{
   return message.text.replace(/\s*\[file:audio\/[^\]\r\n]*\]/g,'').trim().replace(/^\[Voice note\]$/i,'');
 }
 
+/** Relay status rows and audio without a transcript are not a visible Muse answer. */
+export function displayableMuseReply(message:Message,images:boolean):boolean{
+  return message.from==='Muse'&&!message.id.startsWith('status_')
+    &&Boolean(chatText(message).trim()||(images&&(message.image?.data_base64||message.image_file)));
+}
+
 /** A paired input is already visible with its reply; swiping must not show it twice. */
 export function chatEntries(messages:readonly Message[],options:{legacy?:boolean}={}):Message[]{
   return messages.filter(message=>{

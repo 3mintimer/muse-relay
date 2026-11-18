@@ -11,7 +11,7 @@ import { decodeSavedState, LOCAL_STATE_KEY, StateStorage, type SavedState } from
 import { resolveLocale, speechLanguage } from '../src/core/i18n.ts';
 import { ReplyPoll } from '../src/core/reply-poll.ts';
 import {parseSpaceControl} from '../protocol/space-controls.mjs';
-import { chatEntries, chatExchange, chatText } from '../src/core/chat.ts';
+import { chatEntries, chatExchange, chatText, displayableMuseReply } from '../src/core/chat.ts';
 import type { Message, Settings } from '../src/core/types.ts';
 import type { EvenAppBridge } from '@evenrealities/even_hub_sdk';
 
@@ -35,6 +35,13 @@ test('chat pairs explicit replies and voice transcripts without borrowing unrela
   assert.equal(chatExchange(sameTime,'answer-a')?.input.text,'最初に話した内容','an explicit transcript alias beats an appended local placeholder');
   assert.equal(chatText({...messages[0]!,text:'話した内容\n[file:audio/wav abc]'}),'話した内容');
   assert.equal(chatText(messages[0]!), '');
+  assert.equal(displayableMuseReply(messages[2]!,false),true);
+  assert.equal(displayableMuseReply({...messages[2]!,from:'Relay'},true),false);
+  assert.equal(displayableMuseReply({...messages[2]!,from:'You'},true),false);
+  assert.equal(displayableMuseReply({...messages[2]!,id:'status_a'},true),false);
+  assert.equal(displayableMuseReply({...messages[0]!,from:'Muse'},true),false);
+  const image:Message={id:'image',from:'Muse',type:'image',text:'',image_file:'answer.png',ts:5};
+  assert.equal(displayableMuseReply(image,false),false);assert.equal(displayableMuseReply(image,true),true);
 });
 
 test('space exports preserve declarative controls and disable invalid or unknown widgets',()=>{

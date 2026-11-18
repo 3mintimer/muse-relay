@@ -4,7 +4,7 @@ import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import { createController } from '../src/core/controller.ts';
 import { defaults } from '../src/core/config.ts';
 import { Glasses } from '../src/core/glasses.ts';
-import type { AppState, RelayRequest, Snapshot } from '../src/core/types.ts';
+import type { AppState, RelayRequest, Settings, Snapshot } from '../src/core/types.ts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (reason?: unknown) => void;
@@ -60,10 +60,10 @@ function fakeDisplay() {
   return { bridge, frames, operations, text, items, containers:()=>structuredClone(page.textObject||[]), emit: (event: unknown) => eventHandler?.(event as EvenHubEvent) };
 }
 
-async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false) {
+async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false, settings:Partial<Settings>={}) {
   const display = fakeDisplay();
   const saved = JSON.stringify({ settings: { ...defaults, language: 'ja', relay: 'gadget', relayUrl: 'https://relay.example.test',
-    relayToken: 'synthetic-navigation-test', configured: true, pollSeconds: 300, images: true }, snapshot,
+    relayToken: 'synthetic-navigation-test', configured: true, pollSeconds: 300, images: true,...settings }, snapshot,
     readIds: [], hiddenIds: [], selectedSpaceIds: ['test-space'] });
   display.bridge.getLocalStorage = async () => saved;
   const windowTarget = Object.assign(new EventTarget(), { flutter_inappwebview: {} });
@@ -86,6 +86,15 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
   install('window', windowTarget); install('document', documentTarget);
   install('localStorage', memory()); install('sessionStorage', memory());
   install('fetch', async (input: string | URL | Request, options: RequestInit = {}) => {
+    if(String(input)==='https://api.github.com/gists/0123456789abcdef0123456789abcdef'){
+      if(options.method==='PATCH'){
+        const files=JSON.parse(String(options.body)).files;
+        const name=Object.keys(files).find(name=>name.startsWith('muse-relay-request-'))!;
+        sent.push(JSON.parse(files[name].content));return nextSend();
+      }
+      requests.push(options);const result=await nextRead(options);
+      return result.ok?Response.json({files:{'g2muse-relay.json':{content:JSON.stringify(await result.json())}}}):result;
+    }
     if(String(input)==='https://relay.example.test/v1/soniox-token')return Response.json({api_key:'snx_temp_synthetic'});
     if(String(input)==='https://relay.example.test/v1/requests'){sent.push(JSON.parse(String(options.body)));return nextSend();}
     if(String(input).startsWith('https://relay.example.test/v1/files/')){attachmentReads++;return readAttachment();}
@@ -187,10 +196,15 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   assert.equal(part('input').textColor,1);assert.equal(part('body').textColor,4);assert.equal(part('footer').textColor,4);
   assert.match(part('input').content,/あなた:.*質問/s);assert.match(part('input').content,/…$/);
   assert.equal(part('input').content.split('\n').length,2);assert.ok(part('body').content.split('\n').length<=6);
+  assert.match(part('footer').content,/タップ: 次のページ · 2回: ホーム/);
   const question=part('input').content,first=part('body').content;
   app.emit({sysEvent:{}});await settle();assert.equal(part('input').content,question);assert.notEqual(part('body').content,first);
+  app.emit({sysEvent:{}});await settle();assert.doesNotMatch(part('footer').content,/次のページ/,'the final page must not advertise a nonexistent next page');
+  assert.match(part('footer').content,/2回タップ: ホーム/);
+  app.emit({sysEvent:{}});await settle();assert.equal(part('body').content,first,'the existing final-page wrap is preserved');
   app.emit({textEvent:{eventType:1}});await settle();assert.match(part('body').content,/次の回答/);
   assert.equal(part('input').content,'あなた: 次の質問');
+  assert.doesNotMatch(part('footer').content,/次のページ/,'a one-page answer only shows the home gesture');
   app.overlay(11);await settle();assert.equal(app.controller.state.settings.chatLayout,'single');assert.equal(part('input'),undefined);
   app.emit({textEvent:{eventType:2}});await settle();assert.match(app.text(),/次の質問/);assert.equal(part('body').textColor,1);
   await app.controller.showSpace('test-space');assert.equal(part('body').textColor,4,'brightness must reset when a dim container is reused for UI');
@@ -377,7 +391,7 @@ test('display timeout keeps receiving in background and the first gesture only r
   t.mock.timers.tick(30000);await settle();assert.equal(app.text(),secondPage);
 });
 
-test('holding while hidden wakes into chat recording and replies stay hidden until an explicit wake',async t=>{
+test('holding while hidden records chat and its reply wakes the timed-out display once',async t=>{
   const snapshot=interactiveFixture(),app=await appFixture(t,snapshot,true),mic:boolean[]=[];
   app.bridge.audioControl=async(open=false)=>{mic.push(open);return true;};
   await app.controller.saveSettings({...app.controller.state.settings,autoHideSeconds:5});
@@ -395,14 +409,95 @@ test('holding while hidden wakes into chat recording and replies stay hidden unt
   assert.equal(app.text().trim(),'');
   snapshot.messages.push({id:'voice-reply',reply_to:app.sent[0]!.id,from:'Muse',type:'text',text:'音声への返信',ts:30});
   t.mock.timers.tick(1000);await settle();
-  assert.equal(app.controller.state.selectedMessageId,'voice-reply');assert.equal(app.text().trim(),'');
-  assert.ok(!app.controller.state.readIds.includes('voice-reply'));
-  app.emit({sysEvent:{eventType:3,eventSource:1}});await settle();
-  assert.match(app.text(),/音声への返信/,'double-tap wakes without leaving the chat');
+  assert.equal(app.controller.state.selectedMessageId,'voice-reply');assert.equal(app.controller.state.displaySleeping,false);
+  assert.match(app.text(),/音声への返信/,'the explicitly linked Muse answer restores the waiting chat');
   assert.ok(app.controller.state.readIds.includes('voice-reply'));
-  t.mock.timers.tick(5000);await settle();await app.controller.restoreDisplay();assert.match(app.text(),/音声への返信/);
+  t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
+  snapshot.messages[0]!.text+=' 追加';await app.controller.refresh();assert.equal(app.text().trim(),'','streaming the same answer cannot wake twice');
+  await app.controller.restoreDisplay();assert.match(app.text(),/音声への返信/);
   app.emit({sysEvent:{eventType:7}});const frames=app.frames.length;t.mock.timers.tick(30000);await settle();
   assert.equal(app.frames.length,frames,'system exit clears the display timeout');
+});
+
+test('Gist replies wake each outstanding chat once and ignore history, status, echoes and empty updates',async t=>{
+  const snapshot=fixture(),app=await appFixture(t,snapshot,true,{relay:'gist',
+    gistId:'0123456789abcdef0123456789abcdef',githubToken:'synthetic-navigation-test',autoHideSeconds:5});
+  await app.controller.sendText('最初の依頼');await app.controller.sendText('次の依頼');
+  const [first,second]=app.sent;
+  t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
+  snapshot.messages[0]!.reply_to=first!.id;snapshot.messages[0]!.text='前からある履歴の更新';
+  snapshot.messages.push(
+    {id:'accepted',reply_to:first!.id,from:'Relay',type:'text',text:'Accepted by relay',ts:20},
+    {id:'status_processing',reply_to:second!.id,from:'Muse',type:'text',text:'Processing',ts:21},
+    {id:'echo',reply_to:second!.id,from:'You',type:'text',text:'文字起こし',ts:22},
+    {id:'unrelated',reply_to:'different-request',from:'Muse',type:'text',text:'別の会話',ts:23},
+    {id:'legacy',from:'Muse',type:'text',text:'返信先のない投稿',ts:24},
+    {id:'first-answer',reply_to:first!.id,from:'Muse',type:'text',text:' ',ts:25});
+  await app.controller.refresh();assert.equal(app.text().trim(),'');
+  snapshot.messages.at(-1)!.text='最初の回答';await app.controller.refresh();
+  assert.match(app.text(),/最初の回答/,'an existing empty stream row becoming readable is a new answer');
+  assert.equal(app.controller.state.selectedMessageId,'first-answer','an older outstanding send is still correlated');
+  t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
+  snapshot.messages.at(-1)!.text+=' 追記';await app.controller.refresh();assert.equal(app.text().trim(),'');
+  snapshot.messages.push({id:'second-answer',reply_to:second!.id,from:'Muse',type:'text',text:'次の回答',ts:26});
+  await app.controller.refresh();assert.match(app.text(),/次の回答/);
+  t.mock.timers.tick(5000);await settle();await app.controller.refresh();assert.equal(app.text().trim(),'');
+  await app.controller.saveSettings({...app.controller.state.settings,images:false});
+  await app.controller.sendText('画像の回答');t.mock.timers.tick(5000);await settle();
+  snapshot.messages.push({id:'image-answer',reply_to:app.sent.at(-1)!.id,from:'Muse',type:'image',text:'',image_file:'synthetic.png',ts:27});
+  await app.controller.refresh();assert.equal(app.text().trim(),'','disabled images are not a displayable answer');
+  await app.controller.saveSettings({...app.controller.state.settings,images:true});
+  await app.controller.refresh();assert.equal(app.text().trim(),'','enabling images is not a newly received answer');
+  await app.controller.saveSettings({...app.controller.state.settings,images:false});
+  snapshot.messages.at(-1)!.text='画像の説明';await app.controller.refresh();assert.match(app.text(),/画像の説明/);
+});
+
+test('read or hidden answers, recording, failed sends and exit cannot trigger a delayed reply wake',async t=>{
+  const snapshot=fixture(),app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
+  const sendAndHide=async(text:string)=>{
+    await app.controller.sendText(text);t.mock.timers.tick(5000);await settle();
+    assert.equal(app.text().trim(),'');return app.sent.at(-1)!.id;
+  };
+  const readId=await sendAndHide('端末で既読にする');
+  snapshot.messages.push({id:'read-answer',reply_to:readId,from:'Muse',type:'text',text:'',ts:20});
+  await app.controller.refresh();await app.controller.markRead(['read-answer']);
+  snapshot.messages.at(-1)!.text='既読の回答';await app.controller.refresh();assert.equal(app.text().trim(),'');
+  const hiddenId=await sendAndHide('手動で隠す');await app.controller.hideMessage(hiddenId);
+  snapshot.messages.push({id:'hidden-answer',reply_to:hiddenId,from:'Muse',type:'text',text:'隠した依頼への回答',ts:30});
+  await app.controller.refresh();assert.equal(app.text().trim(),'');
+  const recordingId=await sendAndHide('録音中に受信');await app.controller.toggleRecording();
+  snapshot.messages.push({id:'recording-answer',reply_to:recordingId,from:'Muse',type:'text',text:'録音中の回答',ts:40});
+  await app.controller.refresh();assert.equal(app.controller.state.recording,true);assert.match(app.text(),/録音中/);
+  assert.ok(!app.controller.state.readIds.includes('recording-answer'));
+  await app.controller.cancelRecording();t.mock.timers.tick(5000);await settle();
+  snapshot.messages.at(-1)!.text+=' 追記';await app.controller.refresh();assert.equal(app.text().trim(),'');
+  app.setSend(async()=>new Response('{}',{status:503}));
+  await assert.rejects(app.controller.sendText('失敗した依頼'),/HTTP 503/);
+  snapshot.messages.push({id:'failed-answer',reply_to:app.sent.at(-1)!.id,from:'Muse',type:'text',text:'未受理の依頼への行',ts:50});
+  await app.controller.refresh();assert.equal(app.text().trim(),'');
+  app.setSend(async()=>new Response('{}'));const exitingId=await sendAndHide('終了後に受信');
+  const pending=deferred<Response>();app.setRead(()=>pending.promise);const reading=app.controller.refresh();
+  app.emit({sysEvent:{eventType:7}});const frames=app.frames.length;
+  snapshot.messages.push({id:'exit-answer',reply_to:exitingId,from:'Muse',type:'text',text:'終了後の回答',ts:60});
+  pending.resolve(response(snapshot));await reading;assert.equal(app.frames.length,frames);
+});
+
+test('reply wake supersedes a queued blank frame and starts its timeout after the answer render',async t=>{
+  const snapshot=fixture(),app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
+  await app.controller.sendText('表示待ちの依頼');
+  const blank=deferred<void>(),rebuild=app.bridge.rebuildPageContainer;let delayed=false;
+  app.bridge.rebuildPageContainer=async value=>{
+    if(!delayed&&value.textObject?.every((item:any)=>!item.content?.trim())){delayed=true;await blank.promise;}
+    return rebuild(value);
+  };
+  t.mock.timers.tick(5000);await settle();assert.equal(delayed,true);
+  snapshot.messages.push({id:'queued-answer',reply_to:app.sent[0]!.id,from:'Muse',type:'text',text:'描画後にタイマー開始',ts:30});
+  const reading=app.controller.refresh();await settle();
+  t.mock.timers.tick(6000);await settle();assert.equal(app.controller.state.displaySleeping,false);
+  blank.resolve();await reading;assert.match(app.text(),/描画後にタイマー開始/);
+  assert.ok(!app.operations.includes('upgrade:missing'));
+  t.mock.timers.tick(4999);await settle();assert.equal(app.controller.state.displaySleeping,false);
+  t.mock.timers.tick(1);await settle();assert.equal(app.text().trim(),'');
 });
 
 test('successful chat sends return to chat with an opt-out and failed sends never navigate or invite a duplicate retry',async t=>{

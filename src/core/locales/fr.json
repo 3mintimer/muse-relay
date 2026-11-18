@@ -68,6 +68,7 @@
   "Double-tap: back": "Double appui : retour",
   "Double-tap: cancel": "Double appui : annuler",
   "Double-tap: home": "Double appui : accueil",
+  "Tap: next page · Double-tap: home": "Appui : suite · Double : accueil",
   "Double-tap: spaces": "Double appui : espaces",
   "Enable images": "Activer les images",
   "Enter the endpoint and access token.": "Saisissez l’adresse du service et le jeton d’accès.",
