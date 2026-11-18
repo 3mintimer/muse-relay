@@ -311,6 +311,41 @@ test('Soniox connection check rejects an authentication error after the socket o
   finally {globalThis.WebSocket=oldSocket;}
 });
 
+test('Soniox drains recorded audio at its PCM pace and queues newer audio behind it',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const sent:Array<{value:string|ArrayBuffer;time:number}>=[];
+  let socket:Socket|undefined;
+  class Socket {
+    static OPEN=1;
+    readyState=0;bufferedAmount=0;
+    onopen?:()=>void;
+    onmessage?:(event:{data:string})=>void;
+    onclose?:()=>void;
+    constructor(){socket=this;}
+    open(){this.readyState=1;this.onopen?.();}
+    send(value:string|ArrayBuffer){
+      sent.push({value,time:Date.now()});
+      if(value==='')this.onmessage?.({data:'{"finished":true}'});
+    }
+    close(){this.readyState=3;this.onclose?.();}
+  }
+  const prior=globalThis.WebSocket;
+  globalThis.WebSocket=Socket as unknown as typeof WebSocket;
+  const stream=new SonioxStream(()=>{},()=>{});
+  try{
+    const opening=stream.start({...defaults,sonioxAuth:'api-key',sonioxApiKey:'synthetic-direct'});
+    stream.push(new Uint8Array(6400).fill(1));
+    assert.equal(sent.length,0);
+    socket!.open();await opening;
+    stream.push(new Uint8Array(3200).fill(2));
+    const finishing=stream.finish();
+    assert.equal(sent.length,2,'only the configuration and first 100 ms of audio are sent immediately');
+    for(let i=0;i<3;i++){t.mock.timers.tick(100);await new Promise<void>(resolve=>setImmediate(resolve));}
+    await finishing;
+    assert.deepEqual(sent.slice(1).map(({value,time})=>[typeof value==='string'?value:new Uint8Array(value)[0],time]),[[1,0],[1,100],[2,200],['',300]]);
+  }finally{stream.cancel();globalThis.WebSocket=prior;}
+});
+
 test('Muse requests follow the selected voice route, keep credentials private and separate optional work',async()=>{
   const {museSetupPrompt,spacePrompt,avatarPrompt}=await import('../src/ui/prompts.ts');
   for(const relay of ['gist','gadget'] as const)for(const voice of ['muse','soniox'] as const)for(const sonioxAuth of ['api-key','token-server'] as const){
@@ -323,6 +358,13 @@ test('Muse requests follow the selected voice route, keep credentials private an
       assert.match(space,/do not transcribe it again/);
       if(sonioxAuth==='api-key'){assert.match(setup,/Do not build or require a token server/);assert.doesNotMatch(setup,/Keep the long-term Soniox key on/);}
       else assert.match(setup,/Reuse the selected custom endpoint/);
-    } else {assert.match(setup,/16kHz, 16-bit mono WAV/);assert.match(setup,/Soniox setup is not required/);}
+    } else {
+      assert.match(setup,/16kHz, 16-bit mono WAV/);assert.match(setup,/Soniox setup is not required/);
+      if(relay==='gadget'){
+        assert.match(setup,/custom relay already transcribes WAV on the server/);
+        assert.match(setup,/id equal to the request id/);
+        assert.match(space,/use its configured transcriber/);
+      }
+    }
   }
 });

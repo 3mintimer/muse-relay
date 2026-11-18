@@ -99,6 +99,7 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
   const sent: RelayRequest[] = [];
   let nextSend = async () => new Response('{}', { status: 200 });
   let nextRead: (options: RequestInit) => Promise<Response> = async () => response(snapshot);
+  let nextSonioxKey: (options: RequestInit) => Promise<Response> = async () => Response.json({api_key:'snx_temp_synthetic'});
   let readAttachment = async () => new Response('{}', {status:503});
   let attachmentReads = 0;
   install('window', windowTarget); install('document', documentTarget);
@@ -113,7 +114,7 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
       requests.push(options);const result=await nextRead(options);
       return result.ok?Response.json({files:{'g2muse-relay.json':{content:JSON.stringify(await result.json())}}}):result;
     }
-    if(String(input)==='https://relay.example.test/v1/soniox-token')return Response.json({api_key:'snx_temp_synthetic'});
+    if(String(input)==='https://relay.example.test/v1/soniox-token')return nextSonioxKey(options);
     if(String(input)==='https://relay.example.test/v1/requests'){sent.push(JSON.parse(String(options.body)));return nextSend();}
     if(String(input).startsWith('https://relay.example.test/v1/files/')){attachmentReads++;return readAttachment();}
     assert.equal(String(input), 'https://relay.example.test/v1/snapshot', 'tests must never use a real network endpoint');
@@ -142,6 +143,7 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
     onCleanup:(callback:()=>void)=>{cleanups.push(callback);},
     setSend: (handler: () => Promise<Response>) => { nextSend = handler; },
     setRead: (handler: (options: RequestInit) => Promise<Response>) => { nextRead = handler; },
+    setSonioxKey: (handler: (options: RequestInit) => Promise<Response>) => { nextSonioxKey = handler; },
     setAttachment: (handler: () => Promise<Response>) => { readAttachment = handler; },
     attachmentReads: () => attachmentReads,
     overlay: (id?: number) => {
@@ -376,7 +378,8 @@ test('phone slider keeps the relay receipt when the glasses reject the result di
 test('space microphone keeps its target and cancellation never sends',async t=>{
   const app=await appFixture(t,interactiveFixture());
   await app.controller.showSpace('test-space');
-  app.emit({listEvent:{currentSelectItemIndex:4}});await until(()=>app.controller.state.recording,'microphone starts only after selection');
+  app.emit({listEvent:{currentSelectItemIndex:4}});
+  await until(()=>app.controller.state.recording&&app.text().includes('メモ'),'the selected microphone opens and displays the Space item');
   assert.match(app.text(),/メモ/);
   app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
   app.emit({sysEvent:{eventType:3}});await until(()=>!app.controller.state.recording&&!app.controller.state.busy,'cancel capture');
@@ -530,6 +533,111 @@ test('live recording shows the latest recognized lines without rebuilding its la
   }
   app.emit({sysEvent:{eventType:3}});await settle();
   assert.equal(app.controller.state.recording,false);assert.deepEqual(microphone,[true,false]);assert.equal(app.sent.length,0);
+});
+
+for (const auth of ['api-key','token-server'] as const) {
+  test(`Soniox ${auth} records before connecting and finalizes a release before the socket opens`,{timeout:4000},async t=>{
+    const original=globalThis.WebSocket, sockets:Socket[]=[];
+    const frames:Buffer[]=[];
+    let endSent=false;
+    class Socket {
+      static OPEN=1;
+      readyState=0;
+      bufferedAmount=0;
+      onopen?:()=>void;
+      onmessage?:(event:{data:string})=>void;
+      onclose?:()=>void;
+      constructor(readonly url:string,readonly protocols:string[]){sockets.push(this);}
+      open(){this.readyState=1;this.onopen?.();}
+      send(value:string|ArrayBuffer){
+        if(value instanceof ArrayBuffer){
+          assert.equal(endSent,false,'audio must precede the end frame');
+          assert.ok(value.byteLength<=3200,'buffered audio is sent in small chunks');
+          frames.push(Buffer.from(value));
+        }else if(value===''){
+          endSent=true;
+          this.onmessage?.({data:JSON.stringify({tokens:[{text:'予約の確認',is_final:true}],finished:true})});
+        }else assert.equal(JSON.parse(value).sample_rate,16000);
+      }
+      close(){this.readyState=3;this.onclose?.();}
+    }
+    globalThis.WebSocket=Socket as unknown as typeof WebSocket;
+    t.after(()=>{globalThis.WebSocket=original;});
+    const app=await appFixture(t,fixture(),false,{voice:'soniox',sonioxAuth:auth,sonioxApiKey:'synthetic-direct',speakerFilter:'self'});
+    const key=deferred<Response>(),posted=deferred<void>();
+    let requestedKeys=0;
+    app.setSonioxKey(()=>{requestedKeys++;return key.promise;});
+    app.setSend(async()=>{posted.resolve();return Response.json({});});
+    const microphone:boolean[]=[];
+    app.bridge.audioControl=async(open=false)=>{microphone.push(open);return true;};
+    app.emit({sysEvent:{eventType:9}});
+    await until(()=>microphone.length===1,'audio starts while authentication or WebSocket setup is pending');
+    assert.equal(app.controller.state.recording,true);
+    assert.equal(requestedKeys,auth==='token-server'?1:0);
+    assert.ok(sockets.every(socket=>socket.readyState===0));
+    app.emit({audioEvent:{audioPcm:new Uint8Array(9600).fill(11),speakerRole:'self'}});
+    app.emit({audioEvent:{audioPcm:new Uint8Array(3200).fill(99),speakerRole:'other'}});
+    app.emit({audioEvent:{audioPcm:new Uint8Array(9600).fill(22),speakerRole:'self'}});
+    app.emit({sysEvent:{eventType:10}});
+    await until(()=>microphone.length===2,'release closes the microphone while still offline');
+    assert.deepEqual(microphone,[true,false]);
+    assert.equal(app.controller.state.recording,false);
+    assert.deepEqual(frames,[]);
+    assert.equal(app.sent.length,0);
+    app.emit({audioEvent:{audioPcm:new Uint8Array(3200).fill(88),speakerRole:'self'}});
+    if(auth==='token-server')key.resolve(Response.json({api_key:'snx_temp_synthetic'}));
+    await until(()=>sockets.length===1,'the delayed Soniox socket is created');
+    assert.equal(sockets[0]!.url,'wss://stt-rt.soniox.com/transcribe-websocket');
+    assert.deepEqual(sockets[0]!.protocols,['soniox-api-key',auth==='api-key'?'synthetic-direct':'snx_temp_synthetic']);
+    sockets[0]!.open();
+    assert.equal(endSent,false,'the socket is not finalized while audio is still queued');
+    await posted.promise;
+    await until(()=>!app.controller.state.busy,'the final text submission completes');
+    assert.equal(endSent,true);
+    assert.deepEqual(Buffer.concat(frames),Buffer.concat([Buffer.alloc(9600,11),Buffer.alloc(3200),Buffer.alloc(9600,22)]));
+    assert.equal(app.sent[0]!.text,'予約の確認');
+    assert.equal(app.sent[0]!.audio,undefined);
+    assert.doesNotMatch(JSON.stringify(app.sent),/synthetic-direct|snx_temp/);
+  });
+}
+
+test('cancelling a released recording aborts the pending Soniox key and clears its audio',async t=>{
+  const app=await appFixture(t,fixture(),false,{voice:'soniox',sonioxAuth:'token-server'});
+  let tokenSignal:AbortSignal|undefined;
+  app.setSonioxKey(({signal})=>{
+    tokenSignal=signal!;
+    return new Promise((_resolve,reject)=>tokenSignal!.addEventListener('abort',()=>reject(tokenSignal!.reason),{once:true}));
+  });
+  const microphone:boolean[]=[];
+  app.bridge.audioControl=async(open=false)=>{microphone.push(open);return true;};
+  app.emit({sysEvent:{eventType:9}});
+  await until(()=>microphone.length===1&&!!tokenSignal,'the mic is open while a key is pending');
+  app.emit({audioEvent:{audioPcm:new Uint8Array(19200).fill(1),speakerRole:'self'}});
+  app.emit({sysEvent:{eventType:10}});
+  await until(()=>microphone.length===2&&!app.controller.state.recording,'release stops capture');
+  assert.equal(app.controller.state.busy,true,'the end of recording is still waiting for authentication');
+  app.emit({sysEvent:{eventType:3}});
+  await until(()=>!app.controller.state.busy,'cancel exits the pending transcription');
+  assert.equal(tokenSignal!.aborted,true);
+  assert.deepEqual(microphone,[true,false]);
+  assert.equal(app.sent.length,0);
+  assert.match(app.controller.state.notice,/中止/);
+});
+
+test('a Soniox connection failure closes the active microphone without sending audio or text',async t=>{
+  const app=await appFixture(t,fixture(),false,{voice:'soniox',sonioxAuth:'token-server'});
+  const key=deferred<Response>();
+  app.setSonioxKey(()=>key.promise);
+  const microphone:boolean[]=[];
+  app.bridge.audioControl=async(open=false)=>{microphone.push(open);return true;};
+  app.emit({sysEvent:{eventType:9}});
+  await until(()=>microphone.length===1&&app.controller.state.recording,'the recorder does not wait for the key');
+  app.emit({audioEvent:{audioPcm:new Uint8Array(19200).fill(1),speakerRole:'self'}});
+  key.resolve(new Response('{}',{status:503}));
+  await until(()=>microphone.length===2&&!app.controller.state.busy&&Boolean(app.controller.state.error),'the connection failure is reported after closing the microphone');
+  assert.equal(app.controller.state.recording,false);
+  assert.deepEqual(microphone,[true,false]);
+  assert.equal(app.sent.length,0);
 });
 
 test('display timeout keeps receiving in background and the first gesture only restores the prior screen',async t=>{

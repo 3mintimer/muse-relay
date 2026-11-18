@@ -82,6 +82,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let capture:Uint8Array[]=[],captureBytes=0,voiceBusy=false,voiceSending=false,recordingTimeout:ReturnType<typeof setTimeout>;
   let selectedAudioBytes=0,classifiedAudioBytes=0;
   let pendingStop:'send'|'cancel'|undefined;
+  let voiceFailure:unknown;
   let soniox:SonioxStream|undefined,liveUpdate:ReturnType<typeof setTimeout>|undefined;
   let foregroundAbort=new AbortController();
   const localSent:Message[]=[];
@@ -738,8 +739,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(control.type==='button'&&!control.confirm){await dispatchSpaceAction(spaceRequest(target));return;}
     screen='space-control';spaceEditor={target,value:control.type==='slider'||control.type==='choice'?control.value:undefined};await render();
   }
+  function voiceFailed(failure: unknown) {
+    if (!state.recording || pendingStop === 'cancel') return;
+    voiceFailure = failure;
+    fire(act(()=>stopRecording(false),undefined,undefined,false));
+  }
   function ingest(audio:NonNullable<EvenHubEvent['audioEvent']>){
-    if(!state.recording)return;
+    if(!state.recording||pendingStop)return;
     const pcm=audio.audioPcm;
     const limit=(state.settings.relay==='gadget'?30:120)*32000;
     if(captureBytes+pcm.length>limit){fire(act(()=>stopRecording(false),undefined,undefined,false));return;}
@@ -749,58 +755,71 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(classified)classifiedAudioBytes+=pcm.length;
     if(selected)selectedAudioBytes+=pcm.length;
     // Keep pauses and recording duration intact; only selected audio reaches either transcriber.
-    const copy=selected?pcm.slice():new Uint8Array(pcm.length);capture.push(copy);captureBytes+=copy.length;
-    try{soniox?.push(copy);}catch(e){fire(act(async()=>{await stopRecording(true);throw e;},undefined,undefined,false));}
+    const audioFrame=selected?pcm:new Uint8Array(pcm.length);captureBytes+=audioFrame.length;
+    if(!soniox)capture.push(selected?pcm.slice():audioFrame);
+    else try{soniox.push(audioFrame);}catch(e){voiceFailed(e);}
   }
   async function startRecording(mode:'hold'|'toggle'='toggle',target?:ControlTarget){
     if(state.recording||voiceBusy||state.busy)return;
     displayInteraction();
     if(!state.settings.configured)throw new Error('Relay token');
     if(!glasses.ready)throw new Error('Even app required');
+    ++renderSerial;glasses.invalidateRender();
     recordingSpace=target;
     if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'recording',message:target.title};
-    voiceBusy=true;recordingMode=mode;pendingStop=undefined;state.busy=true;state.transcript='';capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;
+    voiceBusy=true;recordingMode=mode;pendingStop=undefined;voiceFailure=undefined;state.busy=true;state.transcript='';capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;
     feedback=undefined;voiceStatus=text('録音を準備中…','Preparing microphone…');emit();
     try{
-      await render();
-      if(state.settings.voice==='soniox'){
-        soniox=new SonioxStream(value=>{state.transcript=value;emit();if(!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);},e=>{
-          error(e);if(state.recording)fire(act(async()=>{await stopRecording(true);throw e;},undefined,undefined,false));
-        });
-        await soniox.start(state.settings);
-      }
-      // A cancellation during transcription setup must not open the microphone.
-      if(pendingStop==='cancel'){soniox?.cancel();soniox=undefined;state.notice=text('録音を中止しました','Recording cancelled');feedback={kind:'done',body:state.notice};return;}
+      // Arm audio before sending any display updates or waiting for Soniox.
       state.recording=true;
-      await glasses.microphone(true,state.settings.mic==='phone');
-      state.notice='';await render();
+      const opening=glasses.microphone(true,state.settings.mic==='phone');
+      if(state.settings.voice==='soniox'){
+        soniox=new SonioxStream(value=>{state.transcript=value;emit();if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);},voiceFailed);
+        // SonioxStream reports failures through voiceFailed and queues audio until ready.
+        void soniox.start(state.settings).catch(()=>{});
+      }
+      await opening;
+      state.notice='';
       recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,undefined,false)),state.settings.relay==='gadget'?30000:120000);
-    }catch(e){state.recording=false;recordingSpace=undefined;if(target)state.spaceAction=undefined;soniox?.cancel();soniox=undefined;await glasses.microphone(false,false).catch(()=>{});throw e;}
+    }catch(e){
+      state.recording=false;recordingSpace=undefined;if(target)state.spaceAction=undefined;
+      soniox?.cancel();soniox=undefined;capture=[];clearTimeout(liveUpdate);liveUpdate=undefined;
+      await glasses.microphone(false,state.settings.mic==='phone').catch(()=>{});throw e;
+    }
     finally{
       voiceBusy=false;state.busy=false;const pending=pendingStop;pendingStop=undefined;emit();
       if(pending&&state.recording){
         // Cleanup must still close a microphone that finished opening after background/exit.
         fire(active&&!disposed?act(()=>stopRecording(pending==='cancel'),undefined,undefined,false):stopRecording(true));
-      }else if(feedback){if(target&&!state.recording){feedback.back=spaceBack;state.spaceAction=undefined;recordingSpace=undefined;}await render();}
+      }
     }
+    if(state.recording)await render().catch(error);
   }
   async function stopRecording(cancel:boolean){
     if(voiceBusy){
       // Cancellation wins over a release until the request has started sending.
-      if(!voiceSending&&(cancel||pendingStop!=='cancel'))pendingStop=cancel?'cancel':'send';
+      if(!voiceSending&&(cancel||pendingStop!=='cancel')){
+        pendingStop=cancel?'cancel':'send';
+        if(cancel)soniox?.cancel();
+      }
       return;
     }
     if(!state.recording)return;
     voiceBusy=true;state.busy=true;pendingStop=cancel?'cancel':'send';state.recording=false;clearTimeout(recordingTimeout);clearTimeout(liveUpdate);liveUpdate=undefined;
     voiceStatus=cancel?text('録音を中止中…','Cancelling recording…'):text('音声を処理中…','Processing voice…');emit();
-    const stream=soniox;soniox=undefined;
+    const stream=soniox;
+    if(cancel)stream?.cancel();
     const target=recordingSpace;
     let sentChatId:string|undefined;
     const voiceRequest=(transcript:string)=>target?spaceRequest(target,undefined,transcript):request(transcript);
     const cancelled=()=>pendingStop==='cancel';
     const cancelNotice=()=>{stream?.cancel();state.notice=text('録音を中止しました','Recording cancelled');feedback={kind:'done',body:state.notice};};
-    try{await render();await glasses.microphone(false,state.settings.mic==='phone');
+    try{
+      const closing=glasses.microphone(false,state.settings.mic==='phone');
+      void render().catch(error);
+      await closing;
       if(cancelled()){cancelNotice();return;}
+      if(voiceFailure)throw voiceFailure;
       if(selectedAudioBytes<19200){
         stream?.cancel();
         state.notice=state.settings.mic==='glasses'&&state.settings.speakerFilter!=='all'&&captureBytes>=19200
@@ -810,20 +829,26 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
           :text('もう少し長く話してください','Speak for at least 0.6 seconds');
         feedback={kind:'done',body:state.notice};return;
       }
+      let req:RelayRequest;
       if(stream){
         let transcript:string;
         try{transcript=await stream.finish();}catch(e){if(cancelled()){cancelNotice();return;}throw e;}
         if(cancelled()){cancelNotice();return;}
-        state.transcript=transcript;if(transcript){voiceSending=true;voiceStatus=text('送信中…','Sending…');await render();const req=voiceRequest(transcript);state.busy=false;await send(req);if(!target)sentChatId=req.id;}
-        else{feedback={kind:'done',body:text('音声を認識できませんでした\nもう一度録音してください','No speech recognized\nRecord again')};return;}
+        state.transcript=transcript;
+        if(!transcript){feedback={kind:'done',body:text('音声を認識できませんでした\nもう一度録音してください','No speech recognized\nRecord again')};return;}
+        req=voiceRequest(transcript);
+      }else{
+        req=voiceRequest('');
+        req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture))};
       }
-      else{const req=voiceRequest('');req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture))};voiceSending=true;voiceStatus=text('送信中…','Sending…');await render();state.busy=false;await send(req);if(!target)sentChatId=req.id;}
+      voiceSending=true;voiceStatus=text('送信中…','Sending…');void render().catch(error);
+      state.busy=false;await send(req);if(!target)sentChatId=req.id;
       feedback={kind:'done',body:text('送信しました\nMuse の応答を待っています','Sent\nWaiting for Muse'),waitForReply:!target};
       if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'sent',message:text('中継が受け付けました','Accepted by relay')};
     }catch(e){if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'error',message:failureText(e)};throw e;
     }finally{if(target){if(feedback)feedback.back=spaceBack;if(state.spaceAction?.status==='recording')state.spaceAction=undefined;}
-      recordingSpace=undefined;stream?.cancel();capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;voiceBusy=false;voiceSending=false;state.busy=false;pendingStop=undefined;emit();
-      if(sentChatId&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChatId);else await render();}
+      recordingSpace=undefined;stream?.cancel();soniox=undefined;capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;voiceBusy=false;voiceSending=false;voiceFailure=undefined;state.busy=false;pendingStop=undefined;emit();
+      if(sentChatId&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChatId);else await render().catch(error);}
   }
   function handleEvent(e:EvenHubEvent){
     if(e.audioEvent){ingest(e.audioEvent);return;}
