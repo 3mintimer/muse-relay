@@ -1,4 +1,5 @@
-import { t, getLocale, setLocale, translatePage, docHref, localizeDocText } from './i18n.js';
+import { t, getLocale, setLocale, prepareLocale, translatePage, docHref, localizeDocText } from './i18n.js';
+import { languages, languageFromUrl, languageHref } from './language.js';
 
 // Static guide state only. Connection details and feedback drafts are never stored.
 const $ = selector => document.querySelector(selector);
@@ -58,6 +59,7 @@ const voiceName = () => state.voice === 'muse' ? t("Transcribe via relay") : sta
 
 function renderRoute() {
   const route = routes()[state.route];
+  $$('[data-gist-only]').forEach(node => { node.hidden = state.route !== 'gist'; });
   $('#flow-choice').textContent = route.name;
   $('#main-flow').replaceChildren(...route.flow.map(([title, subtitle]) => {
     const item = el('li'); item.append(el('strong', title), el('span', subtitle)); return item;
@@ -143,8 +145,13 @@ function renderVoice() {
 }
 
 async function copyText(text, target, status) {
-  try { await navigator.clipboard.writeText(text); status.textContent = t("Copied. Paste into your AI or the appropriate setup page."); }
-  catch { target?.focus(); target?.select(); status.textContent = target ? t("Text selected. Use your device's Copy action.") : t("Could not copy. Select the displayed command and copy it manually."); }
+  try { await navigator.clipboard.writeText(text); status.textContent = target ? t("Copied. Paste into Muse and send.") : t("Copied. Paste into your AI or the appropriate setup page."); }
+  catch {
+    const disclosure = target?.closest('details');
+    if (disclosure) disclosure.open = true;
+    target?.focus(); target?.select();
+    status.textContent = target ? t("Text selected. Use your device's Copy action.") : t("Could not copy. Select the displayed command and copy it manually.");
+  }
 }
 function codeBlock(command) {
   const block = el('div', undefined, 'code-block');
@@ -184,7 +191,7 @@ function renderImplementation() {
 const contractLink = `${repo}/blob/main/docs/protocol.md`;
 const safeConfiguration = () => t("Read endpoints and credentials through secure setup or secret configuration. Do not put tokens in chat, public code, logs, or Gist content. Keep personal endpoints out of the shared EvenHub app; do not change the app.");
 function transportPrompt() {
-  if (state.route === 'gist') return t("Use GitHub Gist. Only for a new Gist, initialize g2muse-relay.json with {\"messages\":[]}; preserve existing files.\nInput: muse-relay-request-<id>.json containing {protocol:\"muse-relay/1\",id,kind:\"chat\"|\"space\",text,created_at,space_id?,space_action?}. audio_file/audio_mime/audio_name or image_file/image_mime/image_name reference separate files containing base64 bytes.\nOutput: g2muse-relay.json as {messages:[{id,from:\"Muse\",type:\"text\",text,ts,reply_to}]}. ts is Unix seconds; reply_to is the original request ID. Use one writer, preserve retained messages, and keep the latest 50. Adapt the old G2Muse watcher to this separate outbox instead of using it unchanged.\nThe optional reference {0}/tree/main/adapters/gist only watches requests. Implement Muse connectivity and processing in the handler.", [repo]);
+  if (state.route === 'gist') return t("Use GitHub Gist. Only for a new Gist, initialize g2muse-relay.json with {\"messages\":[]}; preserve existing files.\nInput: muse-relay-request-<id>.json containing {protocol:\"muse-relay/1\",id,kind:\"chat\"|\"space\",text,created_at,space_id?,space_action?}. audio_file/audio_mime/audio_name or image_file/image_mime/image_name reference separate files containing base64 bytes.\nOutput: g2muse-relay.json as {messages:[{id,from:\"Muse\",type:\"text\",text,ts,reply_to}]}. ts is Unix seconds; reply_to is the original request ID. Use one writer. Preserve existing G2Muse and other foreign records. Apply the latest-50 limit only to rows created by this watcher. Adapt the old G2Muse watcher to this separate outbox instead of using it unchanged.\nThe optional reference {0}/tree/main/adapters/gist only watches requests. Implement Muse connectivity and processing in the handler.", [repo]);
   const linux = state.route === 'linux' ? t("Use the official Linux SDK at {0}/blob/main/linux/README.md. Implement a Muse Relay adapter separately. After initial BLE pairing, Linux at home connects outward to the relay and Muse. Test a dedicated conversation with musegadget send-user-msg --session-id \"<NEW_UUID>\" --wait 60 \"test\". Generate a fresh test UUID for <NEW_UUID>. The official {1}/blob/main/linux/examples/pebble_ring_bridge.py shows how to use the existing SDK connection. Acceptance: preserve the POST /v1/requests id as the Muse reply's reply_to, read that reply through GET /v1/snapshot, and display it in the app. Do not invent APIs; report only what you actually tested.", [sdk, sdk])
     : t("The reference device is an ATOM S3 left at home. Use the firmware and USB setup in {0}/blob/main/docs/atoms3.md. Keep power and Wi-Fi on; the device connects outward to the HTTPS relay. Do not ask for its LAN IP as the phone endpoint or require port forwarding to ATOM.", [repo]);
   return t("Use Muse Gadget SDK. {0}\nApp input: POST /v1/requests with the phone key. Output: GET /v1/snapshot and GET /v1/files/:name. Return the public {messages,spaces?,profile?,device?,capabilities?} format.\nWith the optional reference server at {1}/tree/main/server, the device reads /device/jobs with a separate device key and returns ACKs, matching Muse conversation events, and heartbeats to /device/events. Correlate the dedicated conversation ID with the request and exclude other conversations.\nAdditional Muse output uses a separate MUSE_TOKEN: POST /v1/messages {id:\"muse_export_<unique-id>\",type:\"text\",text,reply_to?}. The sender is Muse. Do not create You messages through /v1/messages. Separate phone, device, and Muse writer keys.\nProvide the phone configuration JSON {relay:\"gadget\",relayUrl,relayToken} through secure setup. Send any hosting credential only to its relay origin. Allow the origin shown inside the Even app; use the reference setup's explicit local-origin option for variable http://127.0.0.1 ports.", [linux, repo]);
@@ -202,7 +209,7 @@ function imagesPrompt() {
   if (!state.images) return t("Images are off. Use text replies and Spaces understandable from text alone. Do not require enabling images or creating an avatar during connection setup.");
   return t("Images are on. Read PNG/JPEG/WebP bytes and export at most 250000 decoded bytes. Do not return only a URL or local path. {0}\nG2 converts images to 288×144 and 16 grayscale levels. Avoid tiny text or information that depends on color.", [state.route === 'gist'
     ? t("Image replies use type:\"image\", image_file:<Gist filename containing base64>, and mime_type. A caption is optional. The reference watcher supports reply image output; Space images need a custom exporter.")
-    : t("Use the Muse writer key for POST /v1/messages {id:\"muse_export_<unique-id>\",type:\"image\",image:{mime,data_base64,name},text?,reply_to?}. SDK display.draw_* targets the Gadget device, not G2. capabilities.images controls image input to Muse, not incoming Muse images. Keep reference ATOM image input disabled until separately verified.")]);
+    : t("Use the Muse writer key for POST /v1/messages {id:\"muse_export_<unique-id>\",type:\"image\",image:{mime,data_base64,name},text?,reply_to?}. SDK display.draw_* targets the Gadget device, not G2. capabilities.images controls image input to Muse, not incoming Muse images. Enable phone-image input only when the connected relay reports support and the route has been verified.")]);
 }
 function spacePrompt() {
   const examples = {
@@ -216,18 +223,31 @@ function spacePrompt() {
 function avatarPrompt() {
   return t("Find the avatar currently configured in Muse by checking the existing profile, persona, and files. If none is found, say so. Do not generate, choose, or substitute another image.\nRead the original image bytes. Export avatar:{mime,data_base64,name} as PNG/JPEG/WebP, at most 250000 decoded bytes. A URL or file path alone is insufficient.\n{0}\nAfter success, guide me to enable Settings → Voice & images → Enable images and select Save settings. The received avatar appears on the G2 home screen. Distinguish finding the image, exporting it, and displaying it on G2; report only the steps actually verified.", [state.route === 'gist' ? t("Use the existing Gist writer to save muse-relay-profile.json as {profile:{name,avatar:{mime,data_base64,name},updated_at}}. Preserve other files.") : t("Use MUSE_TOKEN to PUT /v1/profile on the existing relay, with {name,avatar:{mime,data_base64,name}}. The phone key cannot publish.")]);
 }
+function historyPrompt() {
+  return t("Review history and cleanup on my existing {0} relay. Do not delete anything during diagnosis. First distinguish locally hidden messages, current relay data, and old revisions or backups. Preserve my messages, Spaces, profile, and working configuration. Explain what can be restored and what cannot.", [routes()[state.route].name]) + '\n' + (state.route === 'gist'
+    ? t("If I also use G2Muse, extend the single existing watcher/writer; do not start a competing writer or overwrite g2muse-relay.json or older files. Read the current protocol and watcher implementation. Only after processing is confirmed, propose one atomic update that cleans the matching request and its own input attachments. Review unknown reply IDs individually; preserve message, Space, and avatar files still needed. The reference watcher keeps its own latest 50 rows and preserves other writers’ records. Check root-level gist.truncated separately from an individual file.truncated/raw_url. Do not silently process an incomplete file list. Removing current files does not erase Gist revision history. Present proposed changes and ask before deleting data.")
+    : t("Inspect the configured relay retention and request correlation. Explain whether a missing message was hidden locally or pruned on the relay. Do not treat Device online as proof of a successful Muse round trip. Present proposed cleanup separately; do not delete messages, attachments, Spaces, or profile data without my confirmation."));
+}
+function reusePrompt() {
+  return [t("I already use a G2Muse-compatible Gist. Reuse that same Gist for Muse Relay. Do not initialize or replace it. Inspect the existing watcher and ask it to handle Muse Relay's request files; do not launch a second writer. Preserve all old messages, files, voice settings, images, Spaces, and profile data. Use the connection contract below only to extend the existing setup."), transportPrompt(), historyPrompt(),
+    t("Check a new short text request and its matching reply first. Then check the existing audio route: keep the transcript on the original You message and link Muse's reply with reply_to. Do not switch transcription services or require a new avatar. Ask only for the missing settings through secure setup. Cleanup must be limited to confirmed requests and their owned input attachments in one update; leave unknown or unmatched IDs for individual review.")].join('\n\n');
+}
 function renderPrompt() {
   const route = routes()[state.route];
   $('#space-preset-field').hidden = state.topic !== 'space';
-  $('#prompt-context').textContent = t("{0} · {1} · Images {2}", [route.name, voiceName(), state.images ? t("On") : t("Off")]);
-  const parts = [t("For Muse Relay, please {0}. Public protocol: {1}", [state.topic === 'connection' ? t("set up the relay in my environment") : state.topic === 'voice' ? t("check and implement voice settings") : state.topic === 'space' ? t("create a Space") : t("retrieve the configured avatar"), contractLink]), safeConfiguration()];
+  $('#prompt-context').textContent = state.topic === 'reuse' ? t("G2Muse Gist · Keep existing settings") : t("{0} · {1} · Images {2}", [route.name, voiceName(), state.images ? t("On") : t("Off")]);
+  const parts = [t("For Muse Relay, please {0}. Public protocol: {1}", [state.topic === 'connection' ? t("set up the relay in my environment") : state.topic === 'reuse' ? t("extend my existing G2Muse setup") : state.topic === 'voice' ? t("check and implement voice settings") : state.topic === 'space' ? t("create a Space") : state.topic === 'history' ? t("review history and cleanup") : t("retrieve the configured avatar"), contractLink]), safeConfiguration()];
   if (state.topic === 'connection') parts.push(transportPrompt(), voicePrompt(), imagesPrompt(), t("Persist claims and results by request ID to avoid duplicate execution. Never blindly resend a request whose outcome is unknown. Use lightweight polling and call Muse only for new requests. Do not create Spaces or an avatar during connection setup; wait for a separate request."));
+  else if (state.topic === 'reuse') parts.push(reusePrompt());
   else if (state.topic === 'voice') parts.push(t("The current relay is {0}. Preserve existing chat and credential separation.", [route.name]), voicePrompt(), t("Use the selected microphone only when I record. Check Soniox connection uses one second of silence and may count toward usage. Verify authentication separately from real speech transcription."));
   else if (state.topic === 'space') parts.push(spacePrompt());
+  else if (state.topic === 'history') parts.push(historyPrompt());
   else parts.push(avatarPrompt());
+  if (state.topic === 'connection' && state.route === 'gist') parts.push(t("If G2Muse already uses this Gist, keep g2muse-relay.json and all existing files. Extend its one existing watcher/writer to recognize Muse Relay request files; do not run another writer beside it. Gist profile/avatar export is optional and is not required for migration or text/audio checks."));
+  if (state.topic === 'voice') parts.push(t("If a Muse reply arrives but my input transcript is missing, inspect the original request ID and the saved transcription mode. For Gist, return transcript from the handler and update You.id equal to the request ID; use that ID in Muse.reply_to. For Gadget, check the matching acknowledged conversation's message.user display_text, text, or content. POST /v1/messages is for Muse output, not for creating You messages. If the SDK does not provide a transcript, report that limit instead of fabricating one. Verify a short recording and its matching reply separately from endpoint access; use synthetic or consented test content and keep recordings and credentials out of logs."));
   if (state.route === 'linux' && state.topic !== 'connection') parts.push(t("If no Linux adapter exists, implement it first and verify that a request through the HTTP interface produces its matching reply."));
   parts.push(t("Finish with a short list of settings I must enter and the input, processing, and output steps actually verified. Keep secrets out of the reply."));
-  $('#prompt-output').value = localizeDocText(parts.join('\n\n')); $('#copy-status').textContent = '';
+  $('#prompt-output').value = localizeDocText(parts.join('\n\n')); $('#copy-status').textContent = ''; $('#copy-prompt').disabled = false;
 }
 
 // The on-page HUD is an illustration. It never accesses a microphone or a relay.
@@ -286,19 +306,36 @@ $('#demo-back').addEventListener('click', () => { if (demo.recording) { demo.rec
 // Native anchors keep deep links and browser back/forward behavior intact.
 function markNavigation() {
   const hash = location.hash;
-  $$('.header-row nav a').forEach(a => { if (a.hash === hash) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+  $$('.header-row nav a').forEach(a => { if (a.hash === (hash === '#g2muse' ? '#relay' : hash)) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+  $$('[data-language]').forEach(a => { a.href = languageHref(a.dataset.language, hash); });
+  const target = document.getElementById(hash.slice(1));
+  if (target?.tagName === 'DETAILS') target.open = true;
 }
-window.addEventListener('hashchange', markNavigation);
+function choosePrompt(topic) {
+  state.topic = topic;
+  if (topic === 'reuse') {
+    state.route = 'gist';
+    $$('input[name="route"]').forEach(input => { input.checked = input.value === 'gist'; });
+  }
+  $('#prompt-topic').value = topic;
+  renderRoute();
+}
+function selectHashPrompt() { if (location.hash === '#g2muse') choosePrompt('reuse'); }
+window.addEventListener('hashchange', () => { selectHashPrompt(); markNavigation(); });
 $('#theme').addEventListener('change', event => { document.documentElement.dataset.theme = event.target.value; });
-$$('input[name="route"]').forEach(input => input.addEventListener('change', () => { state.route = input.value; state.step = 0; renderRoute(); }));
+$$('input[name="route"]').forEach(input => input.addEventListener('change', () => {
+  state.route = input.value; state.step = 0;
+  if (state.topic === 'reuse' && state.route !== 'gist') { state.topic = 'connection'; $('#prompt-topic').value = state.topic; }
+  renderRoute();
+}));
 $$('input[name="voice"]').forEach(input => input.addEventListener('change', () => { state.voice = input.value; renderVoice(); renderStep(); renderPrompt(); }));
-$('#guide-images').addEventListener('change', event => { state.images = event.target.checked; renderStep(); renderPrompt(); });
+$('#guide-images').addEventListener('change', event => { state.images = event.target.checked; if (state.images) $('#image-details').open = true; renderStep(); renderPrompt(); });
 $$('[data-step]').forEach(button => button.addEventListener('click', () => { state.step = Number(button.dataset.step); renderStep(); }));
 $('#step-prev').addEventListener('click', () => { state.step = Math.max(0, state.step - 1); renderStep(); });
 $('#step-next').addEventListener('click', () => { state.step = Math.min(3, state.step + 1); renderStep(); });
-$('#prompt-topic').addEventListener('change', event => { state.topic = event.target.value; renderPrompt(); });
+$('#prompt-topic').addEventListener('change', event => choosePrompt(event.target.value));
 $('#space-preset').addEventListener('change', event => { state.preset = event.target.value; renderPrompt(); });
-$$('[data-prompt-link]').forEach(a => a.addEventListener('click', () => { state.topic = a.dataset.promptLink; $('#prompt-topic').value = state.topic; renderPrompt(); }));
+$$('[data-prompt-link]').forEach(a => a.addEventListener('click', () => choosePrompt(a.dataset.promptLink)));
 $('#copy-prompt').addEventListener('click', () => { void copyText($('#prompt-output').value, $('#prompt-output'), $('#copy-status')); });
 
 const form = $('#feedback-form');
@@ -359,18 +396,41 @@ form.addEventListener('submit', async event => {
   }
 });
 
-function applyLanguage(language, updateUrl = false) {
+let languageRequest = 0;
+async function applyLanguage(language, updateUrl = false) {
+  const request = ++languageRequest;
+  try { await prepareLocale(language); }
+  catch {
+    // The language links also work as normal, server-rendered pages.
+    if (updateUrl && request === languageRequest) location.assign(languageHref(language, location.hash));
+    return;
+  }
+  if (request !== languageRequest) return;
   setLocale(language);
   document.documentElement.lang = getLocale();
-  $('#language').value = getLocale();
+  $('#language-name').textContent = languages[getLocale()];
+  $$('[data-language]').forEach(a => { if (a.dataset.language === getLocale()) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   if (updateUrl) {
-    // Only the language is written. Drafts, settings, consent, and credentials never enter URLs.
-    history.replaceState(null, '', `${location.pathname}?lang=${getLocale()}${location.hash}`);
+    $('#language-menu').open = false;
+    $('#language-menu summary').focus();
+    // The language path and existing fragment only; never the form or other query data.
+    history.replaceState(null, '', languageHref(getLocale(), location.hash));
   }
   translatePage();
   localizeDemoScreens();
   renderRoute(); renderDemo(); markNavigation(); updateFeedback(); renderFeedbackNotice();
 }
-$('#language').addEventListener('change', event => applyLanguage(event.target.value, true));
-window.addEventListener('popstate', () => applyLanguage(new URL(location.href).searchParams.get('lang')));
-applyLanguage(new URL(location.href).searchParams.get('lang'));
+$$('[data-language]').forEach(a => a.addEventListener('click', event => {
+  if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault(); void applyLanguage(a.dataset.language, true);
+}));
+const languageMenu = $('#language-menu');
+languageMenu.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && languageMenu.open) { languageMenu.open = false; languageMenu.querySelector('summary').focus(); }
+});
+document.addEventListener('click', event => {
+  if (languageMenu.open && !languageMenu.contains(event.target)) languageMenu.open = false;
+});
+window.addEventListener('popstate', () => { selectHashPrompt(); applyLanguage(languageFromUrl(new URL(location.href))); });
+selectHashPrompt();
+void applyLanguage(languageFromUrl(new URL(location.href)));

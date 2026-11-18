@@ -22,7 +22,8 @@ flowchart LR
 
 | Requirement | Setting |
 |---|---|
-| Gist | Put `{"messages":[]}` in `g2muse-relay.json` |
+| New Gist | Create `g2muse-relay.json` with `{"messages":[]}` only if it does not exist |
+| Existing G2Muse Gist | Keep its messages, fields and files. Do not initialize it again. Review the existing writer before starting this watcher |
 | Secret configuration | Copy [.env.example](.env.example) to `.local/gist-watcher.env` and fill it in |
 | Handler | Absolute executable path in `MUSE_HANDLER` |
 | Arguments | JSON string array in `MUSE_HANDLER_ARGS` |
@@ -32,7 +33,7 @@ flowchart LR
 node --env-file=.local/gist-watcher.env adapters/gist/watcher.mjs
 ```
 
-Requires Node.js 22 or later, with no additional npm dependencies. The GitHub token comes from the environment and is not passed in command arguments, logs, or the handler environment. Select only a handler you have supplied.
+Requires Node.js 22 or later, with no additional npm dependencies. The GitHub token comes from the environment and is not passed in command arguments, logs, or the handler environment. Select only a handler you have supplied. Keep one writer for the shared reply file: do not run an existing G2Muse writer and this watcher against it concurrently. A fresh read followed by PATCH does not merge concurrent writes.
 
 ## Handler input/output
 
@@ -87,9 +88,10 @@ stateDiagram-v2
   uncertain --> claimed: User verifies and retries
 ```
 
-- If interrupted in `handled`, the watcher publishes the saved result without running the handler again.
+- If interrupted in `handled`, the watcher publishes the saved result without running the handler again when the request and ownership checks still match. It recognizes a committed reply even if the PATCH response was lost.
 - A crash during processing or a run exceeding ten minutes has an unknown outcome. Retry explicitly only after checking Muse.
 - Run one watcher per state file, not multiple machines. Concurrent writers to `g2muse-relay.json` are unsupported.
+- A completed request that reappears is never automatically executed again. Cleanup requires the same request digest, exact recorded reply and proven input-file hashes; otherwise it stays for inspection. Old records without this proof and requests already answered under another reply ID are also preserved. One such request does not stop independent requests.
 
 ```sh
 node --env-file=.local/gist-watcher.env adapters/gist/watcher.mjs --retry r_example --once
@@ -99,11 +101,14 @@ node --env-file=.local/gist-watcher.env adapters/gist/watcher.mjs --retry r_exam
 
 | Item | Reference policy |
 |---|---|
-| Replies | Keeps the latest 50 messages |
-| Processed requests / input attachments | Deletes from the current Gist in the same PATCH that publishes the reply |
-| Old output images | Deletes only its own generated files no longer referenced by retained messages/Spaces |
-| Deduplication records | Keeps for 30 days; removes expired records only after the source file is gone |
+| Replies | Keeps the latest 50 watcher-owned You/Muse rows combined. Unowned or legacy rows and unrelated root fields are retained |
+| Processed requests / input attachments | Deletes only verified, unreferenced inputs in the same PATCH as the reply. Changed or shared inputs remain |
+| Output images / avatars | Deletes only exact files recorded as created by this watcher, after checking all retained Gist documents for references. Filename prefixes alone never establish ownership |
+| Local ownership records | New rows carry `muse_relay_owner`; the state file records row and file hashes. Unmarked old rows, edits and collisions are not adopted for deletion |
+| Deduplication records | Detailed completed receipts are compacted after 30 days only when the request file is gone. Request ID/digest tombstones remain until the state file is explicitly removed |
 | Original Gist history | May remain on GitHub; deleting current files does not erase history |
+
+Keep the state file when restarting or moving the watcher. Removing it loses deduplication and ownership evidence. The cleanup reference scan is bounded to four raw-file fetches and 12 MB per pass; unreadable or oversized shared documents defer deletion, while the reply can still be published. References in another history or Space protect attachments. Unknown rows and files may therefore outlive the watcher's 50-row limit.
 
 Gist is not encrypted private storage. Anyone who knows a secret Gist URL can view it. Consider this when choosing to put requests, replies, audio, and images on GitHub.
 

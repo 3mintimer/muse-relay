@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node dev.mjs",
     "build": "node build.mjs",
-    "test": "node --test feedback.test.mjs",
+    "test": "node --test feedback.test.mjs routes.test.mjs",
     "db:generate": "drizzle-kit generate --config=db/drizzle.config.ts"
   },
   "devDependencies": {

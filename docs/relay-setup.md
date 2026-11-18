@@ -2,6 +2,26 @@
 
 [English](relay-setup.md) · [日本語](relay-setup.ja.md)
 
+[Open the setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/)
+
+Choose a method → ask Muse to set it up → enter and save your connection.
+
+| Method | Action | Success looks like |
+|---|---|---|
+| Gist | Settings → Connection → Gist → Check connection → Save | Top status: Gist |
+| Gadget | Settings → Connection → Muse Gadget SDK → Check connection → Save | Top status: Muse Gadget |
+| Both | Chat → type a short message → Send | Muse replies to that message |
+| Both | Chat → Voice → speak → Stop and send | Muse replies to the spoken request |
+| Both | If Soniox is selected: record and send | Final input text and Muse's reply |
+| Both | Optional: open a Space, received image, or G2 home | The requested content or avatar |
+| Both | Reply → Show on glasses | The reply on physical G2 |
+| Both | Away from home: mobile data → send again | A new matching reply |
+
+Voice uses the mode and microphone saved in **Settings → Voice & images**. Relay-side transcription appears only if returned. **Connected / Device online** alone does not verify a Muse reply.
+
+<details>
+<summary>Prepare the relay and select settings</summary>
+
 Everyone receives the same Muse Relay app. Build your own relay, or give Muse the instructions below. Configure the endpoint and credentials in the app.
 
 ```mermaid
@@ -22,6 +42,14 @@ flowchart LR
 
 The Gadget UI names ATOM S3 as the reference device. Implement the relay for your own SDK-compatible device and hosting while preserving the [app contract](protocol.md). You do not have to use the bundled server/watcher or rebuild an EHPK for each user.
 
+| Who handles it | Handoff |
+|---|---|
+| You, in the app | Select the relay and features, enter your credentials, save, then send the verification requests below |
+| Muse / your implementer | Supply the running handler or SDK integration, correlate replies, and export any requested Spaces/images. A copied prompt alone does not start a relay |
+| Relay owner / operator | Keep the handler or home device running; manage credentials, retention, and cleanup |
+
+For an existing G2Muse Gist, preserve its shared history and adapt its existing writer to accept Muse Relay request files. Do not initialize the shared root again or start a second writer. Avatar export is optional on either method: prepare it only on the route where you want images, without copying it to the other relay.
+
 ## 2. Ask Muse to implement it
 
 Choose the relay, voice mode, microphone, and image setting in the app, then copy the setup instructions for Muse. The generated text reflects those choices; copy it again after changing them. Also provide `docs/protocol.md`. Generated instructions do not contain your private URLs or tokens.
@@ -29,12 +57,17 @@ Choose the relay, voice mode, microphone, and image setting in the app, then cop
 | Selection | Instructions for Muse |
 |---|---|
 | Gist / Muse Gadget SDK | Use only the selected method's input/output |
-| Muse transcription | Send WAV to Muse. Gist uses `transcript`; Gadget may include a labeled transcript in the Muse reply when needed |
+| Muse transcription | Send WAV to Muse. Return transcription to the original input when available; a Muse reply alone does not guarantee a returned transcript. [Export rules](protocol.md#voice-transcripts-and-reply-matching) |
 | Soniox | Audio goes to Soniox; only final text goes to Muse. Do not transcribe again with Whisper |
 | G2 / phone microphone | Verify recording from the selected source |
 | Images off / on | Text only / requested image output. Export an avatar only when separately requested. Space text must remain understandable without images |
 
 If you cannot copy from the app, replace the current-settings placeholders below with your selected values.
+
+</details>
+
+<details>
+<summary>Copy for Muse: Gist implementation</summary>
 
 ### Instructions for Gist
 
@@ -48,6 +81,7 @@ Implement and verify these choices. Do not require unselected voice services or 
 
 Preparation:
 - Reuse my GitHub Gist. Only when creating a new Gist, initialize g2muse-relay.json to {"messages":[]}.
+- If G2Muse already writes to this Gist, preserve its messages and add Muse Relay request handling to that writer. Do not run a second writer or overwrite shared history.
 - Receive and store tokens through an available secure credential mechanism; never put them in chat text, source code, or the Gist.
 - Tell me which Gist ID and credential-entry method to use in the app.
 
@@ -76,13 +110,18 @@ Output:
 - Space updates replace the entire list. Include Spaces to retain and preserve their IDs.
 - The reference watcher's Space output contains text and controls. A custom exporter with images enabled may add an image attachment or image_file pointing to a PNG base64 file. Do not put essential information only in images.
 - Keep one writer for g2muse-relay.json and retain unrelated messages that should remain.
-- Set retention and cleanup for processed requests, audio, and images. Explain that Gist history may retain deleted content.
+- Agree on retention and cleanup for processed requests, audio, and images. Preserve existing shared history unless I explicitly choose a shorter retention policy. The reference watcher limits only its own messages to 50 and preserves pre-existing shared history; keep cleanup scoped to records owned by this handler. Keep the file index small enough to list completely, and distinguish app hiding, current-file deletion, and retained Gist revisions.
 
 Completion:
 - Provide app connection instructions; deliver secrets only through a secure destination.
 - First verify one text message I sent and its matching reply. Verify recording, Spaces, or images only when I request those actions. Connection setup alone must not create a Space or avatar.
 - Distinguish acceptance, transcription, Muse completion, and G2 display, and report only what was actually verified.
 ```
+
+</details>
+
+<details>
+<summary>Copy for Muse: Gadget SDK implementation</summary>
 
 ### Instructions for Muse Gadget SDK
 
@@ -140,6 +179,11 @@ Completion:
 - Claim away-from-home access and physical G2 display only if actually verified.
 ```
 
+</details>
+
+<details>
+<summary>Connection and voice settings</summary>
+
 ## 3. Enter app connection settings
 
 ```mermaid
@@ -159,26 +203,56 @@ flowchart TD
 | Voice setting | Additional setup | Audio destination |
 |---|---|---|
 | Transcribe at the relay | Gist: your handler. Gadget: Muse via SDK | Upload the audio file when sending; no captions during recording |
-| Soniox: enter API key, either relay | Enter your own key in app voice settings. New Gist setups use this mode | Audio directly to Soniox; interim text on G2, final text to Muse |
+| Soniox: enter API key, either relay | Enter your own key in app voice settings | Audio directly to Soniox; interim text on G2, final text to Muse |
 | Soniox: temporary-key server, either relay | Issuer URL and authentication. Gadget may reuse its relay settings | Same audio path; the long-lived key stays on the issuer |
 
 The Soniox connection check completes an authenticated session using one second of silence. It uses neither the microphone nor Muse. Entering a key or configuring a server alone does not count as verification. Existing temporary-key configurations remain unchanged after an update.
 
 Enable images only when needed. Direct API-key mode stores the key in Even settings and the device backup; use temporary-key mode if you do not want it stored on the device. Import only phone connection settings, not a device/server configuration JSON.
 
+</details>
+
+<details>
+<summary>Detailed checks and troubleshooting</summary>
+
 ## 4. First checks
 
-| Action | What to verify |
-|---|---|
-| Check connection | The relay is readable |
-| Send a short text | Your message and Muse's reply |
-| Record once using the selected microphone | Muse voice processing/reply, or Soniox interim/final text. Gadget may include a labeled transcript in the Muse reply |
-| Open Spaces | Muse's exported list/cards |
-| Select an item | Text, a button, value adjustment, choices, or recording |
-| Submit an action | Sending → relay acceptance → Muse's published result |
-| With images enabled, ask Muse for an image and open it | Image displayed on G2 through the EvenHub app |
+Use your saved relay and selected features. For voice tests, first save the mode and microphone under **Settings → Voice & images**. Speak a short phrase you can recognize.
 
-A connection check does not verify a Muse response or physical G2 rendering. If Spaces are empty, ask Muse to create/export the intended content.
+| Route | In the app | Confirm |
+|---|---|---|
+| Active relay · Gist / Gadget | **Settings → Connection**: method and endpoint → **Check connection → Save settings** (initial setup: **Save and open**) | Top status names the saved **Gist / Muse Gadget** choice. Checking a draft does not switch it |
+| Text · Gist / Gadget | **Chat → Send** a new message → reply's **Show on glasses** | Matching Muse reply on phone and G2 |
+| Relay transcription · Gist | **Chat → Voice** → speak → **Stop and send** | Spoken words in your input, plus the matching Muse reply |
+| Relay transcription · Gadget | **Chat → Voice** → speak → **Stop and send** | Muse reply to the recording; check transcript availability separately below |
+| Soniox · Gist / Gadget, if selected | Check Soniox in **Voice & images**, save → **Chat → Voice → Stop and send** | Captions/final input text, then Muse reply. A silent connection check is not this test |
+| Space · Gist / Gadget, if requested | **Spaces → Add → Add an exported space** → refresh/add → open an item | Exported content; declared actions produce updated content/value after acceptance |
+| Image · Gist / Gadget, if enabled | Ask Muse for an image → received reply → **Show on glasses** | Image on G2; separate from image input into a Gadget |
+| Avatar · either route, optional | **Settings → G2 display → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
+| Mobile data · Gist / Gadget | Keep required devices/handlers running; away from home, turn phone Wi-Fi off and use mobile data → **Chat → Send** or **Voice → Stop and send** | New matching reply on phone and G2 over mobile data |
+
+**Connected / Device online** is not a Muse round trip. Reading fails → relay operator; no reply after a successful read → Muse/handler implementer; phone reply works but G2 does not → Even/G2 connection and **Show on glasses**.
+
+<details>
+<summary>A reply arrived, but transcription is missing</summary>
+
+The voice label means no displayable transcript, not necessarily missing audio delivery. Gist needs the handler's transcript output; Gadget needs text from the matching SDK user event. Text inside Muse's answer does not update your input. Give the implementer the [transcript contract](protocol.md#voice-transcripts-and-reply-matching). Soniox supplies final input text in the app.
+
+</details>
+
+<details>
+<summary>History and Gist cleanup</summary>
+
+| Action | Scope |
+|---|---|
+| Chat → Hide / Manage history | Local display only; no relay or Muse deletion |
+| Relay cleanup | Owner/Muse removes confirmed processed inputs and unreferenced outputs under the agreed policy; preserve existing shared history |
+| Incomplete Gist file list | Pause new submissions; ask the operator to reconcile processed files. Unlisted does not mean completed |
+| Delete a current Gist file | Previous revisions, forks, and copies are separate |
+
+[Reference cleanup rules](protocol.md#gist-cleanup-and-retention) · [Storage and deletion](data.md). Custom relays need their own retention policy.
+
+</details>
 
 ### Space interaction requirements
 
@@ -196,6 +270,11 @@ flowchart LR
 
 Give Muse the [Space contract](spaces.md) and [JSON example](../examples/spaces.json) for controls, payloads, confirmation buttons, and slider bounds. A microphone starts only when its row is tapped. A slider does not submit until you tap; double-tap cancels. Use the in-app Space practice to try the controls without sending.
 
+</details>
+
+<details>
+<summary>Reference implementations</summary>
+
 ## Reference implementations
 
 | Component | Instructions |
@@ -206,3 +285,5 @@ Give Muse the [Space contract](spaces.md) and [JSON example](../examples/spaces.
 | Custom implementation | [App input/output contract](protocol.md) |
 
 Existing G2Muse messages are readable, but its watcher needs adaptation for Muse Relay request files. Image input to Muse through the reference ATOM is disabled by default. Image replies and image cards use separate output paths. Gist history and Muse/Soniox data handling follow those services and the user's settings.
+
+</details>

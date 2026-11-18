@@ -6,7 +6,7 @@
 
 | したいこと | 入口 |
 |---|---|
-| GitHub登録なしで要望・質問を送る | [ガイドの非公開受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback) |
+| GitHub登録なしで要望・質問を送る | [ガイドの非公開受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#feedback) |
 | 公開で質問・不具合・改善案を扱う | [GitHubのIssueフォーム](https://github.com/3mintimer/muse-relay/issues/new/choose) |
 | 既存の要望を探す | [Issues](https://github.com/3mintimer/muse-relay/issues) |
 | コードや資料を改善する | 関連Issueを確認し、変更を小さくまとめてPull Requestを作る |

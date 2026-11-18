@@ -92,9 +92,37 @@ Gadget attachment format:
 | `device` | Reference Gadget connection state, optional |
 | `capabilities` | `images` permits image input from app to Muse, independently of received-image display. Optional boolean `soniox` says a long-lived key is configured on the server, not that connectivity has been verified |
 
-For paired input/answer display, export the input as `from:"You", id:<original request ID>, text:<input or transcript>` and the answer as `from:"Muse", reply_to:<same request ID>`. Update transcription on the original You ID. An independent Muse post omits `reply_to` and must not be associated with unrelated input.
+### Voice transcripts and reply matching
 
-Soniox final text is saved by the app. The Gist watcher applies handler `transcript` to the same You message. The Gadget reference relay uses text from an ACK-matching SDK `message.user`, but cannot guarantee that the SDK supplies transcription. A custom Gist exporter may return a separate You transcript ID if its `reply_to` identifies the original request.
+Receiving a Muse answer and receiving a transcript are separate results. Without displayable input text, G2 shows a voice-message label; it does not reconstruct what was said.
+
+<details>
+<summary>Fields for the relay / Muse implementer</summary>
+
+| Path | Input text returned to the app |
+|---|---|
+| Gist reference watcher | Handler `transcript` → `You.text`, with `You.id` equal to the original request ID. If omitted, the watcher uses request `text`, which may be empty for audio |
+| Gadget reference relay | For an audio request, an SDK `message.user` whose message ID matches an ACK ID updates the original `You.text` from `payload.display_text`, `payload.text`, or `payload.content`. The SDK may supply no displayable transcript |
+| Soniox, either relay | Final text becomes the app request's `text` and its local You message. The relay receives text rather than a WAV to transcribe |
+
+Use the original app request ID for both the input and the answer's `reply_to`:
+
+```json
+{"messages":[
+  {"id":"r_voice1","from":"You","type":"voice-note","text":"What is next?","ts":1794880000},
+  {"id":"muse_r_voice1","from":"Muse","type":"text","text":"Here is your next item.","ts":1794880012,"reply_to":"r_voice1"}
+]}
+```
+
+For Gadget, the SDK user message ID is `payload.message_id`, `event.message_id`, or `payload.id`; accepted ACK IDs are `result.message_id` and optional `result.reply_to_message_id`. The [dedicated-session checks](#atom-and-relay) still apply. SDK IDs are not substituted for the app request ID in the exported messages.
+
+A custom Gist exporter may use a separate transcript ID, but that `from:"You"` row must set `reply_to` to the original request ID; the Muse answer references the same original ID. An independent Muse post omits `reply_to` and must not be paired with unrelated input.
+
+Putting a labeled transcript in `Muse.text` does not update `You.text`. Reference `POST /v1/messages` accepts Muse output only, so it cannot create a You transcript. Do not invent an SDK user event to work around a missing transcript.
+
+Sources: [Gist publication](../adapters/gist/watcher.mjs), [Gadget event handling](../server/core.mjs), [chat pairing](../src/core/chat.ts).
+
+</details>
 
 ### Muse avatar on G2 home
 
@@ -151,7 +179,7 @@ One profile is retained independently of chat history limits. When replaced/clea
 | `muse-relay-output-<id>.base64` | Reference watcher | Muse image reply |
 | `muse-relay-avatar-<sha256>.base64` | Reference watcher | Profile image base64 |
 
-The app writes a distinct request file instead of appending to the shared `messages` array. Muse-side processing reflects input and replies in `g2muse-relay.json`. Avoid multiple writers overwriting the same JSON.
+The app writes a distinct request file instead of appending to the shared `messages` array. Muse-side processing reflects input and replies in `g2muse-relay.json`. If G2Muse already owns that file, preserve existing history and extend its writer to handle Muse Relay requests; do not reinitialize it or run a second writer. A separate Gadget relay does not need a copy of this Gist profile or history.
 
 Audio request example:
 
@@ -197,9 +225,36 @@ Reference: [adapters/gist](../adapters/gist/README.md). Ordinary polling does no
 | `https://api.github.com/gists/<id>` | GitHub token | GET / PATCH |
 | API-provided `https://gist.githubusercontent.com/...` | None | Retrieve a `truncated:true` file |
 
-Raw-file fetches omit the token and do not follow redirects to other hosts. GitHub may truncate file content over roughly 1 MB and file lists beyond 300 files. Muse-side processing cleans completed files. [GitHub Gists API](https://docs.github.com/en/rest/gists/gists#truncation)
+Raw-file fetches omit the token and reject redirects. GitHub may truncate file content over roughly 1 MB and file lists beyond 300 files. These are different cases. [GitHub Gists API](https://docs.github.com/en/rest/gists/gists#truncation)
+
+| Reported condition | Reference behavior |
+|---|---|
+| A listed file has `truncated:true` | App/watcher fetch that file's API-provided raw URL within their size limit |
+| The Gist itself has `truncated:true` | The reference watcher stops that read with an error. The app does not explicitly reject the incomplete index; unlisted files can be missing from its view. A successful root read is not proof that all files were listed |
+
+Do not treat unlisted requests as completed. The owner must reconcile processed files and restore a complete index before resuming the watcher. Keep shared history and files still referenced by messages, Spaces, or profile.
 
 A Secret Gist is unlisted, readable by anyone with its URL, and not encrypted by this app. Audio, images, and conversations are stored on GitHub and may remain in revision history after deletion.
+
+### Gist cleanup and retention
+
+These are the bundled watcher's policies, not requirements for every relay. Agree on retention before using it with an existing shared Gist.
+
+<details>
+<summary>Cleanup contract for the operator / implementer</summary>
+
+| Item | Reference behavior |
+|---|---|
+| Processed request and its input audio/image files | Publish the saved result and remove confirmed, unreferenced inputs in one PATCH. Keep inputs whose ownership or references cannot be verified |
+| Display history | Latest 50 messages written by this watcher, including its You and Muse rows; preserves pre-existing G2Muse or other shared history |
+| Generated output files | Remove files whose contents match this writer’s record and whose names are no longer referenced in any retained Gist file |
+| Duplicate requests | After 30 days and once the request file is gone, the watcher compacts the local receipt to its ID and content digest to prevent replay |
+| App Hide / Manage history | Changes local visibility only; sends no Gist deletion |
+| Gist revisions | Not erased by removing current files; forks/copies and Muse-held data remain separate |
+
+Run one writer for the shared root. Preserve saved results after interruption instead of blindly rerunning a Muse action. See [watcher operations](../adapters/gist/README.md) and [data deletion](data.md).
+
+</details>
 
 ## Muse Gadget SDK method
 
@@ -362,7 +417,7 @@ flowchart LR
 
 Choose your API key entered in the app or a temporary key from an issuer. Direct-key mode needs no additional server even with Gist. Do not embed keys in the shared build or Muse instructions. The app uses the selected key with `wss://stt-rt.soniox.com/transcribe-websocket` and sends audio directly to Soniox; Muse receives final text. Gist users may separately configure a temporary-key issuer.
 
-For separately displayed Muse-mode transcription, the Gist watcher saves handler `transcript` as `from:"You"`. Reference Gadget `POST /v1/messages` forces `from:"Muse"`; a labeled transcript may appear inside a Muse reply, but this API cannot create a user message. Soniox final text becomes the app's user message and is not transcribed again.
+For input transcription and its matching answer, use the [transcript contract](#voice-transcripts-and-reply-matching). Soniox final text is already the app input; do not transcribe it again.
 
 Temporary-key response: `{"api_key":"snx_temp_...","expires_at":"..."}`. The reference issuer requests `usage_type:transcribe_websocket`, `expires_in_seconds:60`, `single_use:true`, and `max_session_duration_seconds:150`. [Soniox contract](https://docs.soniox.com/authentication/temporary-api-keys)
 
@@ -384,7 +439,7 @@ These are app and bundled reference limits. Custom relays must respect the app's
 | Spaces | Reference relays: at most 20, each with 50 cards |
 | HTTP body | Reference Gadget server: at most 2,000,000 bytes |
 | Jobs | Gadget: one executing, 20 queued, 15-minute expiry |
-| History | Gist watcher: 50 messages / Gadget server: 100 |
+| History | Gist watcher: 50 of its own messages, preserving other shared history / Gadget server: 100 |
 | Read/hidden markers | App-local; do not delete relay data |
 
 Users/Muse manage relay retention and removal of processed audio/images. Changing app settings does not erase Gist history or Muse data.

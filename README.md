@@ -2,9 +2,9 @@
 
 [English](README.md) · [日本語](README.ja.md)
 
-Muse Relay is an EvenHub app for Even G2. Read Muse replies, images, and exported Spaces on G2, and send text or voice from your phone or glasses. Everyone uses the same app build; each user configures their own Gist or HTTPS relay, Muse-side processing, and credentials.
+Send a message from your phone or Even G2 and read Muse’s reply on your glasses. The setup guide lets you choose your own relay and copy the instructions for Muse.
 
-[User and setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/) · [Questions, problems, and ideas](docs/feedback.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+[Set up Muse Relay](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup) · [Using a G2Muse Gist?](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#g2muse) · [Questions and feedback](docs/feedback.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
 ## What you need
 

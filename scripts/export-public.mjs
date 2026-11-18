@@ -5,6 +5,7 @@ import { lstat, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/pr
 import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isGuidePage } from '../guide/web/language.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestName = 'PUBLIC-SOURCE-MANIFEST.json';
@@ -115,10 +116,13 @@ function checkLinks(files) {
       try { decoded = decodeURIComponent(target); } catch { report(file, 'invalid local link encoding'); continue; }
       const [pathWithQuery, fragment] = decoded.split('#');
       const path = pathWithQuery.split('?')[0];
-      if (path.startsWith('/api/') && file.startsWith('guide/web/')) continue;
-      const webRoot = file.startsWith('guide/web/') ? join(root, 'guide/web') : root;
-      const resolved = !path ? file : relative(root, path.startsWith('/') ? resolve(webRoot, '.' + path) : resolve(root, dirname(file), path)).split(sep).join('/');
-      if ((!resolved && path === '/') || (resolved === 'guide/web' && path === '/')) continue;
+      const guideAsset = file.startsWith('guide/web/');
+      if (guideAsset && path.startsWith('/api/')) continue;
+      const webRoot = guideAsset ? join(root, 'guide/web') : root;
+      // Localized guide pages share one HTML source and the same section anchors.
+      const documentPath = guideAsset && isGuidePage(path) ? '/index.html' : path;
+      const resolved = !documentPath ? file : relative(root, documentPath.startsWith('/') ? resolve(webRoot, '.' + documentPath) : resolve(root, dirname(file), documentPath)).split(sep).join('/');
+      if (!resolved && path === '/') continue;
       if (!exists(resolved)) { report(file, 'local link outside public file list'); continue; }
       if (fragment && files.get(resolved)?.text && /\.(?:md|html)$/.test(resolved)
         && !headings(files.get(resolved).text).has(fragment)) report(file, 'local anchor not found');

@@ -1,4 +1,5 @@
 import { handleFeedback } from './feedback.mjs';
+import { isGuidePage, languageFromUrl, languageHref } from './web/language.js';
 
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; manifest-src 'self'";
 const SECURITY_HEADERS = {
@@ -22,9 +23,11 @@ function plain(status, text, headers = {}) {
 export function createGuide(assets = embeddedAssets) {
   return {
     async fetch(request, env) {
-      const path = new URL(request.url).pathname;
+      const url = new URL(request.url), path = url.pathname;
       if (path === '/api/feedback') return finish(await handleFeedback(request, env), request.method);
-      const name = path === '/' ? '/index.html' : path;
+      const page = isGuidePage(path);
+      const language = languageFromUrl(url);
+      const name = page ? languageHref(language) + 'index.html' : path;
       if (!Object.hasOwn(assets, name)) return finish(plain(404, 'Not found'), request.method);
       if (!['GET', 'HEAD'].includes(request.method)) return finish(plain(405, 'Method not allowed', { allow: 'GET, HEAD' }), request.method);
       const asset = assets[name];
@@ -32,6 +35,7 @@ export function createGuide(assets = embeddedAssets) {
         'content-type': asset.type,
         'cache-control': name.endsWith('.html') ? 'no-cache' : 'public, max-age=0, must-revalidate',
         'etag': asset.etag,
+        ...(page ? { 'content-language': language } : {}),
       };
       if (request.headers.get('if-none-match')?.split(',').some(value => value.trim().replace(/^W\//, '') === asset.etag || value.trim() === '*')) {
         return finish(new Response(null, { status: 304, headers }), request.method);

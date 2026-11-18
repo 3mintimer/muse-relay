@@ -1,7 +1,7 @@
 import {parseSpaceControl,parseSpaceAction,matchesSpaceAction} from '../../protocol/space-controls.mjs';
 import { validateProfile } from '../../server/core.mjs';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { dirname, resolve, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,6 +13,8 @@ const PROFILE = 'muse-relay-profile.json';
 const MAX_FILE = 6_000_000;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const replyId = id => `muse_${id.length <= 123 ? id : createHash('sha256').update(id).digest('hex')}`;
+const hash = value => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
+class InspectionError extends Error {}
 function responseError(response, operation) {
   const error = new Error(`GitHub ${operation} failed (HTTP ${response.status}).`);
   if ([403, 429].includes(response.status)) error.retryAfterMs = Math.max(60_000, Number(response.headers.get('retry-after') || 0) * 1000, response.headers.get('x-ratelimit-remaining') === '0' ? Number(response.headers.get('x-ratelimit-reset') || 0) * 1000 - Date.now() : 0);
@@ -166,129 +168,249 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
   try { state = safeJson(await readFile(stateFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (state.version !== 1 || !object(state.requests)) throw new Error('Unsupported watcher state.');
+  state.writerId ||= randomUUID();
+  if (typeof state.writerId !== 'string' || !ID.test(state.writerId)) throw new Error('Unsupported watcher state.');
+  for (const name of ['requests', 'rows', 'files', 'completed']) {
+    if (state[name] !== undefined && !object(state[name])) throw new Error('Unsupported watcher state.');
+    state[name] = Object.assign(Object.create(null), state[name]);
+  }
   async function save() {
     await mkdir(dirname(stateFile), { recursive: true, mode: 0o700 });
     await writeFile(`${stateFile}.tmp`, JSON.stringify(state), { mode: 0o600 });
     await rename(`${stateFile}.tmp`, stateFile);
   }
-  async function hydrate(raw) {
+  async function inbound() {
+    const value = store.files[ROOT] ? safeJson(await store.file(ROOT)) : { messages: [] };
+    if (!object(value) || !Array.isArray(value.messages)) throw new Error('Inbound messages must be an array.');
+    return value;
+  }
+  const ownedRow = message => {
+    const owner = object(message) && message.muse_relay_owner;
+    return object(owner) && owner.writer === state.writerId && ID.test(owner.request_id || '')
+      && ((message.id === owner.request_id && message.from === 'You')
+        || (message.id === replyId(owner.request_id) && message.from === 'Muse' && message.reply_to === owner.request_id))
+      && state.rows[message.id] === hash(message);
+  };
+  async function hydrate(raw, inputs) {
     const request = { id: raw.id, kind: raw.kind, text: raw.text, created_at: raw.created_at, ...(raw.space_id ? { space_id: raw.space_id } : {}) };
     if (raw.space_action) {
       const spaces = store.files[SPACES] ? safeJson(await store.file(SPACES)).spaces : [];
       const control = spaces?.find(space=>space.id===raw.space_id)?.items?.find(item=>item.id===raw.space_action.item_id)?.control;
-      if (!matchesSpaceAction(control,raw.space_action)) throw new Error('Space control changed; refresh before trying again.');
+      if (!matchesSpaceAction(control,raw.space_action)) throw new InspectionError('Space control changed; refresh before trying again.');
       request.space_action = raw.space_action;
     }
     for (const kind of ['audio', 'image']) {
       const name = raw[`${kind}_file`];
       if (!name) continue;
+      if (!store.files[name]) throw new InspectionError('Request attachment is missing; inspect before handling.');
       const mime = raw[`${kind}_mime`];
       const allowed = kind === 'audio' ? ['audio/wav', 'audio/ogg'] : ['image/png', 'image/jpeg', 'image/webp'];
-      const data = (await store.file(name)).replace(/[\r\n]/g, '');
-      if (!allowed.includes(mime) || data.length > 5_500_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new Error('Invalid request attachment.');
+      const original = await store.file(name), data = original.replace(/[\r\n]/g, '');
+      if (!allowed.includes(mime) || data.length > 5_500_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new InspectionError('Invalid request attachment.');
+      inputs[name] = hash(original);
       request[kind] = { mime, data_base64: data, name: typeof raw[`${kind}_name`] === 'string' ? raw[`${kind}_name`].slice(0, 128) : name };
     }
     return request;
   }
-  async function publish(raw, result) {
+  async function verifiedInputs(raw, record, requireAttachments = false) {
+    const names = [`${REQUEST_PREFIX}${raw.id}.json`, ...['audio', 'image'].map(kind => raw[`${kind}_file`]).filter(Boolean)];
+    for (const name of names) {
+      if (!record.inputs?.[name]) return false;
+      if (!store.files[name]) { if (requireAttachments || name === names[0]) return false; continue; }
+      const content = await store.file(name);
+      if (hash(content) !== record.inputs[name]) return false;
+      if (name === names[0] && hash(validateRequest(safeJson(content), name)) !== record.digest) return false;
+    }
+    return true;
+  }
+  async function published(id, record, root) {
+    const matches = root.messages.filter(message => object(message) && message.id === replyId(id));
+    if (matches.length !== 1 || !record.receipt || hash(matches[0]) !== record.receipt.reply
+      || !ownedRow(matches[0]) || matches[0].reply_to !== id || matches[0].muse_relay_owner.digest !== record.digest) return false;
+    for (const [name, digest] of Object.entries(record.receipt.outputs)) {
+      if (!store.files[name] || hash(await store.file(name)) !== digest) return false;
+    }
+    return true;
+  }
+  async function output(files, name, content) {
+    const digest = hash(content);
+    if (store.files[name]) {
+      if (hash(await store.file(name)) !== digest) throw new InspectionError('Output filename collision; inspect the existing file before continuing.');
+      // Identical unowned content can be referenced, but never adopted for deletion.
+    } else { files[name] = { content }; state.files[name] = digest; }
+    return digest;
+  }
+  async function cleanup(files, inputs = {}) {
+    const candidates = new Set(), contents = new Map();
+    let externalReads = 0, bytes = 0;
+    const content = async name => {
+      if (!contents.has(name)) {
+        if (!files[name] && (store.files[name]?.truncated || typeof store.files[name]?.content !== 'string') && ++externalReads > 4) throw new Error('Cleanup read budget');
+        const text = files[name]?.content ?? await store.file(name);
+        bytes += Buffer.byteLength(text);
+        if (bytes > 12_000_000) throw new Error('Cleanup byte budget');
+        contents.set(name, text);
+      }
+      return contents.get(name);
+    };
+    try {
+      for (const [name, digest] of Object.entries({ ...state.files, ...inputs })) {
+        if (store.files[name] && !Object.hasOwn(files, name) && hash(await content(name)) === digest) candidates.add(name);
+      }
+      if (!candidates.size) return;
+      // Search all retained Gist documents, including other histories and Spaces.
+      // If a retained request references an input, retain that input as well.
+      const names = new Set([...Object.keys(store.files), ...Object.keys(files)]);
+      let changed;
+      do {
+        changed = false;
+        for (const name of names) if (files[name] !== null && !candidates.has(name)) {
+          const text = await content(name);
+          for (const candidate of candidates) if (text.includes(candidate)) { candidates.delete(candidate); changed = true; }
+        }
+      } while (changed);
+    } catch {
+      return; // An unreadable shared document is not evidence that its references are absent.
+    }
+    for (const name of candidates) files[name] = null;
+  }
+  async function patch(files) {
+    if (!Object.keys(files).length) return;
+    await store.patch(files);
+    for (const [name, value] of Object.entries(files)) if (value === null) delete state.files[name];
+  }
+  async function cleanupCompleted(raw, record) {
+    await store.read(true);
+    if (!await published(raw.id, record, await inbound()) || !await verifiedInputs(raw, record)) return false;
+    const files = {};
+    await cleanup(files, record.inputs);
+    await patch(files);
+    return files[`${REQUEST_PREFIX}${raw.id}.json`] === null;
+  }
+  async function publish(raw, record) {
+    const result = record.result;
     // Refresh before updating the single inbound file. Other writers to ROOT are unsupported.
     await store.read(true);
-    const inbound = store.files[ROOT] ? safeJson(await store.file(ROOT)) : { messages: [] };
-    if (!object(inbound) || !Array.isArray(inbound.messages)) throw new Error('Inbound messages must be an array.');
+    const root = await inbound();
+    if (!await verifiedInputs(raw, record, true)) throw new InspectionError('Request files changed or ownership is unknown; inspect before publishing.');
     const time = Math.floor(now() / 1000);
     const ownId = replyId(raw.id);
-    const keep = inbound.messages.filter(message => object(message) && message.id !== ownId && message.id !== raw.id);
-    keep.push({ id: raw.id, from: 'You', type: raw.audio_file ? 'voice-note' : raw.image_file ? 'image' : 'text', text: result.transcript ?? raw.text, ts: raw.created_at });
-    const message = { id: ownId, from: 'Muse', type: result.image ? 'image' : 'text', text: result.text, ts: time, reply_to: raw.id };
+    if ([raw.id, ownId].some(id => root.messages.filter(message => object(message) && message.id === id).length > 1)) {
+      throw new InspectionError('Message ownership collision; existing history was preserved.');
+    }
+    for (const message of root.messages) if (object(message) && ([raw.id, ownId].includes(message.id)
+      || (['You', 'Muse'].includes(message.from) && message.reply_to === raw.id))
+      && (!ownedRow(message) || message.muse_relay_owner.request_id !== raw.id || message.muse_relay_owner.digest !== record.digest)) {
+      throw new InspectionError('Message ownership collision; existing history was preserved.');
+    }
+    const owner = { writer: state.writerId, request_id: raw.id, digest: record.digest };
+    const input = { id: raw.id, from: 'You', type: raw.audio_file ? 'voice-note' : raw.image_file ? 'image' : 'text', text: result.transcript ?? raw.text, ts: raw.created_at, muse_relay_owner: owner };
+    const message = { id: ownId, from: 'Muse', type: result.image ? 'image' : 'text', text: result.text, ts: time, reply_to: raw.id, muse_relay_owner: owner };
+    const keep = root.messages.filter(message => !object(message) || ![ownId, raw.id].includes(message.id));
     const files = {};
+    const outputs = {};
     if (result.image) {
       message.image_file = `muse-relay-output-${raw.id}.base64`;
       message.mime_type = result.image.mime;
-      files[message.image_file] = { content: result.image.data_base64 };
+      outputs[message.image_file] = await output(files, message.image_file, result.image.data_base64);
     }
-    keep.push(message);
-    const retained = keep.slice(-50);
-    files[ROOT] = { content: JSON.stringify({ ...inbound, messages: retained }) };
-    if (result.spaces !== undefined) files[SPACES] = { content: JSON.stringify({ spaces: result.spaces }) };
-    let profile;
+    keep.push(input, message);
+    state.rows[input.id] = hash(input); state.rows[message.id] = hash(message);
+    const counts = new Map();
+    for (const message of keep) if (object(message)) counts.set(message.id, (counts.get(message.id) || 0) + 1);
+    let remaining = 50;
+    const retained = keep.slice().reverse().filter(message => !ownedRow(message) || counts.get(message.id) !== 1 || remaining-- > 0).reverse();
+    files[ROOT] = { content: JSON.stringify({ ...root, messages: retained }) };
+    if (result.spaces !== undefined) {
+      const previous = store.files[SPACES] ? safeJson(await store.file(SPACES)) : {};
+      if (!object(previous)) throw new Error('Spaces document must be an object.');
+      files[SPACES] = { content: JSON.stringify({ ...previous, spaces: result.spaces }) };
+    }
     if (result.profile !== undefined) {
-      profile = structuredClone(result.profile);
+      const profile = structuredClone(result.profile);
       if (profile.avatar) {
-        const hash = createHash('sha256').update(JSON.stringify(profile.avatar)).digest('hex');
-        profile.avatar_file = `muse-relay-avatar-${hash}.base64`;
-        files[profile.avatar_file] = { content: profile.avatar.data_base64 };
+        profile.avatar_file = `muse-relay-avatar-${hash(profile.avatar)}.base64`;
+        await output(files, profile.avatar_file, profile.avatar.data_base64);
         delete profile.avatar;
       }
-      files[PROFILE] = { content: JSON.stringify({ profile }) };
-    } else profile = store.files[PROFILE] ? safeJson(await store.file(PROFILE)).profile : inbound.profile;
-    files[`${REQUEST_PREFIX}${raw.id}.json`] = null;
-    for (const kind of ['audio', 'image']) if (raw[`${kind}_file`]) files[raw[`${kind}_file`]] = null;
-    const retainedOutput = new Set(retained.map(item => item.image_file).filter(Boolean));
-    if (typeof profile?.avatar_file === 'string') retainedOutput.add(profile.avatar_file);
-    const spaceDocuments = [inbound.spaces, result.spaces];
-    if (result.spaces === undefined && store.files[SPACES]) spaceDocuments.push(safeJson(await store.file(SPACES)).spaces);
-    for (const spaces of spaceDocuments) if (Array.isArray(spaces)) {
-      for (const space of spaces) if (Array.isArray(space?.items)) {
-        for (const item of space.items) if (typeof item?.image_file === 'string') retainedOutput.add(item.image_file);
-      }
+      const previous = store.files[PROFILE] ? safeJson(await store.file(PROFILE)) : {};
+      if (!object(previous)) throw new Error('Profile document must be an object.');
+      files[PROFILE] = { content: JSON.stringify({ ...previous, profile }) };
     }
-    // Only this adapter's own output files; never delete unrelated Gist files.
-    for (const file of Object.keys(store.files)) if ((file.startsWith('muse-relay-output-') || file.startsWith('muse-relay-avatar-')) && file.endsWith('.base64') && !retainedOutput.has(file)) files[file] = null;
-    await store.patch(files);
+    record.receipt = { reply: hash(message), outputs };
+    await save(); // Proof survives a successful PATCH whose response is lost.
+    await cleanup(files, record.inputs);
+    await patch(files);
+    state.rows = Object.assign(Object.create(null), Object.fromEntries(retained.filter(ownedRow).map(message => [message.id, hash(message)])));
   }
   async function tick() {
     await store.read();
     const names = Object.keys(store.files).filter(name => name.startsWith(REQUEST_PREFIX) && name.endsWith('.json'));
     // A PATCH can succeed even if its response is lost. Detect that without rerunning the handler.
     for (const [id, entry] of Object.entries(state.requests)) if (entry.status === 'handled' && !names.includes(`${REQUEST_PREFIX}${id}.json`)) {
-      const inbound = store.files[ROOT] ? safeJson(await store.file(ROOT)) : {};
-      if (Array.isArray(inbound.messages) && inbound.messages.some(message => message.id === replyId(id))) {
+      if (await published(id, entry, await inbound())) {
         entry.status = 'done'; entry.doneAt = now(); delete entry.result;
       } else entry.status = 'uncertain';
       await save();
     }
     const requests = [];
-    for (const name of names) requests.push(validateRequest(safeJson(await store.file(name)), name));
+    let handled = 0, inspection = 0;
+    for (const name of names) {
+      const content = await store.file(name);
+      try { requests.push(validateRequest(safeJson(content), name)); } catch { inspection++; }
+    }
     requests.sort((a, b) => a.created_at - b.created_at);
-    let handled = 0;
     for (const raw of requests) {
-      const digest = createHash('sha256').update(JSON.stringify(raw)).digest('hex');
-      let record = state.requests[raw.id];
-      if (record && record.digest !== digest) throw new Error('A completed request ID was reused with different content.');
-      if (record?.status === 'done') continue;
-      if (record?.status === 'claimed') {
-        if (record.claimUntil <= now()) { record.status = 'uncertain'; await save(); }
-        continue;
-      }
-      if (record?.status === 'uncertain') continue;
-      if (!record) {
-        const request = await hydrate(raw);
-        record = { status: 'claimed', digest, claimedAt: now(), claimUntil: now() + 10 * 60_000 };
-        state.requests[raw.id] = record;
-        await save();
-        try {
-          record.result = validateResult(await handler(request));
-          record.status = 'handled';
-          await save();
-        } catch {
-          record.status = 'uncertain';
-          await save();
-          throw new Error('Handler result is unknown. Inspect it before explicitly retrying this request.');
+      try {
+        const digest = hash(raw);
+        let record = state.requests[raw.id];
+        if ((record && record.digest !== digest) || (state.completed[raw.id] && state.completed[raw.id] !== digest)) throw new InspectionError('A completed request ID was reused with different content.');
+        if (state.completed[raw.id]) { inspection++; continue; }
+        if (record?.status === 'done') { if (!await cleanupCompleted(raw, record)) inspection++; continue; }
+        if (record?.status === 'claimed') {
+          if (record.claimUntil <= now()) { record.status = 'uncertain'; await save(); }
+          continue;
         }
-      }
-      if (record.status === 'handled') {
-        await publish(raw, record.result);
-        record.status = 'done';
-        record.doneAt = now();
-        delete record.result;
-        await save();
-        handled++;
+        if (record?.status === 'uncertain') continue;
+        if (!record) {
+          if ((await inbound()).messages.some(message => object(message) && ([raw.id, replyId(raw.id)].includes(message.id)
+            || (['You', 'Muse'].includes(message.from) && message.reply_to === raw.id)))) {
+            throw new InspectionError('Request ID already appears in shared history; inspect before handling.');
+          }
+          const inputs = { [`${REQUEST_PREFIX}${raw.id}.json`]: hash(await store.file(`${REQUEST_PREFIX}${raw.id}.json`)) };
+          const request = await hydrate(raw, inputs);
+          record = { status: 'claimed', digest, inputs, claimedAt: now(), claimUntil: now() + 10 * 60_000 };
+          state.requests[raw.id] = record;
+          await save();
+          try {
+            record.result = validateResult(await handler(request));
+            record.status = 'handled';
+            await save();
+          } catch {
+            record.status = 'uncertain';
+            await save();
+            throw new Error('Handler result is unknown. Inspect it before explicitly retrying this request.');
+          }
+        }
+        if (record.status === 'handled') {
+          await publish(raw, record);
+          record.status = 'done';
+          record.doneAt = now();
+          delete record.result;
+          await save();
+          handled++;
+        }
+      } catch (error) {
+        if (!(error instanceof InspectionError)) throw error;
+        inspection++;
       }
     }
-    // Retain dedupe records 30 days, and only drop them after the source file is gone.
-    for (const [id, record] of Object.entries(state.requests)) if (record.status === 'done' && now() - record.doneAt > 30 * 86400_000 && !names.includes(`${REQUEST_PREFIX}${id}.json`)) delete state.requests[id];
+    // Compact old receipts, but retain ID/digest tombstones to prevent replaying old work.
+    for (const [id, record] of Object.entries(state.requests)) if (record.status === 'done' && now() - record.doneAt > 30 * 86400_000 && !names.includes(`${REQUEST_PREFIX}${id}.json`)) {
+      state.completed[id] = record.digest; delete state.requests[id];
+    }
     await save();
-    return { handled, pending: requests.length, uncertain: Object.values(state.requests).filter(record => record.status === 'uncertain').length };
+    return { handled, pending: requests.length, inspection, uncertain: Object.values(state.requests).filter(record => record.status === 'uncertain').length };
   }
   async function retry(id) {
     const entry = state.requests[id];
@@ -327,14 +449,16 @@ async function main() {
     });
     if (process.argv[2] === '--retry') { await watcher.retry(process.argv[3]); console.log('Interrupted request cleared for an explicit retry.'); }
     const poll = Math.max(10, Math.min(300, Number(process.env.GIST_POLL_SECONDS) || 15)) * 1000;
-    let lastUncertain = 0;
+    let lastUncertain = 0, lastInspection = 0;
     do {
       let delay = Math.max(poll, (store.minimumPollSeconds || 0) * 1000);
       try {
         const result = await watcher.tick();
         if (result.handled) console.log(`Completed ${result.handled} request(s).`);
         if (result.uncertain && result.uncertain !== lastUncertain) console.log(`${result.uncertain} interrupted request(s) require inspection before retrying.`);
+        if (result.inspection && result.inspection !== lastInspection) console.log(`${result.inspection} shared request(s) were preserved for inspection; no automatic retry.`);
         lastUncertain = result.uncertain;
+        lastInspection = result.inspection;
       } catch (error) { console.error(error.message); delay = Math.max(poll, error.retryAfterMs || 60_000); }
       if (process.argv.includes('--once')) break;
       for (let elapsed = 0; elapsed < delay && !stopping; elapsed += 1000) await new Promise(resolveTimer => setTimeout(resolveTimer, 1000));

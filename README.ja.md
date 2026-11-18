@@ -2,11 +2,9 @@
 
 [English](README.md) · [日本語](README.ja.md)
 
-Muse Relay is an EvenHub app for Even G2. Each user supplies a Gist or HTTPS relay, Muse-side processing, and credentials.
+スマートフォンや Even G2 からメッセージを送り、グラスで Muse の返信を読めます。ガイドで自分の中継方式を選ぶと、Muse に渡す設定の依頼文をコピーできます。
 
-Even G2 で Muse の返信・画像・書き出されたスペースを表示し、スマートフォンまたは G2 からテキスト・音声を送るアプリです。配布アプリは全利用者共通で、接続先と認証情報はアプリ内で設定します。
-
-[使い方・初回設定ガイド](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/) · [質問・不具合・提案](docs/feedback.ja.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+[初回設定を始める](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup) · [G2Muse の Gist を引き継ぐ](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#g2muse) · [質問・フィードバック](docs/feedback.ja.md) · [プライバシー](PRIVACY.md) · [セキュリティ](SECURITY.md)
 
 ## 利用するもの
 
@@ -65,7 +63,7 @@ Secret Gist も URL を知る人は閲覧でき、変更履歴を持ちます。
 | 変更提案 | [参加方法](CONTRIBUTING.ja.md) |
 | 配布区分・リリース運用 | [リリース手順](docs/releases.ja.md) |
 
-各資料の冒頭で英語・日本語を切り替えられます。公開Issueは下のフォームを選んでください。[GitHub登録なしの非公開受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#feedback)も利用できます。
+各資料の冒頭で英語・日本語を切り替えられます。公開Issueは下のフォームを選んでください。[GitHub登録なしの非公開受付](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#feedback)も利用できます。
 
 | 内容 | 日本語 | English |
 | --- | --- | --- |

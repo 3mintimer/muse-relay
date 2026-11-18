@@ -53,13 +53,15 @@ Soniox の録音を中止しても、すでに Soniox へ送った音声を取�
 | 端末の WebView / ブラウザー | `muse-relay-state-v1` に設定のバックアップ。`muse-relay-cache-v1` に直近 50 メッセージ、スペース、プロフィールの名前・参照・更新時刻などの表示キャッシュ。取得画像本体は永続キャッシュから除外 | [persistence.ts](../src/core/persistence.ts)、[controller.ts](../src/core/controller.ts) |
 | 録音中のアプリメモリー | PCM と暫定文字。音声バッファは録音終了処理で解放。送信後の文字はメッセージとして残る | [controller.ts](../src/core/controller.ts) |
 | Gist | 要求、返信、音声・画像、書き出されたスペース・プロフィール。現在のファイルを消しても Git の履歴や既存のコピーは別 | [gist.ts](../src/relay/gist.ts) |
-| 参考 Gist watcher | 自分の状態ファイルに処理記録。反映待ちの結果も保存。返信は直近 50 件、完了記録は元ファイル消失後かつ 30 日経過後に整理 | [watcher.mjs](../adapters/gist/watcher.mjs) |
+| 参考 Gist watcher | 状態ファイルに処理・結果・所有ハッシュを保存。所有を確認できるYou/Muse行だけを合計50件に制限し、既存・共有の履歴は保持。完了の詳細は元ファイル消失後かつ30日経過後に圧縮し、要求ID・ダイジェストは残す | [watcher.mjs](../adapters/gist/watcher.mjs) |
 | Node 参考中継 | 設定した状態ファイルに要求・返信・スペース・プロフィール・添付を保存。メッセージは直近 100 件。本文と添付は参照が残る間保存 | [app.mjs](../server/app.mjs)、[core.mjs](../server/core.mjs) |
 | Cloudflare 参考中継 | D1 に状態、R2 に添付。参照のなくなった添付は作成後 24 時間の猶予を経て、上限付きの回収処理で削除。即時・定時の完全削除ではない | [storage.mjs](../server/cloudflare/storage.mjs)、[worker.mjs](../server/cloudflare/worker.mjs) |
 | ATOM S3 参考ファームウェア | NVS に Wi-Fi、SDK・ペアリング、中継設定。転送内容は処理用メモリーを通る。アプリ領域の更新だけでは NVS は消えない | [relay.c](../firmware/components/muse_relay/relay.c)、[ATOM S3 手順](atoms3.ja.md) |
 | Muse / Soniox / ホスティング | 各利用者のアカウント・処理・設定に従う。アプリから保持期間や完全削除を制御する機能はない | 利用するサービスと中継の管理設定 |
 
 Node/Worker の要求が終了すると、キュー内の入力本文・添付・解析途中のデータを整理します。ただし、同じ内容が保持中のメッセージ・添付として残る場合があります。件数上限は日数による削除ではありません。サービス停止中に回収処理は進みません。
+
+既存のG2Muse Gistはファイルを残し、共有する返信ファイルの書込担当を1つにします。参考watcherが削除するのは、確認できた入力と、自分が作成した参照のない出力・アバターだけです。別の履歴やスペースからの参照も保護し、所有不明・内容変更・参照確認の不足があれば削除を保留します。Muse Relay風のファイル名だけでは削除しません。[設定と復旧](../adapters/gist/README.ja.md)
 
 設定とトークンはアプリ独自の暗号化を施さず保存します。端末の保護、バックアップ、サーバー・フラッシュのアクセス制御は利用環境に依存します。新しいファイルへ設定するアクセス権は、既存ファイルやホスティング全体の安全性を保証しません。
 
