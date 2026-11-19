@@ -7,7 +7,7 @@ import { GistRelay } from '../relay/gist';
 import { GadgetRelay } from '../relay/gadget';
 import { Glasses, glassBodyRows, type GlassMenuItem, type GlassTextStyle } from './glasses';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
-import { base64, resizeImage, wav } from './media';
+import { base64, hasAudiblePcm, resizeImage, wav } from './media';
 import { RelayVoiceSession, SonioxStream } from './soniox';
 import { LOCAL_STATE_KEY, StateStorage, type SavedState } from './persistence';
 import { resolveLocale, translate } from './i18n';
@@ -15,6 +15,8 @@ import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from './chat';
+
+const HEAD_END_GRACE_MS = 1000;
 
 type GlassPage={body:string;footer:string;image?:boolean};
 interface ChatPage {
@@ -85,6 +87,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let pendingStop:'send'|'cancel'|undefined;
   let voiceFailure:unknown;
   let soniox:SonioxStream|RelayVoiceSession|undefined,liveUpdate:ReturnType<typeof setTimeout>|undefined;
+  let headEndTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastAudibleFrameAt = -Infinity;
   let foregroundAbort=new AbortController();
   const localSent:Message[]=[];
   const replyPoll=new ReplyPoll();
@@ -790,6 +794,24 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     voiceFailure = failure;
     fire(act(()=>stopRecording(false),undefined,undefined,false));
   }
+  function clearHeadEndpoint() {
+    clearTimeout(headEndTimer);
+    headEndTimer = undefined;
+    lastAudibleFrameAt = -Infinity;
+  }
+  function waitAfterHeadEndpoint() {
+    if (!state.recording || pendingStop || headEndTimer !== undefined) return;
+    const submit = () => {
+      clearHeadEndpoint();
+      if (state.recording && !pendingStop) fire(act(() => stopRecording(false), undefined, undefined, false));
+    };
+    headEndTimer = setTimeout(() => {
+      // Give resumed speech time to produce a caption. Ambient sound alone can
+      // extend the wait once, so a noisy room cannot keep an ended turn open.
+      if (Date.now() - lastAudibleFrameAt < HEAD_END_GRACE_MS) headEndTimer = setTimeout(submit, HEAD_END_GRACE_MS);
+      else submit();
+    }, HEAD_END_GRACE_MS);
+  }
   function ingest(audio:NonNullable<EvenHubEvent['audioEvent']>){
     if(!state.recording||pendingStop)return;
     const limit = 120 * 32000;
@@ -797,6 +819,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const filter=state.settings.mic==='glasses'?state.settings.speakerFilter:'all';
     const classified=audio.source!==AudioInputSource.Phone&&(audio.speakerRole===AudioSpeakerRole.Self||audio.speakerRole===AudioSpeakerRole.Other);
     const selected=filter==='all'||(classified&&audio.speakerRole===filter);
+    if (headEndTimer !== undefined && selected && hasAudiblePcm(pcm)) lastAudibleFrameAt = Date.now();
     if(classified)classifiedAudioBytes+=pcm.length;
     if(selected)selectedAudioBytes+=pcm.length;
     // Keep pauses and recording duration intact; only selected audio reaches either transcriber.
@@ -823,12 +846,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(state.settings.voice==='soniox'||relayLiveVoice){
         const onText = (value: string) => {
           if(value===state.transcript)return;
+          clearHeadEndpoint();
           state.transcript=value;emit();
           if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);
         };
-        const onEndpoint = mode === 'head' ? () => {
-          if (state.recording && !pendingStop) fire(act(() => stopRecording(false), undefined, undefined, false));
-        } : undefined;
+        const onEndpoint = mode === 'head' ? waitAfterHeadEndpoint : undefined;
         soniox = relayLiveVoice ? new RelayVoiceSession(state.settings, onText, voiceFailed, onEndpoint)
           : new SonioxStream(onText, voiceFailed, onEndpoint);
         // SonioxStream reports failures through voiceFailed and queues audio until ready.
@@ -838,6 +860,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       state.notice='';
       recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,undefined,false)),120000);
     }catch(e){
+      clearHeadEndpoint();
       state.recording=false;recordingSpace=undefined;if(target)state.spaceAction=undefined;
       soniox?.cancel();soniox=undefined;capture=[];clearTimeout(liveUpdate);liveUpdate=undefined;
       await glasses.microphone(false,state.settings.mic==='phone').catch(()=>{});throw e;
@@ -852,6 +875,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.recording)await render().catch(error);
   }
   async function stopRecording(cancel:boolean){
+    clearHeadEndpoint();
     if(voiceBusy){
       // Cancellation wins over a release until the request has started sending.
       if(!voiceSending&&(cancel||pendingStop!=='cancel')){

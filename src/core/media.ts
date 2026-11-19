@@ -1,5 +1,19 @@
 import type { Attachment } from './types';
 
+// A short window avoids averaging a new syllable into a long silent PCM batch.
+// This only extends a pending endpoint. Sound alone never triggers a send.
+export function hasAudiblePcm(pcm: Uint8Array): boolean {
+  const samples = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const count = Math.floor(pcm.byteLength / 2);
+  for (let start = 0; start < count; start += 320) {
+    const end = Math.min(count, start + 320);
+    let energy = 0;
+    for (let i = start; i < end; i++) energy += samples.getInt16(i * 2, true) ** 2;
+    if (energy > (end - start) * 256 ** 2) return true;
+  }
+  return false;
+}
+
 export function base64(bytes: Uint8Array): string {
   let text='';
   for (let i=0;i<bytes.length;i+=8192) text+=String.fromCharCode(...bytes.subarray(i,i+8192));

@@ -165,7 +165,7 @@ stateDiagram-v2
 | Hold | Wakes the display and starts the chat microphone; release to send |
 | Head-up display (Beta 0.3.13) | Choose the wake angle on the dial (10–60°, default 30°). Turning it on sets auto-hide to 15 seconds if previously off |
 | Recalibrate zero | Face forward and hold still, then save settings. Reset on the dial restores the 30° threshold |
-| Record on wake | Off by default. Raise your head from the app’s hidden display and speak. With live captions, the app stops and sends when it detects the end of an utterance. You can also tap to send or double-tap to cancel. Recordings send automatically at two minutes |
+| Record on wake | Off by default. Raise your head from the app’s hidden display and speak. With live captions, the app waits one second after an endpoint before sending. Audible input can add one more second for captions to arrive. New words keep the recording going. You can also tap to send or double-tap to cancel. Recordings send automatically at two minutes |
 | Restore display on the phone | Returns to the same screen as glasses input |
 | Return to chat after sending | On by default. Shows chat after successfully sending text or chat audio; excludes failure, cancellation, and Space input |
 

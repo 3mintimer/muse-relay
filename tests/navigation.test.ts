@@ -1392,19 +1392,30 @@ test('only a live head-wake utterance endpoint stops capture and sends its finis
   first.tokens([],true);
   current.tokens([word('次の'),end,{text:'文',is_final:false}]);
   await settle(); assert.equal(app.controller.state.recording,true);
-  current.tokens([word('文。'),end]); await settle();
+  current.tokens([word('文。'),end]);
+  t.mock.timers.tick(800);
+  app.emit({audioEvent:{audioPcm:new Uint8Array(3200).fill(32)}});
+  t.mock.timers.tick(300); await settle();
+  assert.ok(app.controller.state.recording,'resumed audio can precede its first caption');
+  current.tokens([{text:'続け',is_final:false}]);
+  t.mock.timers.tick(2000); await settle();
+  assert.ok(app.controller.state.recording,'new words discard the old endpoint');
+  current.tokens([word('続けます。'),end]);
+  t.mock.timers.tick(999); await settle();
+  assert.ok(app.controller.state.recording);
+  t.mock.timers.tick(1); await settle();
   assert.equal(app.controller.state.recording,false);
   assert.equal(current.finishes,1);
   assert.equal(app.sent.length,0,'wait for finalization');
   current.tokens([end]); current.tokens([],true); await settle();
-  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。']);
+  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。続けます。']);
 
   await raise();
   const cancelled = sockets.at(-1)!;
   app.emit({audioEvent:{audioPcm:frame}});
   cancelled.tokens([word('取り消し'),end]); await settle();
   app.emit({sysEvent:{eventType:3}}); await settle();
-  cancelled.tokens([],true); await settle();
+  cancelled.tokens([],true); t.mock.timers.tick(2000); await settle();
   assert.equal(app.sent.length,1);
 
   app.emit({sysEvent:{eventType:9}}); await settle();
@@ -1413,5 +1424,5 @@ test('only a live head-wake utterance endpoint stops capture and sends its finis
   held.tokens([word('長押し'),end]); await settle();
   assert.equal(held.finishes,0); assert.equal(app.controller.state.recording,true);
   app.emit({sysEvent:{eventType:10}}); await settle(); held.tokens([],true); await settle();
-  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。','長押し']);
+  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。続けます。','長押し']);
 });
