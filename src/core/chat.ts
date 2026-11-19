@@ -1,7 +1,14 @@
 import type { Message } from './types';
 
+export interface SentChat { id: string; previousIds: ReadonlySet<string>; }
+interface ChatOptions {
+  legacy?: boolean;
+  following?: SentChat;
+  images?: boolean;
+}
+
 /** Pair explicit reply IDs first. Legacy messages can use their chronological turn. */
-export function chatExchange(messages:readonly Message[],selectedId:string,options:{legacy?:boolean}={}):{input:Message;reply?:Message}|undefined{
+export function chatExchange(messages:readonly Message[],selectedId:string,options:ChatOptions={}):{input:Message;reply?:Message}|undefined{
   const ordered=[...messages].sort((a,b)=>a.ts-b.ts);
   const selected=ordered.find(m=>m.id===selectedId);
   if(!selected)return;
@@ -22,11 +29,17 @@ export function chatExchange(messages:readonly Message[],selectedId:string,optio
   const id=requestId(selected),input=inputFor(id)||selected;
   const linked=ordered.filter(m=>!own(m)&&m.reply_to===id);
   const original=ordered.find(m=>own(m)&&m.id===id)||selected;
-  const after=ordered.slice(ordered.indexOf(original)+1);
+  const sent = options.following?.id === id ? options.following : undefined;
+  // With second-resolution legacy timestamps, a previously viewed reply can sort after
+  // this input, or an incoming answer can precede its locally appended echo on a tie.
+  const after = sent && legacy
+    ? ordered.filter(m => m.id !== id && !sent.previousIds.has(m.id) && m.ts >= original.ts)
+    : ordered.slice(ordered.indexOf(original)+1);
   const boundary=after.findIndex(m=>own(m)&&requestId(m)!==id);
   const following=legacy?after.slice(0,boundary<0?undefined:boundary).filter(m=>!own(m)&&!m.reply_to):[];
   const replies=linked.length?linked:following;
-  const reply=replies.filter(m=>m.from!=='Relay').at(-1)||replies.at(-1);
+  const reply=sent ? replies.filter(m=>displayableReply(m,options.images===true)).at(-1)
+    : replies.filter(m=>m.from!=='Relay').at(-1)||replies.at(-1);
   return {input,reply};
 }
 
@@ -37,13 +50,17 @@ export function chatText(message:Message):string{
 }
 
 /** Relay status rows and audio without a transcript are not a visible Muse answer. */
-export function displayableMuseReply(message:Message,images:boolean):boolean{
-  return message.from==='Muse'&&!message.id.startsWith('status_')
+function displayableReply(message:Message,images:boolean):boolean{
+  return message.from!=='Relay'&&message.from!=='You'&&!message.id.startsWith('status_')
     &&Boolean(chatText(message).trim()||(images&&(message.image?.data_base64||message.image_file)));
 }
 
+export function displayableMuseReply(message:Message,images:boolean):boolean{
+  return message.from==='Muse' && displayableReply(message,images);
+}
+
 /** A paired input is already visible with its reply; swiping must not show it twice. */
-export function chatEntries(messages:readonly Message[],options:{legacy?:boolean}={}):Message[]{
+export function chatEntries(messages:readonly Message[],options:ChatOptions={}):Message[]{
   return messages.filter(message=>{
     if(message.from!=='You')return true;
     const exchange=chatExchange(messages,message.id,options);

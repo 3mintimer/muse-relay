@@ -136,7 +136,7 @@ export class Glasses {
     catch (e) { if (this.avatar === entry) this.avatar = undefined; throw e; }
   }
 
-  async show(state: AppState, body: string, footer = '', image?: Attachment, menuItems: GlassMenuItem[] = [], style: GlassTextStyle = {}): Promise<void> {
+  async show(state: AppState, body: string, footer = '', image?: Attachment, menuItems: GlassMenuItem[] = [], style: GlassTextStyle = {}, messageId?: string): Promise<void> {
     if (!this.ready) return;
     const renderId = ++this.serial;
     // Photos have their own page. The following text page carries the exchange and caption.
@@ -152,7 +152,7 @@ export class Glasses {
       text.push(label(1, 'body', first.height, bodyHeight, excerpt(body, lineBudget(bodyHeight)), true, style.bodyColor));
     }
     if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content, Boolean(image)));
-    await this.paint(renderId, state, menuItems, text, [], bitmaps);
+    await this.paint(renderId, state, menuItems, text, [], bitmaps, messageId);
   }
 
   async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment): Promise<void> {
@@ -172,11 +172,12 @@ export class Glasses {
   }
 
   private async paint(renderId: number, state: AppState, menuItems: GlassMenuItem[], textObject: ReturnType<typeof label>[],
-    listObject: ListContainerProperty[], bitmaps: GlassBitmap[]): Promise<void> {
+    listObject: ListContainerProperty[], bitmaps: GlassBitmap[], messageId?: string): Promise<void> {
     if (renderId !== this.serial) return;
     const imageObject = bitmaps.map(({ x, y, width, height, containerID, containerName }) =>
       ({ xPosition: x, yPosition: y, width, height, containerID, containerName }));
-    const layout = JSON.stringify([state.settings.language, listObject, imageObject, menuItems,
+    // A different message starts a fresh native page, even with identical text geometry.
+    const layout = JSON.stringify([messageId, state.settings.language, listObject, imageObject, menuItems,
       textObject.map(t => [t.containerID, t.yPosition, t.height, t.isEventCapture])]);
     await this.run(async bridge => {
       if (renderId !== this.serial) return;

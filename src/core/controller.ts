@@ -14,7 +14,7 @@ import { resolveLocale, translate } from './i18n';
 import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
-import { chatEntries, chatExchange, chatText, displayableMuseReply } from './chat';
+import { chatEntries, chatExchange, chatText, displayableMuseReply, type SentChat } from './chat';
 
 const HEAD_END_GRACE_MS = 1000;
 
@@ -98,7 +98,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let drawingChatFrame: number | undefined;
   let lastChatPage: {frame: number; key: string; inlineImage?: string; ready: Promise<void>} | undefined;
   let menuActions:Array<()=>Promise<void>>=[];
-  let displayTimer:ReturnType<typeof setTimeout>|undefined,displayDeadline=0,followingChatId:string|undefined;
+  let displayTimer:ReturnType<typeof setTimeout>|undefined,displayDeadline=0;
+  let followingChat:(SentChat & {targetId:string})|undefined;
   let homeClockTimer:ReturnType<typeof setTimeout>|undefined;
   let avatarJob:Promise<void>|undefined,avatarFailedKey='',avatarRetryKey='',avatarRetryAfter=0;
   const glasses=new Glasses(handleEvent,options.bridgeFactory);
@@ -287,8 +288,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     screen=spaceLayout()==='list'?'space-list':'space';await render();
   }
   async function showSpaceItems(){spaceLayouts.set(spaceId,'list');spaceEditor=undefined;feedback=undefined;screen='space-list';await render();}
-  const show=(body:string,footer='',image?:Attachment,style?:GlassTextStyle)=>active&&!contextualOpen
-    ?glasses.show(state,body,footer,image,contextualMenu(),style):Promise.resolve();
+  const show=(body:string,footer='',image?:Attachment,style?:GlassTextStyle,messageId?:string)=>active&&!contextualOpen
+    ?glasses.show(state,body,footer,image,contextualMenu(),style,messageId):Promise.resolve();
   function imageFailure(code:string):string|undefined{
     if(/^Image download(?: HTTP \d{3})?$/.test(code))return text('画像を取得できませんでした\n接続を確認して再試行してください','Unable to download the image\nCheck the connection and retry')+(code.includes('HTTP')?` (${code.slice(15)})`:'');
     const messages:Record<string,[string,string]>={
@@ -369,7 +370,17 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
   }
   const refreshFromGlasses=()=>act(()=>refresh(true),text('更新中…','Refreshing…'));
-  const visible=()=>state.snapshot.messages.filter(m=>!state.hiddenIds.includes(m.id)).sort((a,b)=>b.ts-a.ts);
+  const visible=()=>state.snapshot.messages.filter(m=>!state.hiddenIds.includes(m.id)).sort((a,b)=>a.ts-b.ts);
+  const chatOptions=()=>({legacy:state.settings.relay==='gist', following:followingChat, images:state.settings.images});
+  function currentExchange(messages:Message[], selectedId:string) {
+    const id=followingChat?.targetId===selectedId ? followingChat.id : selectedId;
+    return chatExchange(messages,id,chatOptions());
+  }
+  function followedMessage(){
+    if(!followingChat)return;
+    const turn=chatExchange(visible(),followingChat.id,chatOptions());
+    return turn?.reply ?? turn?.input;
+  }
   const serializable=():SavedState=>({settings:state.settings,snapshot:{messages:state.snapshot.messages.slice(-50).map(({image,...m})=>m),
     spaces:state.snapshot.spaces.map(s=>({...s,items:s.items.map(({image,...i})=>i)})),
     ...(state.snapshot.profile?{profile:{...state.snapshot.profile,avatar:undefined}}:{})},
@@ -414,10 +425,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const mode=await storage.save(saved,true);
       state.settings=checked;
       if(!checked.autoHideSeconds){state.displaySleeping=false;autoHiddenReplies.clear();}
-      if(!checked.returnToChatAfterSend)followingChatId=undefined;
+      if(!checked.returnToChatAfterSend)followingChat=undefined;
       displayDeadline=0;
       if(clear){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();relay=checked.configured?makeRelay(checked):undefined;state.connected=false;delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
+      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();relay=checked.configured?makeRelay(checked):undefined;state.connected=false;delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
@@ -452,7 +463,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   function chatPage(): ChatPage {
     const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
     if(!selected)return {body:text('メッセージはありません\n録音またはスマートフォンから送信','No messages yet\nRecord voice or send from your phone'),footer:text('ダブルタップ: ホーム','Double-tap: home')};
-    const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
+    const exchange=state.settings.chatLayout==='exchange'?currentExchange(messages,selected.id):undefined;
     const message=exchange?.reply||exchange?.input||selected;
     const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
     const stamp=(m:Message)=>new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -532,7 +543,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       // A subsequent snapshot may contain these same bytes or a replacement for the same file.
       if(lastChatPage?.frame===frame)lastChatPage.inlineImage=image.data_base64;
     }
-    await show(view.body,view.footer,image,view.style);
+    await show(view.body,view.footer,image,view.style,view.messageId);
     if(frame===renderSerial&&!state.displaySleeping&&!contextualOpen&&view.readReplyId&&!state.readIds.includes(view.readReplyId)){
       state.readIds.push(view.readReplyId);emit();saveSoon();
     }
@@ -628,19 +639,19 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   async function showMenu(){
     if(state.recording||voiceBusy)return;
-    displayInteraction();followingChatId=undefined;
+    displayInteraction();followingChat=undefined;
     screen='home';page=0;feedback=undefined;await render();
   }
   async function showChat(){
     if(state.recording||voiceBusy)return;
-    displayInteraction();followingChatId=undefined;
-    const first=visible()[0];
+    displayInteraction();followingChat=undefined;
+    const first=visible().at(-1);
     if(first){await api.showMessage(first.id);return;}
     screen='message';state.selectedMessageId=undefined;page=0;feedback=undefined;await render();
   }
   async function showSpaces(){
     if(state.recording||voiceBusy)return;
-    displayInteraction();followingChatId=undefined;
+    displayInteraction();followingChat=undefined;
     screen='spaces';page=0;feedback=undefined;await render();
   }
   async function refresh(explicit=false){
@@ -681,23 +692,22 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const selectedSpace=snap.spaces.find(s=>s.id===spaceId);
       if(spaceItemId&&selectedSpace){const index=selectedSpace.items.findIndex(i=>i.id===spaceItemId);spaceItem=Math.max(0,index);}
       const arrivedReplies=takeReplies(snap.messages,previousMessages);
-      const wakeReply=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
+      const wakeReplies=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
         &&!state.busy&&!contextualOpen&&!feedback
-        ?arrivedReplies.filter(message=>autoHiddenReplies.has(message.reply_to!)).at(-1):undefined;
+        ?arrivedReplies.filter(message=>autoHiddenReplies.has(message.reply_to!)):[];
+      const wakeReply=wakeReplies.filter(m=>m.reply_to===followingChat?.id).at(-1)??wakeReplies.at(-1);
       const newMessages=snap.messages.filter(m=>!before.has(m.id)&&m.from!=='You');
-      const sent=followingChatId?snap.messages.find(m=>m.id===followingChatId):undefined;
-      const reply=followingChatId?newMessages.filter(m=>!state.hiddenIds.includes(m.id)
-        &&(m.reply_to===followingChatId||(!m.reply_to&&sent&&m.ts>=sent.ts))).at(-1):undefined;
+      const latest=screen==='message' ? followedMessage() : undefined;
       if(wakeReply){
+        if(followingChat && wakeReply.reply_to===followingChat.id)followingChat.targetId=wakeReply.id;
         await wakeForReply(wakeReply);
-      }else if(reply&&screen==='message'&&!state.recording&&!voiceBusy&&!feedback){
-        // Other receives stay behind the blank display until an explicit gesture.
-        state.selectedMessageId=reply.id;page=0;
-        if(!state.displaySleeping&&!contextualOpen)await act(()=>openMessage(reply.id,false));
+      }else if(latest && followingChat && latest.id!==followingChat.targetId && !state.recording&&!voiceBusy&&!feedback){
+        followingChat.targetId=latest.id;state.selectedMessageId=latest.id;page=0;
+        if(!state.displaySleeping&&!contextualOpen)await act(()=>openMessage(latest.id,false));
       }else if(!state.displaySleeping&&newMessages.length&&!state.recording&&!voiceBusy&&!contextualOpen&&screen==='home'&&!feedback){
         await act(()=>openMessage(newMessages.at(-1)!.id,false));
       }else if(!state.displaySleeping&&['message','space','spaces','space-list','space-control'].includes(screen)&&!feedback){
-        if(screen==='message'&&!visible().some(m=>m.id===state.selectedMessageId))state.selectedMessageId=visible()[0]?.id;
+        if(screen==='message'&&!visible().some(m=>m.id===state.selectedMessageId))state.selectedMessageId=visible().at(-1)?.id;
         // Relay success remains a relay success even if local image/G2 rendering fails.
         await act(render);
       }
@@ -713,7 +723,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     state.busy=true;state.error='';emit();
     try{await relay.send(request,foregroundAbort.signal);
       const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,...(request.image?{image:request.image}:{})};
-      localSent.push(sent);if(localSent.length>50)localSent.shift();state.snapshot.messages.push(sent);
+      const echo=state.snapshot.messages.find(m=>m.id===sent.id);
+      localSent.push(echo??sent);if(localSent.length>50)localSent.shift();
+      if(!echo)state.snapshot.messages.push(sent);
       if(request.kind==='chat'&&current===relay&&active&&!disposed){
         awaitingReplies.set(request.id,beforeIds);
         if(awaitingReplies.size>50)awaitingReplies.delete(awaitingReplies.keys().next().value!);
@@ -722,12 +734,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(state.settings.relay==='gadget'&&active&&!disposed){replyPoll.sent(request.id);replyPoll.observe(state.snapshot.messages);}
       state.notice=text('中継へ送信しました。Muse の応答を待っています。','Sent to relay. Waiting for Muse.');emit();saveSoon();
       if(state.settings.relay==='gadget')armPoll();else armPoll(2000);
+      return {id:request.id,previousIds:beforeIds};
     }finally{state.busy=false;emit();}
   }
   const request=(textValue:string):RelayRequest=>({id:`r_${crypto.randomUUID()}`,kind:'chat',text:textValue,created_at:Math.floor(Date.now()/1000)});
   async function openMessage(id:string,interaction=true){
     if(!state.snapshot.messages.some(m=>m.id===id))return;
-    if(interaction){displayInteraction();followingChatId=undefined;}
+    if(interaction){displayInteraction();followingChat=undefined;}
     state.selectedMessageId=id;screen='message';page=0;feedback=undefined;state.error='';
     const ready=render(true),frame=renderSerial;
     await ready;
@@ -735,13 +748,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       &&screen==='message'&&state.selectedMessageId===id&&!state.readIds.includes(id))state.readIds.push(id);
     emit();saveSoon();
   }
-  async function returnToSentChat(id:string){
+  async function returnToSentChat(sent:SentChat){
     if(!state.settings.returnToChatAfterSend||!active||disposed)return;
-    displayInteraction();followingChatId=id;
-    // A receive already in flight can deliver Muse's reply before the POST acknowledgement.
-    const reply=chatExchange(visible(),id,{legacy:state.settings.relay==='gist'})?.reply;
-    // A display failure must never turn an accepted send into a retryable send error.
-    await openMessage(reply?.id||id,false).catch(error);
+    displayInteraction();followingChat={...sent,targetId:sent.id};
+    // Resolve from the full snapshot: a transcript or reply can precede the acknowledgement.
+    followingChat.targetId=followedMessage()?.id??sent.id;
+    await openMessage(followingChat.targetId,false).catch(error);
   }
   function spaceRequest(target:ControlTarget,value?:number|string,transcript=''):RelayRequest{
     const action={item_id:target.itemId,type:target.control.type,...(value!==undefined?{value}:{})};
@@ -778,7 +790,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.recording||voiceBusy||state.busy)return;
     const space=state.snapshot.spaces.find(s=>s.id===id),item=space?.items.find(i=>i.id===itemId);
     if(!space||!item)return;
-    displayInteraction();followingChatId=undefined;
+    displayInteraction();followingChat=undefined;
     spaceId=id;spaceItem=space.items.indexOf(item);spaceItemId=item.id;page=0;feedback=undefined;spaceEditor=undefined;
     if(!item.control){screen='space';await render();return;}
     if(item.control.disabled){
@@ -890,7 +902,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const stream=soniox;
     if(cancel)stream?.cancel();
     const target=recordingSpace;
-    let sentChatId:string|undefined;
+    let sentChat:SentChat|undefined;
     const voiceRequest=(transcript:string)=>target?spaceRequest(target,undefined,transcript):request(transcript);
     const cancelled=()=>pendingStop==='cancel';
     const cancelNotice=()=>{stream?.cancel();state.notice=text('録音を中止しました','Recording cancelled');};
@@ -922,13 +934,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture, state.settings.relay === 'gadget' && captureBytes > 1_099_956))};
       }
       voiceSending=true;voiceStatus=text('送信中…','Sending…');void render().catch(error);
-      state.busy=false;await send(req);if(!target)sentChatId=req.id;
+      state.busy=false;const accepted=await send(req);if(!target)sentChat=accepted;
       if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'sent',message:text('中継が受け付けました','Accepted by relay')};
     }catch(e){if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'error',message:failureText(e)};throw e;
     }finally{const cancelledSpace=cancelled();
       if(target){if(feedback)feedback.back=spaceBack;if(state.spaceAction?.status==='recording')state.spaceAction=undefined;}
       recordingSpace=undefined;stream?.cancel();soniox=undefined;capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;voiceBusy=false;voiceSending=false;voiceFailure=undefined;state.busy=false;pendingStop=undefined;emit();
-      if(sentChatId&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChatId);
+      if(sentChat&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChat);
       else if(target&&!feedback&&(cancelledSpace||state.spaceAction?.status==='sent'))await spaceBack().catch(error);
       else await render().catch(error);}
   }
@@ -1018,8 +1030,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       }
       if(screen==='space'){const s=state.snapshot.spaces.find(s=>s.id===spaceId);if(s?.items.length){spaceItem=(spaceItem+(type===1?-1:1)+s.items.length)%s.items.length;spaceItemId=s.items[spaceItem]!.id;}page=0;fire(act(render));return;}
       if(['home','spaces','space-list','space-control'].includes(screen))return;
-      const all=visible(),chatOptions={legacy:state.settings.relay==='gist'},exchange=state.settings.chatLayout==='exchange'?chatExchange(all,state.selectedMessageId||'',chatOptions):undefined;
-      const messages=state.settings.chatLayout==='exchange'?chatEntries(all,chatOptions):all;
+      const all=visible(),options=chatOptions(),exchange=state.settings.chatLayout==='exchange'?currentExchange(all,state.selectedMessageId||''):undefined;
+      const messages=(state.settings.chatLayout==='exchange'?chatEntries(all,options):all).reverse();
       const anchor=exchange?.reply?.id||exchange?.input.id||state.selectedMessageId,index=messages.findIndex(m=>m.id===anchor);
       const next=(index+(type===1?-1:1)+messages.length)%messages.length;
       if(messages[next])fire(act(()=>api.showMessage(messages[next]!.id)));
@@ -1031,7 +1043,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     async checkConnection(settings=state.settings){return guarded(async()=>makeRelay(validateSettings({...settings,voice:'muse'})).read());},
     refresh:()=>guarded(()=>refresh(true)),
     async sendText(value,image){await guarded(async()=>{const textValue=value.trim();if(!textValue&&!image)return;
-      if(textValue.length>10000)throw new Error('Message too long');const req=request(textValue);if(image)req.image=image;await send(req);await returnToSentChat(req.id);});},
+      if(textValue.length>10000)throw new Error('Message too long');const req=request(textValue);if(image)req.image=image;await returnToSentChat(await send(req));});},
     toggleRecording:()=>guarded(()=>state.recording?stopRecording(false):startRecording()),
     cancelRecording:()=>guarded(()=>stopRecording(true)),
     async pickImage(source){return guarded(async()=>{if(!state.settings.images)return null;
@@ -1064,8 +1076,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const existing=new Set(state.snapshot.messages.map(m=>m.id));
       state.hiddenIds=[...new Set([...state.hiddenIds,...ids.filter(id=>existing.has(id))])].slice(-300);
       for(const id of ids){awaitingReplies.delete(id);autoHiddenReplies.delete(id);}
+      if(followingChat&&ids.includes(followingChat.id))followingChat=undefined;
       if(state.selectedMessageId&&state.hiddenIds.includes(state.selectedMessageId)){
-        state.selectedMessageId=visible()[0]?.id;page=0;feedback=undefined;
+        followingChat=undefined;
+        state.selectedMessageId=visible().at(-1)?.id;page=0;feedback=undefined;
       }
       emit();await save(true);await render();
     });},
@@ -1073,7 +1087,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     hideMessage:id=>api.hideMessages([id]),
     async showSpace(id,itemId){await guarded(async()=>{const s=state.snapshot.spaces.find(s=>s.id===id);if(!s)return;
       if(state.recording||voiceBusy)return;
-      displayInteraction();followingChatId=undefined;
+      displayInteraction();followingChat=undefined;
       spaceId=id;spaceItem=Math.max(0,s.items.findIndex(i=>i.id===itemId));spaceItemId=s.items[spaceItem]?.id||'';spaceListPage=Math.floor(spaceItem/18);
       screen=itemId||spaceLayout(s)==='cards'?'space':'space-list';spaceEditor=undefined;page=0;feedback=undefined;state.error='';glasses.invalidateImage();
       await render();emit();});},
@@ -1086,7 +1100,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     activateSpaceItem:(id,itemId)=>guarded(()=>activateSpaceItem(id,itemId)),
     submitSpaceAction:(id,itemId,value)=>guarded(async()=>{
       if(state.recording||voiceBusy||state.busy)throw new Error('Busy');
-      displayInteraction();followingChatId=undefined;
+      displayInteraction();followingChat=undefined;
       const target=controlTarget(id,itemId);spaceId=id;spaceItemId=itemId;
       spaceItem=state.snapshot.spaces.find(s=>s.id===id)!.items.findIndex(i=>i.id===itemId);spaceListPage=Math.floor(spaceItem/18);
       if(target.control.type==='microphone'){await startRecording('toggle',target);return;}

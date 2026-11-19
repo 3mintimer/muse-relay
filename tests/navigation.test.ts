@@ -790,6 +790,20 @@ test('Gist replies wake each outstanding chat once and ignore history, status, e
   snapshot.messages.at(-1)!.text='画像の説明';await app.controller.refresh();assert.match(app.text(),/画像の説明/);
 });
 
+test('a delayed reply that wakes G2 still yields to the latest sent chat when its answer arrives',async t=>{
+  const snapshot=fixture(), app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
+  await app.controller.sendText('First request');
+  await app.controller.sendText('Current request');
+  t.mock.timers.tick(5000);await settle();
+  snapshot.messages.push({id:'older', reply_to:app.sent[0]!.id, from:'Muse',type:'text',text:'Earlier answer',ts:21});
+  await app.controller.refresh();await app.controller.refresh();
+  assert.match(app.text(),/Earlier answer/);
+  snapshot.messages.push({id:'current', reply_to:app.sent[1]!.id, from:'Muse',type:'text',text:'Current answer',ts:20});
+  await app.controller.refresh();
+  assert.equal(app.controller.state.selectedMessageId,'current');
+  assert.match(app.text(),/Current request/);assert.match(app.text(),/Current answer/);
+});
+
 test('read or hidden answers, recording, failed sends and exit cannot trigger a delayed reply wake',async t=>{
   const snapshot=fixture(),app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
   const sendAndHide=async(text:string)=>{
@@ -837,6 +851,86 @@ test('reply wake supersedes a queued blank frame and starts its timeout after th
   t.mock.timers.tick(4999);await settle();assert.equal(app.controller.state.displaySleeping,false);
   t.mock.timers.tick(1);await settle();assert.equal(app.text().trim(),'');
 });
+
+for (const chatLayout of ['exchange', 'single'] as const) {
+  test(`a new ${chatLayout} chat cannot return to an already viewed legacy Gist reply`, async t => {
+    const snapshot = fixture();
+    // The relay clock is one second ahead of the phone.
+    snapshot.messages = [
+      {id:'previous-ask', from:'You', type:'text', text:'Previous question', ts:9},
+      {id:'previous-answer', from:'Muse', type:'text', text:'Previous answer', ts:11}
+    ];
+    const app = await appFixture(t, snapshot, true, {chatLayout, relay:'gist',
+      gistId:'0123456789abcdef0123456789abcdef', githubToken:'synthetic-navigation-test'});
+    await app.controller.showMessage('previous-answer');
+    await app.controller.sendText('Latest question');
+    const id = app.sent[0]!.id;
+    assert.equal(app.controller.state.selectedMessageId, id);
+    assert.match(app.text(), /Latest question/);
+    assert.doesNotMatch(app.text(), /Previous answer/);
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, id);
+    snapshot.messages.push({id:'legacy-answer', from:'Muse', type:'text', text:'Latest answer', ts:app.sent[0]!.created_at});
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, 'legacy-answer');
+    assert.match(app.text(), /Latest answer/);
+    assert.equal(app.text().includes('Latest question'), chatLayout === 'exchange');
+  });
+
+  test(`consecutive ${chatLayout} sends open the latest native page even with identical timestamps`, async t => {
+    const snapshot = fixture(), app = await appFixture(t, snapshot, true, {chatLayout});
+    await app.controller.sendText('First input');
+    const rebuilds = app.operations.filter(op => op === 'rebuild:text').length;
+    await app.controller.sendText('Second input');
+    assert.equal(app.sent[0]!.created_at, app.sent[1]!.created_at);
+    assert.ok(app.operations.filter(op => op === 'rebuild:text').length > rebuilds);
+    snapshot.messages.push({id:'late', reply_to:app.sent[0]!.id, from:'Muse', type:'text', text:'Late first answer', ts:11});
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, app.sent[1]!.id);
+    assert.match(app.text(), /Second input/);
+    snapshot.messages.push({id:'second', reply_to:app.sent[1]!.id, from:'Muse', type:'text', text:'Second answer', ts:12});
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, 'second');
+    assert.match(app.text(), /Second answer/);
+    assert.equal(app.text().includes('Second input'), chatLayout === 'exchange');
+    const frames = app.frames.length;
+    await app.controller.refresh();
+    assert.equal(app.frames.length, frames, 'an unchanged poll keeps the rendered page');
+  });
+
+  test(`a followed ${chatLayout} voice chat displays its own transcript and completed reply`, async t => {
+    const snapshot = fixture(), app = await appFixture(t, snapshot, true, {chatLayout});
+    await app.controller.showMessage('test-message');
+    await app.controller.toggleRecording();
+    app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
+    const ack = deferred<Response>(); app.setSend(() => ack.promise);
+    const sending = app.controller.toggleRecording();
+    await settle();
+    const req = app.sent[0]!;
+    snapshot.messages.push({id:req.id, from:'You', type:'voice-note', text:'', ts:req.created_at});
+    await app.controller.refresh(); ack.resolve(new Response('{}')); await sending;
+    assert.equal(app.controller.state.snapshot.messages.filter(row => row.id === req.id).length, 1);
+    assert.equal(app.controller.state.selectedMessageId, req.id);
+    assert.doesNotMatch(app.text(), /テストの返信/);
+    snapshot.messages.push(
+      {id:'transcript', reply_to:req.id, from:'You', type:'text', text:'Latest voice input', ts:11},
+      {id:'pending-answer', reply_to:req.id, from:'Muse', type:'text', text:'', ts:12},
+      {id:'independent', from:'Muse', type:'text', text:'Independent post', ts:13},
+      {id:'receipt', reply_to:req.id, from:'Relay', type:'text', text:'Receipt', ts:14}
+    );
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, 'transcript');
+    assert.match(app.text(), /Latest voice input/);
+    snapshot.messages.find(row => row.id === 'pending-answer')!.text = 'Latest voice answer';
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, 'pending-answer');
+    assert.match(app.text(), /Latest voice answer/);
+    assert.equal(app.text().includes('Latest voice input'), chatLayout === 'exchange');
+    await app.controller.showMessage('test-message');
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, 'test-message', 'manual browsing ends follow');
+  });
+}
 
 test('successful chat sends return to chat with an opt-out and failed sends never navigate or invite a duplicate retry',async t=>{
   const snapshot=fixture();snapshot.capabilities={audio:true,images:true,spaces:true};
