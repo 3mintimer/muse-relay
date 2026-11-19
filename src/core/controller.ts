@@ -75,6 +75,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     recording:false,transcript:'',error:'',notice:'',readIds:[],hiddenIds:[],selectedSpaceIds:[]};
   const listeners=new Set<()=>void>();
   let relay:Relay|undefined,poll:ReturnType<typeof setTimeout>,saveTimer:ReturnType<typeof setTimeout>;
+  let hasLiveSnapshot=false;
   let active=true,disposed=false,screen:'home'|'message'|'spaces'|'space-list'|'space'|'space-control'='home',page=0,spaceId='',spaceItem=0,spaceListPage=0,spaceItemId='';
   const spaceLayouts=new Map<string,'list'|'cards'>();
   type ControlTarget={spaceId:string;itemId:string;title:string;control:SpaceControl};
@@ -91,6 +92,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let lastAudibleFrameAt = -Infinity;
   let foregroundAbort=new AbortController();
   const localSent:Message[]=[];
+  function mergeSentInput(messages:Message[],sent:Message){
+    const echo=messages.find(message=>message.id===sent.id);
+    if(!echo)messages.push({...sent});
+    else if(echo.from==='You'){
+      // Keep the latest known transcript across empty echoes and snapshots missing this row.
+      if(sent.type==='voice-note'&&chatText(echo).trim())sent.text=echo.text;
+      else if(chatText(sent).trim())echo.text=sent.text;
+    }
+  }
   const replyPoll=new ReplyPoll();
   // Session-only: restored history can never arm an automatic reply wake.
   const awaitingReplies=new Map<string,Set<string>>();
@@ -403,7 +413,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(result.value){
       const saved=result.value;state.settings=saved.settings;state.snapshot=saved.snapshot;
       state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;
-      relay=state.settings.configured?makeRelay(state.settings):undefined;state.connected=false;
+      configureRelay(state.settings);
     }
     persistenceReady=result.writable;state.persistence=result.mode;state.settingsLoadFailed=result.failed;
     raise.reset();fire(syncImu());
@@ -425,10 +435,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const mode=await storage.save(saved,true);
       state.settings=checked;
       if(!checked.autoHideSeconds){state.displaySleeping=false;autoHiddenReplies.clear();}
-      if(!checked.returnToChatAfterSend)followingChat=undefined;
+      if(!checked.returnToChatAfterSend&&screen!=='message')followingChat=undefined;
       displayDeadline=0;
       if(clear){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();relay=checked.configured?makeRelay(checked):undefined;state.connected=false;delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
+      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
@@ -459,6 +469,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     });
   }
   function makeRelay(settings:Settings):Relay{return settings.relay==='gist'?new GistRelay(settings):new GadgetRelay(settings);}
+  function configureRelay(settings:Settings){
+    relay=settings.configured?makeRelay(settings):undefined;
+    hasLiveSnapshot=false;state.connected=false;
+  }
   function armPoll(delay=replyPoll.delay(state.settings.pollSeconds*1000)){clearTimeout(poll);if(active&&relay&&!disposed)poll=setTimeout(()=>fire(refresh()),delay);}
   function chatPage(): ChatPage {
     const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
@@ -474,7 +488,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
     const body=exchange?.reply?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp(message)}\n${messageText(message)}`;
     const hasImage=state.settings.images&&Boolean(message.image||message.image_file);
-    const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
+    const waiting=message.from==='You'&&selected.id===followingChat?.targetId?text('Muse の返信待ち','Waiting for Muse')+'\n':'';
+    const pages=bodyPages(body,(index,total)=>`${waiting}${index+1}/${total} · ${index<total-1
       ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
     if(page>=pages.length)page=0;
     const current=pages[page]!;
@@ -669,9 +684,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(snap.profile?.avatar_file&&!snap.profile.avatar&&avatarKey(snap.profile)===previousAvatarKey)
         snap.profile.avatar=state.snapshot.profile?.avatar;
       replyPoll.observe(snap.messages);
-      const before=new Set(state.snapshot.messages.map(m=>m.id));
+      // The saved history can be incomplete. Only compare live snapshots for new arrivals.
+      const before=hasLiveSnapshot?new Set(state.snapshot.messages.map(m=>m.id)):undefined;
       const previousMessages=state.snapshot.messages;
-      for(const sent of localSent)if(!snap.messages.some(m=>m.id===sent.id))snap.messages.push(sent);
+      for(const sent of localSent)mergeSentInput(snap.messages,sent);
       // Preserve downloaded attachments while their relay reference/version is unchanged.
       // Otherwise every poll flashes a loading page and needlessly retransmits the image.
       for(const message of snap.messages){
@@ -688,15 +704,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
             &&previous.ts===item.ts)item.image=previous.image;
         }
       }
-      snap.messages.sort((a,b)=>a.ts-b.ts);state.snapshot=snap;syncProfileAvatar();state.connected=true;state.lastSync=Date.now();if(feedback?.kind!=='error')state.error='';
+      snap.messages.sort((a,b)=>a.ts-b.ts);state.snapshot=snap;hasLiveSnapshot=true;syncProfileAvatar();state.connected=true;state.lastSync=Date.now();if(feedback?.kind!=='error')state.error='';
       const selectedSpace=snap.spaces.find(s=>s.id===spaceId);
       if(spaceItemId&&selectedSpace){const index=selectedSpace.items.findIndex(i=>i.id===spaceItemId);spaceItem=Math.max(0,index);}
       const arrivedReplies=takeReplies(snap.messages,previousMessages);
       const wakeReplies=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
         &&!state.busy&&!contextualOpen&&!feedback
         ?arrivedReplies.filter(message=>autoHiddenReplies.has(message.reply_to!)):[];
-      const wakeReply=wakeReplies.filter(m=>m.reply_to===followingChat?.id).at(-1)??wakeReplies.at(-1);
-      const newMessages=snap.messages.filter(m=>!before.has(m.id)&&m.from!=='You');
+      const wakeReply=wakeReplies.filter(m=>!followingChat||m.reply_to===followingChat.id).at(-1);
+      const newMessages=before?snap.messages.filter(m=>!before.has(m.id)&&m.from!=='You'):[];
       const latest=screen==='message' ? followedMessage() : undefined;
       if(wakeReply){
         if(followingChat && wakeReply.reply_to===followingChat.id)followingChat.targetId=wakeReply.id;
@@ -720,12 +736,14 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.busy)throw new Error('Busy');
     if(request.image&&state.settings.relay==='gadget'&&state.snapshot.capabilities?.images!==true)throw new Error('Image sending unavailable');
     const current=relay,beforeIds=new Set(state.snapshot.messages.map(message=>message.id));
+    // In a legacy Gist, the next unlinked answer could still belong to an earlier open turn.
+    const priorTurn=state.settings.relay==='gist'?visible().filter(m=>m.from!=='Relay'&&!m.id.startsWith('status_')).at(-1):undefined;
+    const needsReplyId=priorTurn?.from==='You';
     state.busy=true;state.error='';emit();
     try{await relay.send(request,foregroundAbort.signal);
       const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,...(request.image?{image:request.image}:{})};
-      const echo=state.snapshot.messages.find(m=>m.id===sent.id);
-      localSent.push(echo??sent);if(localSent.length>50)localSent.shift();
-      if(!echo)state.snapshot.messages.push(sent);
+      mergeSentInput(state.snapshot.messages,sent);
+      localSent.push(sent);if(localSent.length>50)localSent.shift();
       if(request.kind==='chat'&&current===relay&&active&&!disposed){
         awaitingReplies.set(request.id,beforeIds);
         if(awaitingReplies.size>50)awaitingReplies.delete(awaitingReplies.keys().next().value!);
@@ -734,7 +752,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(state.settings.relay==='gadget'&&active&&!disposed){replyPoll.sent(request.id);replyPoll.observe(state.snapshot.messages);}
       state.notice=text('中継へ送信しました。Muse の応答を待っています。','Sent to relay. Waiting for Muse.');emit();saveSoon();
       if(state.settings.relay==='gadget')armPoll();else armPoll(2000);
-      return {id:request.id,previousIds:beforeIds};
+      return {id:request.id,previousIds:beforeIds,needsReplyId};
     }finally{state.busy=false;emit();}
   }
   const request=(textValue:string):RelayRequest=>({id:`r_${crypto.randomUUID()}`,kind:'chat',text:textValue,created_at:Math.floor(Date.now()/1000)});
@@ -748,8 +766,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       &&screen==='message'&&state.selectedMessageId===id&&!state.readIds.includes(id))state.readIds.push(id);
     emit();saveSoon();
   }
+  const shouldShowSentChat=()=>screen==='message'||state.settings.returnToChatAfterSend;
   async function returnToSentChat(sent:SentChat){
-    if(!state.settings.returnToChatAfterSend||!active||disposed)return;
+    if(!shouldShowSentChat()||!active||disposed)return;
     displayInteraction();followingChat={...sent,targetId:sent.id};
     // Resolve from the full snapshot: a transcript or reply can precede the acknowledgement.
     followingChat.targetId=followedMessage()?.id??sent.id;
@@ -940,7 +959,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }finally{const cancelledSpace=cancelled();
       if(target){if(feedback)feedback.back=spaceBack;if(state.spaceAction?.status==='recording')state.spaceAction=undefined;}
       recordingSpace=undefined;stream?.cancel();soniox=undefined;capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;voiceBusy=false;voiceSending=false;voiceFailure=undefined;state.busy=false;pendingStop=undefined;emit();
-      if(sentChat&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChat);
+      if(sentChat&&shouldShowSentChat())await returnToSentChat(sentChat);
       else if(target&&!feedback&&(cancelledSpace||state.spaceAction?.status==='sent'))await spaceBack().catch(error);
       else await render().catch(error);}
   }

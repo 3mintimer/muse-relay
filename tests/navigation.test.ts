@@ -77,11 +77,11 @@ function bodyGeometry(app:ReturnType<typeof fakeDisplay>){
   return {body,input,footer,rows};
 }
 
-async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false, settings:Partial<Settings>={}) {
+async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boolean|number = false, settings:Partial<Settings>={}, savedSnapshot = snapshot) {
   const display = fakeDisplay();
   const cleanups:Array<()=>void>=[];
   const saved = JSON.stringify({ settings: { ...defaults, language: 'ja', relay: 'gadget', relayUrl: 'https://relay.example.test',
-    relayToken: 'synthetic-navigation-test', configured: true, pollSeconds: 300, images: true,...settings }, snapshot,
+    relayToken: 'synthetic-navigation-test', configured: true, pollSeconds: 300, images: true,...settings }, snapshot: savedSnapshot,
     readIds: [], hiddenIds: [], selectedSpaceIds: ['test-space'] });
   display.bridge.getLocalStorage = async () => saved;
   const windowTarget = Object.assign(new EventTarget(), { flutter_inappwebview: {} });
@@ -153,6 +153,52 @@ async function appFixture(t: TestContext, snapshot = fixture(), virtualTime: boo
     },
   };
 }
+
+for (const relay of ['gadget', 'gist'] as const) {
+  test(`initial ${relay} history stays unread on Home until Chat is selected`, async t => {
+    const live = fixture();
+    const cached = relay === 'gist' ? structuredClone(live) : { messages: [], spaces: [] };
+    live.messages.push({id:'offline-reply', from:'Muse', type:'text', text:'留守中の返信', ts:2});
+    const app = await appFixture(t, live, true, {relay, gistId:'0123456789abcdef0123456789abcdef', githubToken:'synthetic-navigation-test'}, cached);
+    await app.controller.refresh();
+    assert.ok(app.items().includes('チャット'));
+    assert.equal(app.controller.state.snapshot.messages.at(-1)?.id, 'offline-reply');
+    assert.equal(app.controller.state.selectedMessageId, undefined);
+    assert.deepEqual(app.controller.state.readIds, []);
+    assert.ok(app.frames.every(frame => !frame.includes('留守中の返信')));
+
+    app.emit({listEvent:{currentSelectItemIndex:0}});
+    await settle();
+    assert.match(app.text(), /留守中の返信/);
+    assert.ok(app.controller.state.readIds.includes('offline-reply'));
+
+    await app.controller.showGlassesMenu();
+    live.messages.push({id:'new-reply', from:'Muse', type:'text', text:'起動後の新着', ts:3});
+    await app.controller.refresh();
+    assert.match(app.text(), /起動後の新着/);
+  });
+}
+
+test('the first successful read of a replacement relay establishes its history even after a network error', async t => {
+  const app = await appFixture(t, fixture(), true);
+  await app.controller.saveSettings({...app.controller.state.settings, relayToken:'replacement-test-token'});
+  app.setRead(async () => new Response('{}', {status:503}));
+  await assert.rejects(app.controller.refresh(), /HTTP 503/);
+
+  const live = fixture();
+  live.messages.push({id:'other-history', from:'Muse', type:'text', text:'接続先の履歴', ts:2});
+  app.setRead(async () => response(live));
+  await app.controller.refresh();
+  assert.ok(app.items().includes('チャット'));
+  assert.deepEqual(app.controller.state.readIds, []);
+
+  app.setRead(async () => new Response('{}', {status:503}));
+  await assert.rejects(app.controller.refresh(), /HTTP 503/);
+  live.messages.push({id:'after-error', from:'Muse', type:'text', text:'復旧後の新着', ts:3});
+  app.setRead(async () => response(live));
+  await app.controller.refresh();
+  assert.match(app.text(), /復旧後の新着/);
+});
 
 test('registered spaces keep user order through refresh, persist removals, and can be added again',async t=>{
   const snapshot=fixture();snapshot.spaces.push({...snapshot.spaces[0]!,id:'second',title:'Second'});
@@ -759,7 +805,7 @@ test('holding while hidden records chat and its reply wakes the timed-out displa
 
 test('Gist replies wake each outstanding chat once and ignore history, status, echoes and empty updates',async t=>{
   const snapshot=fixture(),app=await appFixture(t,snapshot,true,{relay:'gist',
-    gistId:'0123456789abcdef0123456789abcdef',githubToken:'synthetic-navigation-test',autoHideSeconds:5});
+    gistId:'0123456789abcdef0123456789abcdef',githubToken:'synthetic-navigation-test',autoHideSeconds:5,returnToChatAfterSend:false});
   await app.controller.sendText('最初の依頼');await app.controller.sendText('次の依頼');
   const [first,second]=app.sent;
   t.mock.timers.tick(5000);await settle();assert.equal(app.text().trim(),'');
@@ -790,18 +836,28 @@ test('Gist replies wake each outstanding chat once and ignore history, status, e
   snapshot.messages.at(-1)!.text='画像の説明';await app.controller.refresh();assert.match(app.text(),/画像の説明/);
 });
 
-test('a delayed reply that wakes G2 still yields to the latest sent chat when its answer arrives',async t=>{
+test('a delayed older answer cannot reopen the previous exchange while waiting for the latest voice reply',async t=>{
   const snapshot=fixture(), app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
   await app.controller.sendText('First request');
-  await app.controller.sendText('Current request');
+  app.emit({sysEvent:{eventType:9}});await settle();
+  app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
+  app.emit({sysEvent:{eventType:10}});await settle();
+  const voice=app.sent[1]!;
+  assert.equal(app.controller.state.selectedMessageId,voice.id);
+  snapshot.messages.push({id:voice.id, from:'You', type:'voice-note', text:'Current voice input', ts:voice.created_at});
+  await app.controller.refresh();
+  assert.match(app.text(),/Current voice input/);assert.match(app.text(),/Muse の返信待ち/);
   t.mock.timers.tick(5000);await settle();
   snapshot.messages.push({id:'older', reply_to:app.sent[0]!.id, from:'Muse',type:'text',text:'Earlier answer',ts:21});
   await app.controller.refresh();await app.controller.refresh();
-  assert.match(app.text(),/Earlier answer/);
-  snapshot.messages.push({id:'current', reply_to:app.sent[1]!.id, from:'Muse',type:'text',text:'Current answer',ts:20});
+  assert.equal(app.controller.state.selectedMessageId,voice.id);
+  assert.equal(app.controller.state.displaySleeping,true);
+  assert.ok(!app.controller.state.readIds.includes('older'));
+  snapshot.messages.push({id:'current', reply_to:voice.id, from:'Muse',type:'text',text:'Current answer',ts:20});
   await app.controller.refresh();
   assert.equal(app.controller.state.selectedMessageId,'current');
-  assert.match(app.text(),/Current request/);assert.match(app.text(),/Current answer/);
+  assert.match(app.text(),/Current voice input/);assert.match(app.text(),/Current answer/);
+  assert.doesNotMatch(app.text(),/Muse の返信待ち/);
 });
 
 test('read or hidden answers, recording, failed sends and exit cannot trigger a delayed reply wake',async t=>{
@@ -853,6 +909,46 @@ test('reply wake supersedes a queued blank frame and starts its timeout after th
 });
 
 for (const chatLayout of ['exchange', 'single'] as const) {
+  test(`a late unlinked Gist answer cannot replace a pending ${chatLayout} input when two requests overlap`, async t => {
+    const snapshot = fixture();
+    const app = await appFixture(t, snapshot, true, {chatLayout, relay:'gist',
+      gistId:'0123456789abcdef0123456789abcdef', githubToken:'synthetic-navigation-test'});
+    await app.controller.sendText('前の依頼');
+    await app.controller.sendText('今の依頼');
+    snapshot.messages.push({id:'late-legacy', from:'Muse', type:'text', text:'前の依頼への遅い回答', ts:12});
+    await app.controller.refresh();
+    assert.equal(app.controller.state.selectedMessageId, app.sent[1]!.id);
+    assert.match(app.text(), /今の依頼/);
+    assert.doesNotMatch(app.text(), /遅い回答/);
+    snapshot.messages.push({id:'current-linked', from:'Muse', type:'text', text:'今の回答', reply_to:app.sent[1]!.id, ts:13});
+    await app.controller.refresh();
+    assert.match(app.text(), /今の回答/);
+  });
+
+  test(`voice send from an open ${chatLayout} chat replaces the previous turn even with automatic return off`, async t => {
+    const snapshot = fixture();
+    snapshot.messages.unshift({id:'previous', from:'You', type:'text', text:'前の質問', ts:0});
+    snapshot.messages[1]!.reply_to = 'previous';
+    const app = await appFixture(t, snapshot, true, {chatLayout, returnToChatAfterSend:false});
+    await app.controller.showMessage('test-message');
+    app.emit({sysEvent:{eventType:9}});await settle();
+    app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
+    app.emit({sysEvent:{eventType:10}});await settle();
+    const sent = app.sent[0]!;
+    assert.equal(app.controller.state.selectedMessageId, sent.id);
+    assert.match(app.text(), /音声メッセージ/);
+    assert.doesNotMatch(app.text(), /前の質問|テストの返信/);
+    snapshot.messages.push({id:sent.id, from:'You', type:'voice-note', text:'今話した内容', ts:sent.created_at});
+    await app.controller.refresh();
+    assert.match(app.text(), /今話した内容/);
+    snapshot.messages.at(-1)!.text = '';
+    await app.controller.refresh();
+    assert.match(app.text(), /今話した内容/, 'a lagging echo must preserve the known transcript');
+    snapshot.messages.pop();
+    await app.controller.refresh();
+    assert.match(app.text(), /今話した内容/, 'a poll without the sent row must preserve the known transcript');
+  });
+
   test(`a new ${chatLayout} chat cannot return to an already viewed legacy Gist reply`, async t => {
     const snapshot = fixture();
     // The relay clock is one second ahead of the phone.

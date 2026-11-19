@@ -96,6 +96,8 @@ The app handles G2 images, audio, and interaction. Browser UI checks do not subs
 
 G2 home's top row shows the phone's current date, weekday, and 24-hour time. It updates every minute while preserving the selected menu item. Clock updates pause during auto-hide, recording, and the Contextual Menu; returning home shows the current time.
 
+At startup, G2 stays on Home while loading unread history. Select Chat to open the latest message.
+
 | Home region | Content |
 | --- | --- |
 | Top | Date, weekday, clock |
@@ -167,7 +169,7 @@ stateDiagram-v2
 | Recalibrate zero | Face forward and hold still, then save settings. Reset on the dial restores the 30° threshold |
 | Record on wake | Off by default. Raise your head from the app’s hidden display and speak. With live captions, the app waits one second after an endpoint before sending. Audible input can add one more second for captions to arrive. New words keep the recording going. You can also tap to send or double-tap to cancel. Recordings send automatically at two minutes |
 | Restore display on the phone | Returns to the same screen as glasses input |
-| Return to chat after sending | On by default. Shows chat after successfully sending text or chat audio; excludes failure, cancellation, and Space input |
+| Return to chat after sending | On by default. Opens chat when you send a chat message from another screen. An already open chat shows the input you just sent with either setting |
 
 Native-list selection changes are handled inside the SDK; each swipe is not delivered to the app. The timer continues during those movements and restarts on delivered inputs such as taps. While hidden, an empty text container receives wake input. Duration and return-to-chat settings are persisted; the hidden state itself is not restored on next startup.
 
@@ -185,6 +187,8 @@ The wake-control practice in settings lets you try blank screen → tap → cont
 | Image page | Input above, 288×144 image in the center, and a hint below to open the text |
 
 The default is input and reply together. Switch to one at a time in Settings → G2 display → Chat layout, or in chat's Contextual Menu. Long input is truncated to two lines with “…”; one-at-a-time mode lets you page through the full text. While input is shown beside its reply, swiping skips the duplicate input-only page.
+
+After sending, the glasses show your input with “Waiting for Muse”. If the display hides while waiting, a reply to that input wakes it.
 
 Input/reply pairing uses `You.id` and `Muse.reply_to`. An independently published Gadget photo without a matching ID is not given an unrelated question. Legacy-only Gist data is paired by order. Audio without a returned transcript is labeled “Voice message”; missing speech content is never invented.
 

@@ -1,6 +1,6 @@
 import type { Message } from './types';
 
-export interface SentChat { id: string; previousIds: ReadonlySet<string>; }
+export interface SentChat { id: string; previousIds: ReadonlySet<string>; needsReplyId: boolean; }
 interface ChatOptions {
   legacy?: boolean;
   following?: SentChat;
@@ -36,7 +36,7 @@ export function chatExchange(messages:readonly Message[],selectedId:string,optio
     ? ordered.filter(m => m.id !== id && !sent.previousIds.has(m.id) && m.ts >= original.ts)
     : ordered.slice(ordered.indexOf(original)+1);
   const boundary=after.findIndex(m=>own(m)&&requestId(m)!==id);
-  const following=legacy?after.slice(0,boundary<0?undefined:boundary).filter(m=>!own(m)&&!m.reply_to):[];
+  const following=legacy&&!sent?.needsReplyId?after.slice(0,boundary<0?undefined:boundary).filter(m=>!own(m)&&!m.reply_to):[];
   const replies=linked.length?linked:following;
   const reply=sent ? replies.filter(m=>displayableReply(m,options.images===true)).at(-1)
     : replies.filter(m=>m.from!=='Relay').at(-1)||replies.at(-1);
