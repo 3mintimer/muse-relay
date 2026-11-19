@@ -233,6 +233,7 @@
   "Tap: open · Double-tap: exit": "Toque: abrir · Doble toque: salir",
   "Tap: open · Double-tap: home": "Toque: abrir · Doble toque: inicio",
   "Tap: retry · Double-tap: back": "Toque: reintentar · Doble toque: atrás",
+  "Auto-send after speech · Double-tap: cancel": "Envío al terminar de hablar · Doble toque: cancelar",
   "Tap: send · Double-tap: cancel": "Toque: enviar · Doble toque: cancelar",
   "Temporary key endpoint": "URL del servicio de claves temporales",
   "The action failed.": "La operación falló.",

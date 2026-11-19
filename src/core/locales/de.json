@@ -233,6 +233,7 @@
   "Tap: open · Double-tap: exit": "Tippen: öffnen · Doppeltippen: beenden",
   "Tap: open · Double-tap: home": "Tippen: öffnen · Doppeltippen: Startseite",
   "Tap: retry · Double-tap: back": "Tippen: erneut versuchen · Doppeltippen: zurück",
+  "Auto-send after speech · Double-tap: cancel": "Nach Sprechende senden · Doppeltippen: Abbruch",
   "Tap: send · Double-tap: cancel": "Tippen: senden · Doppeltippen: abbrechen",
   "Temporary key endpoint": "URL für temporäre Schlüssel",
   "The action failed.": "Die Aktion ist fehlgeschlagen.",

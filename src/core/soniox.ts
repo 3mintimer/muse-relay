@@ -27,7 +27,10 @@ export class SonioxStream {
   private completed=false;
   private onText: (text:string)=>void;
   private onError: (error:Error)=>void;
-  constructor(onText:(text:string)=>void,onError:(error:Error)=>void){this.onText=onText;this.onError=onError;}
+  private onEndpoint?: () => void;
+  constructor(onText:(text:string)=>void,onError:(error:Error)=>void,onEndpoint?:()=>void){
+    this.onText=onText;this.onError=onError;this.onEndpoint=onEndpoint;
+  }
 
   start(settings: Settings, viaRelay = false): Promise<void> {
     this.opening ??= this.connect(settings, viaRelay)
@@ -71,12 +74,15 @@ export class SonioxStream {
       try {
         const data=record(JSON.parse(String(event.data)));
         if(data.error_code){this.fail(new Error(`Soniox ${Number(data.error_code)}`));return;}
-        let partial='';
+        let partial='', ended=false;
         if(Array.isArray(data.tokens))for(const token of data.tokens){const t=record(token);const text=typeof t.text==='string'?t.text:'';
-          if(text==='<end>'||text==='<fin>')continue;
+          if(text==='<end>'){ended=t.is_final===true;continue;}
+          if(text==='<fin>')continue;
+          if(text.trim())ended=false;
           if(t.is_final)this.finalText+=text;else partial+=text;}
         this.onText(this.finalText+partial);
         if(data.finished){this.completed=true;this.resolve?.(this.finalText.trim());}
+        else if(ended && this.finalText.trim() && !partial.trim())this.onEndpoint?.();
       }catch{this.fail(new Error('Soniox response'));}
     };
     ws.onclose=()=>this.fail(new Error('Soniox disconnected'));
@@ -179,8 +185,9 @@ export class RelayVoiceSession {
   private settings: Settings;
   private onText: (text: string) => void;
   private onError: (error: Error) => void;
-  constructor(settings: Settings, onText: (text: string) => void, onError: (error: Error) => void) {
-    this.settings = settings; this.onText = onText; this.onError = onError;
+  private onEndpoint?: () => void;
+  constructor(settings: Settings, onText: (text: string) => void, onError: (error: Error) => void, onEndpoint?: () => void) {
+    this.settings = settings; this.onText = onText; this.onError = onError; this.onEndpoint = onEndpoint;
   }
 
   private openPart() {
@@ -188,7 +195,10 @@ export class RelayVoiceSession {
       if (this.stopped) return;
       part.text = text;
       this.onText(this.parts.map(part => part.text).filter(Boolean).join(' '));
-    }, this.onError), result: undefined as Promise<string> | undefined};
+    }, this.onError, () => {
+      // A closing 30-second segment can report its endpoint after the next segment starts.
+      if (!this.stopped && this.parts.at(-1) === part) this.onEndpoint?.();
+    }), result: undefined as Promise<string> | undefined};
     this.parts.push(part);
     this.bytes = 0;
     return part.stream.start(this.settings, true);

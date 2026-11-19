@@ -1349,3 +1349,69 @@ test('two minutes of relay captions respect each socket duration and produce one
   assert.equal(app.sent[0]!.text, 'part0 part1 part2 part3');
   assert.equal(app.sent[0]!.audio, undefined);
 });
+
+test('only a live head-wake utterance endpoint stops capture and sends its finished text once', async t => {
+  const sockets: Socket[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1; bufferedAmount = 0; finishes = 0;
+    onopen?: () => void; onmessage?: (e: {data: string}) => void;
+    constructor() { sockets.push(this); queueMicrotask(() => this.onopen?.()); }
+    send(value: string | ArrayBuffer) { if (value === '') this.finishes++; }
+    close() { this.readyState = 3; }
+    tokens(tokens: {text: string; is_final: boolean}[], finished = false) {
+      this.onmessage?.({data: JSON.stringify({tokens, finished})});
+    }
+  }
+  const original = globalThis.WebSocket;
+  globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+  t.after(() => { globalThis.WebSocket = original; });
+  const app = await appFixture(t, {...fixture(), capabilities:{live_transcription:true}}, true,
+    {relayToken:'p'.repeat(40)});
+  Object.assign(app.bridge,{imuControl: async () => true});
+  await app.controller.saveSettings({...app.controller.state.settings,headWake:true,headWakeMic:true,autoHideSeconds:5});
+  const word = (text: string) => ({text, is_final:true});
+  const end = word('<end>');
+  const frame = new Uint8Array(32000);
+  const pose = (degrees: number) => {
+    t.mock.timers.tick(100);
+    app.emit({sysEvent:{eventType:8,imuData:{x:Math.sin(degrees*Math.PI/180),z:Math.cos(degrees*Math.PI/180)}}});
+  };
+  async function raise() {
+    t.mock.timers.tick(5000); await settle();
+    pose(0);pose(55);pose(55);pose(55);await settle();
+    assert.equal(app.controller.state.recording,true);
+  }
+  await raise();
+  const first = sockets.at(-1)!;
+  first.tokens([end]);
+  for (let i=0;i<31;i++) { app.emit({audioEvent:{audioPcm:frame}}); await settle(); }
+  const current = sockets.at(-1)!;
+  assert.notEqual(first,current);
+  first.tokens([word('最初の文。'),end]);
+  first.tokens([],true);
+  current.tokens([word('次の'),end,{text:'文',is_final:false}]);
+  await settle(); assert.equal(app.controller.state.recording,true);
+  current.tokens([word('文。'),end]); await settle();
+  assert.equal(app.controller.state.recording,false);
+  assert.equal(current.finishes,1);
+  assert.equal(app.sent.length,0,'wait for finalization');
+  current.tokens([end]); current.tokens([],true); await settle();
+  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。']);
+
+  await raise();
+  const cancelled = sockets.at(-1)!;
+  app.emit({audioEvent:{audioPcm:frame}});
+  cancelled.tokens([word('取り消し'),end]); await settle();
+  app.emit({sysEvent:{eventType:3}}); await settle();
+  cancelled.tokens([],true); await settle();
+  assert.equal(app.sent.length,1);
+
+  app.emit({sysEvent:{eventType:9}}); await settle();
+  app.emit({audioEvent:{audioPcm:frame}});
+  const held=sockets.at(-1)!;
+  held.tokens([word('長押し'),end]); await settle();
+  assert.equal(held.finishes,0); assert.equal(app.controller.state.recording,true);
+  app.emit({sysEvent:{eventType:10}}); await settle(); held.tokens([],true); await settle();
+  assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。','長押し']);
+});

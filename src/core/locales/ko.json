@@ -233,6 +233,7 @@
   "Tap: open · Double-tap: exit": "탭: 열기 · 두 번 탭: 종료",
   "Tap: open · Double-tap: home": "탭: 열기 · 두 번 탭: 홈",
   "Tap: retry · Double-tap: back": "탭: 다시 시도 · 두 번 탭: 뒤로",
+  "Auto-send after speech · Double-tap: cancel": "발화 종료 시 전송 · 두 번 탭: 취소",
   "Tap: send · Double-tap: cancel": "탭: 전송 · 두 번 탭: 취소",
   "Temporary key endpoint": "임시 키 엔드포인트",
   "The action failed.": "작업에 실패했습니다.",

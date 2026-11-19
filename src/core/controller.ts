@@ -79,7 +79,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let spaceEditor:{target:ControlTarget;value?:number|string}|undefined,recordingSpace:ControlTarget|undefined;
   let readJob:Promise<void>|undefined,contextualOpen=false,pendingMenuAction:(()=>Promise<void>)|undefined;
   let feedback:{kind:'busy'|'done'|'error';body:string;retry?:()=>Promise<void>;back?:()=>Promise<void>;waitForReply?:boolean;page?:number}|undefined;
-  let actionSerial=0,renderSerial=0,voiceStatus='',recordingMode:'hold'|'toggle'='toggle';
+  let actionSerial=0,renderSerial=0,voiceStatus='',recordingMode:'hold'|'toggle'|'head'='toggle';
   let capture:Uint8Array[]=[],captureBytes=0,voiceBusy=false,voiceSending=false,recordingTimeout:ReturnType<typeof setTimeout>;
   let selectedAudioBytes=0,classifiedAudioBytes=0;
   let pendingStop:'send'|'cancel'|undefined;
@@ -540,6 +540,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.displaySleeping){await show(' ',' ');return;}
     if(state.recording){
       const footer=recordingMode==='hold'?text('離す: 送信 · 2回タップ: 中止','Release: send · Double-tap: cancel')
+        :recordingMode==='head' && soniox ? text('発話終了で送信 · 2回タップ: 中止','Auto-send after speech · Double-tap: cancel')
         :text('タップ: 送信 · 2回タップ: 中止','Tap: send · Double-tap: cancel');
       const rows=glassBodyRows(footer),body=(recordingSpace?recordingSpace.title+'\n':'')+(state.transcript||text('録音中…','Recording…'));
       // Keep one stable body region throughout capture and show its newest complete lines.
@@ -804,7 +805,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     else try{soniox.push(audioFrame);}catch(e){voiceFailed(e);}
     if (captureBytes === limit) fire(act(() => stopRecording(false), undefined, undefined, false));
   }
-  async function startRecording(mode:'hold'|'toggle'='toggle',target?:ControlTarget){
+  async function startRecording(mode:'hold'|'toggle'|'head'='toggle',target?:ControlTarget){
     if(state.recording||voiceBusy||state.busy)return;
     displayInteraction();
     if(!state.settings.configured)throw new Error('Relay token');
@@ -825,7 +826,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
           state.transcript=value;emit();
           if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);
         };
-        soniox = relayLiveVoice ? new RelayVoiceSession(state.settings, onText, voiceFailed) : new SonioxStream(onText, voiceFailed);
+        const onEndpoint = mode === 'head' ? () => {
+          if (state.recording && !pendingStop) fire(act(() => stopRecording(false), undefined, undefined, false));
+        } : undefined;
+        soniox = relayLiveVoice ? new RelayVoiceSession(state.settings, onText, voiceFailed, onEndpoint)
+          : new SonioxStream(onText, voiceFailed, onEndpoint);
         // SonioxStream reports failures through voiceFailed and queues audio until ready.
         void soniox.start(state.settings).catch(()=>{});
       }
@@ -911,7 +916,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const s = state.settings;
       if (s.headWake && raise.sample(pitch - s.neutralPitch, s.headWakeAngle, Date.now())
         && state.displaySleeping && !state.busy && !voiceBusy && state.persistence !== 'loading') {
-        if (s.headWakeMic && s.configured) fire(act(() => startRecording('toggle'), undefined, undefined, false));
+        if (s.headWakeMic && s.configured) fire(act(() => startRecording('head'), undefined, undefined, false));
         else fire(restoreDisplay());
       }
       return;

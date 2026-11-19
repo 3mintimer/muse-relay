@@ -233,6 +233,7 @@
   "Tap: open · Double-tap: exit": "Appui : ouvrir · Double appui : quitter",
   "Tap: open · Double-tap: home": "Appui : ouvrir · Double appui : accueil",
   "Tap: retry · Double-tap: back": "Appui : réessayer · Double appui : retour",
+  "Auto-send after speech · Double-tap: cancel": "Envoi en fin de parole · Deux appuis : annuler",
   "Tap: send · Double-tap: cancel": "Appui : envoyer · Double appui : annuler",
   "Temporary key endpoint": "Adresse du service de clés temporaires",
   "The action failed.": "L’opération a échoué.",

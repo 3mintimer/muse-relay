@@ -233,6 +233,7 @@
   "Tap: open · Double-tap: exit": "點一下：開啟 · 點兩下：離開",
   "Tap: open · Double-tap: home": "點一下：開啟 · 點兩下：首頁",
   "Tap: retry · Double-tap: back": "點一下：重試 · 點兩下：返回",
+  "Auto-send after speech · Double-tap: cancel": "說完自動傳送 · 點兩下取消",
   "Tap: send · Double-tap: cancel": "點一下：傳送 · 點兩下：取消",
   "Temporary key endpoint": "臨時金鑰端點",
   "The action failed.": "操作失敗。",
