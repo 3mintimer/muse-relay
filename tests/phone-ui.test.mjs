@@ -105,10 +105,13 @@ test('phone settings scroll in both directions with the keyboard open and Save s
   await page.getByLabel('Theme', { exact: true }).selectOption('dark');
   await page.locator('[data-group="connection"] > summary').tap();
   const token = page.getByLabel('Phone access token', { exact: true });
+  await token.tap();
   await token.fill('test');
 
   // Model a WebView where only the visual viewport shrinks for the keyboard
   // and swiping the document itself cannot reveal content below the viewport.
+  assert.ok(await token.evaluate(el => document.activeElement === el && el.closest('details').open),
+    'the keyboard scenario starts with the connection field open and focused');
   await page.evaluate(() => {
     for (const element of [document.documentElement, document.body]) {
       element.style.height = '100%';
