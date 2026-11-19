@@ -1,4 +1,6 @@
 {
+  "Live captions through your HTTPS relay": "Subtítulos en directo a través de tu servidor HTTPS",
+  "Your HTTPS relay transcribes audio as you speak and shows captions on G2 and your phone. Muse receives the final text.": "Tu servidor HTTPS transcribe el audio mientras hablas y muestra subtítulos en G2 y en tu teléfono. Muse recibe el texto final.",
   "Setup guide": "Guía de configuración",
   "Build a relay": "Crear un relé",
   "Send feedback": "Enviar comentarios",

@@ -69,6 +69,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   const signature = (settings = draft) => JSON.stringify([settings.relay, settings.gistId, settings.githubToken, settings.relayUrl, settings.relayToken, settings.gatewayToken]);
   const voiceSignature = (settings = draft) => JSON.stringify([sonioxAuthMode(settings), settings.sonioxApiKey, settings.sonioxTokenUrl, settings.sonioxTokenAuth, settings.sonioxGatewayToken, signature(settings), settings.language]);
   const connectionChecked = () => Boolean(testResult && testedSignature === signature());
+  const relayLiveVoice = () => draft.relay === 'gadget' && (connectionChecked() ? testResult
+    : signature() === signature(controller.state.settings) ? controller.state.snapshot : null)?.capabilities?.live_transcription === true;
   const needsConnectionCheck = () => signature() !== signature(controller.state.settings) && !connectionChecked();
   const settingsDirty = () => settingKeys.some(key => draft[key] !== savedSettings[key]);
   const editable = () => !working && !controller.state.busy;
@@ -319,17 +321,21 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function voiceOptions() {
     const card = el('div', '');
     const title = t('文字起こし先', 'Transcription service');
+    const live = relayLiveVoice();
     const heading = el('h3', 'section-title', title); heading.id = 'voice-service';
     const choices = el('fieldset', 'relay-choices'); choices.setAttribute('aria-labelledby', heading.id);
     card.append(withHint(heading, title, () => el('dl', 'voice-help',
       el('dt', '', voiceTitle('soniox')), el('dd', '', t('音声認識はSonioxが行います。アプリは字幕を表示し、中継には確定した文字だけを送ります。', 'Soniox transcribes the audio. The app displays the captions and sends only the final text to your relay.')),
-      el('dt', '', voiceTitle('muse')), el('dd', '', t('録音中の音声は中継に送りません。送信した音声の文字起こしが中継先から返ると、チャットに表示します。', 'Audio is not streamed to the relay while you speak. If the relay returns a transcript of your audio message, it appears in chat.')))));
+      el('dt', '', voiceTitle('muse')), el('dd', '', live
+        ? t('録音中の音声を HTTPS 中継が文字起こしし、G2とスマホに字幕を表示します。Muse には確定した文字を送ります。', 'Your HTTPS relay transcribes audio as you speak and shows captions on G2 and your phone. Muse receives the final text.')
+        : t('録音中の音声は中継に送りません。送信した音声の文字起こしが中継先から返ると、チャットに表示します。', 'Audio is not streamed to the relay while you speak. If the relay returns a transcript of your audio message, it appears in chat.')))));
     for (const mode of ['soniox', 'muse'] as const) {
       const input = el('input', 'even-radio'); input.type = 'radio'; input.name = 'voice'; input.value = mode; input.checked = draft.voice === mode;
       focusKey(input, `voice-${mode}`);
       input.addEventListener('change', () => { changed('voice', mode); render(); });
       const detail = mode === 'soniox' ? t('話している間、G2とスマホに字幕を表示', 'Show words on glasses and phone as you speak')
-        : t('送信時に音声ファイルを{relay}へ', 'Send the audio file to {relay} on submit', { relay: audioRelay() });
+        : live ? t('HTTPS 中継でリアルタイム字幕', 'Live captions through your HTTPS relay')
+          : t('送信時に音声ファイルを{relay}へ', 'Send the audio file to {relay} on submit', { relay: audioRelay() });
       choices.append(el('label', `relay-choice ${draft.voice === mode ? 'is-selected' : ''}`, icon(mode === 'soniox' ? 'glasses' : 'network'),
         el('span', 'choice-copy', el('strong', '', voiceTitle(mode)), el('span', '', detail)), input));
     }
@@ -392,7 +398,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const panel = el('div', 'prompt-panel');
     panel.append(button(t('Muse に渡す設定手順', 'Setup instructions for Muse'), () => { promptOpen = !promptOpen; render(); }, { secondary: true, icon: 'copy', className: 'full-width' }));
     if (promptOpen) {
-      const text = el('textarea', 'even-input prompt-text'); text.readOnly = true; text.value = museSetupPrompt(draft); text.rows = 8;
+      const text = el('textarea', 'even-input prompt-text'); text.readOnly = true; text.value = museSetupPrompt(draft, relayLiveVoice()); text.rows = 8;
       text.setAttribute('aria-label', t('Muse に渡す設定手順', 'Setup instructions for Muse')); focusKey(text, 'prompt');
       panel.append(text, button(t('コピー', 'Copy'), () => { void run(async () => {
         try { await navigator.clipboard.writeText(text.value); uiNotice = t('コピーしました。Muse に貼り付けてください。', 'Copied. Paste it into Muse.'); }
@@ -643,7 +649,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       const next = button(t('依頼文を作る', 'Create request'), () => { spaceAddPage = 'prompt'; render(); window.scrollTo({ top: 0 }); }, { icon: 'arrow', className: 'full-width', disabled: !spaceCreation!.name.trim() || !spaceCreation!.purpose.trim() }); next.dataset.spaceCreate = '';
       content.append(el('div', 'wizard-actions', next));
     } else if (spaceAddPage === 'prompt') {
-      const request = spacePrompt(s.settings, spaceCreation!);
+      const request = spacePrompt(s.settings, spaceCreation!, s.snapshot.capabilities?.live_transcription === true);
       content.append(el('div', 'page-toolbar', el('h3', '', spaceCreation!.name), el('span', 'muted', s.settings.relay === 'gist' ? 'GitHub Gist' : 'Muse Gadget SDK')));
       const text = el('textarea', 'even-input prompt-text'); text.readOnly = true; text.value = request; text.rows = 9; text.setAttribute('aria-label', t('Museへの依頼文', 'Request for Muse')); focusKey(text, 'space-prompt');
       content.append(text, el('div', 'space-prompt-actions',

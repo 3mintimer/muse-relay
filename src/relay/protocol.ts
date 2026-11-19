@@ -59,7 +59,11 @@ export function parseSnapshot(value: unknown): Snapshot {
     }catch{/* Optional image; preserve readable profile metadata. */}
   }
   if (v.device) { const d=record(v.device); snapshot.device={connected:d.connected===true,last_seen:Number(d.last_seen)||undefined}; }
-  if (v.capabilities) { const c=record(v.capabilities); snapshot.capabilities={audio:c.audio===true,images:c.images===true,spaces:c.spaces===true,...(typeof c.soniox==='boolean'?{soniox:c.soniox}:{})}; }
+  if (v.capabilities) {
+    const c=record(v.capabilities);
+    snapshot.capabilities={audio:c.audio===true,images:c.images===true,spaces:c.spaces===true,
+      ...(typeof c.soniox==='boolean'?{soniox:c.soniox}:{}),...(c.live_transcription===true?{live_transcription:true}:{})};
+  }
   return snapshot;
 }
 

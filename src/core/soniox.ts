@@ -1,16 +1,16 @@
 import type { Settings } from './types';
-import { resolveSonioxConnection } from './config';
+import { endpoint, resolveSonioxConnection } from './config';
 import { jsonResponse, record } from '../relay/protocol';
 import { speechLanguage } from './i18n';
 
-const PCM_BYTES_PER_MS = 32; // 16 kHz, signed 16-bit mono.
-const PCM_CHUNK_BYTES = 100 * PCM_BYTES_PER_MS;
+const PCM_CHUNK_BYTES = 3200; // 100 ms of 16 kHz, signed 16-bit mono audio.
+const SOCKET_BUFFER_LIMIT = 512000;
 
-function waitForAudioTime(ms: number, signal: AbortSignal): Promise<void> {
+function waitForSocketBuffer(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(signal.reason); };
-    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, 20);
     signal.addEventListener('abort', abort, { once: true });
   });
 }
@@ -21,7 +21,6 @@ export class SonioxStream {
   private opening?: Promise<void>;
   private ready = false;
   private readonly queuedAudio: Uint8Array[] = [];
-  private draining?: Promise<void>;
   private finalText='';
   private resolve?: (value:string)=>void;
   private reject?: (error:Error)=>void;
@@ -30,32 +29,43 @@ export class SonioxStream {
   private onError: (error:Error)=>void;
   constructor(onText:(text:string)=>void,onError:(error:Error)=>void){this.onText=onText;this.onError=onError;}
 
-  start(settings: Settings): Promise<void> {
-    this.opening ??= this.connect(settings).then(() => {
-      this.abort.signal.throwIfAborted();
-      this.ready = true;
-      if (this.queuedAudio.length) this.draining = this.drainAudio();
-    }).catch(error => { this.fail(error); throw error; });
+  start(settings: Settings, viaRelay = false): Promise<void> {
+    this.opening ??= this.connect(settings, viaRelay)
+      .then(() => this.flushStartupAudio())
+      .catch(error => { this.fail(error); throw error; });
     return this.opening;
   }
 
-  private async connect(settings: Settings): Promise<void> {
+  private async connect(settings: Settings, viaRelay: boolean): Promise<void> {
     const signal = this.abort.signal;
     signal.throwIfAborted();
-    const connection=resolveSonioxConnection(settings);
-    let key: string;
-    if (connection.mode === 'api-key') key = connection.apiKey;
-    else {
-      // Endpoint credentials belong only to that endpoint, never the Soniox socket.
-      const data=record(await jsonResponse(await fetch(connection.url,{method:'POST',
-        headers:{...(connection.token?{Authorization:`Bearer ${connection.token}`} : {}),
-          ...(connection.gatewayToken?{'OAI-Sites-Authorization':`Bearer ${connection.gatewayToken}`}:{})},
-        signal:AbortSignal.any([signal,AbortSignal.timeout(15000)]),redirect:'error',credentials:'omit'})));
-      key=String(data.api_key||'');
-      if(!/^snx_temp_[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key))throw new Error('Soniox temporary key');
+    let url = 'wss://stt-rt.soniox.com/transcribe-websocket';
+    let protocols: string[];
+    if (viaRelay) {
+      const relayUrl = new URL(`${endpoint(settings.relayUrl)}/v1/voice/live`);
+      relayUrl.protocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      url = relayUrl.href;
+      const token = settings.relayToken.trim();
+      if (!/^[A-Za-z0-9_-]{32,200}$/.test(token)) throw new Error('Relay token');
+      protocols = ['muse-relay-voice', token];
+    } else {
+      const connection = resolveSonioxConnection(settings);
+      let key: string;
+      if (connection.mode === 'api-key') key = connection.apiKey;
+      else {
+        // Endpoint credentials belong only to that endpoint, never the Soniox socket.
+        const data=record(await jsonResponse(await fetch(connection.url,{method:'POST',
+          headers:{...(connection.token?{Authorization:`Bearer ${connection.token}`} : {}),
+            ...(connection.gatewayToken?{'OAI-Sites-Authorization':`Bearer ${connection.gatewayToken}`}:{})},
+          signal:AbortSignal.any([signal,AbortSignal.timeout(15000)]),redirect:'error',credentials:'omit'})));
+        key=String(data.api_key||'');
+        if(!/^snx_temp_[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key))throw new Error('Soniox temporary key');
+      }
+      protocols = ['soniox-api-key', key];
     }
     signal.throwIfAborted();
-    const ws=new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket',['soniox-api-key',key]);this.socket=ws;
+    const ws = new WebSocket(url, protocols);
+    this.socket = ws;
     ws.onmessage=event=>{
       if(signal.aborted||this.completed)return;
       try {
@@ -91,37 +101,41 @@ export class SonioxStream {
     this.abort.signal.throwIfAborted();
     if (!this.opening || this.completed) throw new Error('Soniox disconnected');
     if (!pcm.length) return;
-    if (!this.ready || this.draining) this.queuedAudio.push(pcm.slice());
+    if (!this.ready) this.queuedAudio.push(pcm.slice());
     else this.sendAudio(pcm);
   }
 
   private sendAudio(pcm: Uint8Array): void {
     this.abort.signal.throwIfAborted();
     if(this.socket?.readyState!==WebSocket.OPEN)throw new Error('Soniox disconnected');
-    if(this.socket.bufferedAmount>512000)throw new Error('Soniox network slow');
+    if(this.socket.bufferedAmount>SOCKET_BUFFER_LIMIT)throw new Error('Soniox network slow');
     this.socket.send(pcm.slice().buffer);
   }
 
-  // Soniox tolerates short bursts and expects a near-real-time pace for longer audio.
-  // Incoming frames join the same queue until the audio recorded during setup is sent.
-  private async drainAudio(): Promise<void> {
-    try {
-      while (this.queuedAudio.length) {
-        const pcm = this.queuedAudio.shift()!;
-        for (let offset = 0; offset < pcm.length; offset += PCM_CHUNK_BYTES) {
-          const chunk = pcm.subarray(offset, offset + PCM_CHUNK_BYTES);
-          this.sendAudio(chunk);
-          await waitForAudioTime(chunk.length / PCM_BYTES_PER_MS, this.abort.signal);
+  // Flush the startup backlog right after configuration, then hand off to live audio.
+  // Waiting for each chunk's playback time would keep captions behind the speaker.
+  private async flushStartupAudio(): Promise<void> {
+    const signal = this.abort.signal;
+    signal.throwIfAborted();
+    const socket = this.socket!;
+    for (const pcm of this.queuedAudio) {
+      for (let offset = 0; offset < pcm.length; offset += PCM_CHUNK_BYTES) {
+        const chunk = pcm.subarray(offset, offset + PCM_CHUNK_BYTES);
+        const deadline = Date.now() + 10000;
+        while (socket.bufferedAmount + chunk.length > SOCKET_BUFFER_LIMIT) {
+          if (Date.now() >= deadline) throw new Error('Soniox network slow');
+          await waitForSocketBuffer(signal);
         }
+        this.sendAudio(chunk);
       }
-    } catch (error) { this.fail(error); }
-    finally { this.draining = undefined; }
+    }
+    this.queuedAudio.length = 0;
+    this.ready = true;
   }
 
   async finish(): Promise<string> {
     if (!this.opening) throw new Error('Soniox disconnected');
     await this.opening;
-    await this.draining;
     this.abort.signal.throwIfAborted();
     if(this.completed)return this.finalText.trim();
     return new Promise<string>((resolve,reject)=>{

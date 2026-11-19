@@ -4,6 +4,7 @@ import {
   createMachine, byteLength,
 } from '../core.mjs';
 import { D1StateStore, R2Attachments } from './storage.mjs';
+import { LIVE_VOICE_PROTOCOL, openLiveVoice } from './live-voice.mjs';
 
 const MAX_SPACE_IMAGES = 8;
 
@@ -79,6 +80,15 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         } });
         const path = url.pathname;
         if (request.method === 'GET' && path === '/health') return response(200, { ok: true, service: 'muse-relay', version: 1 }, headers);
+        const liveVoice = env.SONIOX_RELAY_LIVE === 'true' && Boolean(config.sonioxApiKey);
+        if (request.method === 'GET' && path === '/v1/voice/live') {
+          const protocols = request.headers.get('sec-websocket-protocol')?.split(',').map(value => value.trim());
+          if (protocols?.length !== 2 || protocols[0] !== LIVE_VOICE_PROTOCOL || !equal(protocols[1], config.relayToken)) fail(401, 'unauthorized');
+          if (!liveVoice || !env.DB) fail(503, 'live_voice_not_configured');
+          if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') fail(426, 'upgrade_required');
+          await new D1StateStore(env.DB).reserveSonioxToken(now());
+          return await openLiveVoice(fetchImpl, config.sonioxApiKey);
+        }
         const device = path.startsWith('/device/');
         const spaces = spaceExportRoute(request.method, path);
         const muse = spaces || (path === '/v1/profile' && request.method === 'PUT') || (path === '/v1/messages' && request.method === 'POST') || (path === '/admin/gc' && request.method === 'POST');
@@ -105,7 +115,9 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         }
         if (request.method === 'POST' && path === '/v1/soniox-token') {
           if (!config.sonioxApiKey) fail(503, 'soniox_not_configured');
-          await mutate(machine => machine.useSoniox());
+          const started = Date.now();
+          await store.reserveSonioxToken(now());
+          const admitted = Date.now();
           let upstream;
           try {
             upstream = await fetchImpl('https://api.soniox.com/v1/auth/temporary-api-key', {
@@ -123,7 +135,9 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
           try { data = await upstream.json(); }
           catch (error) { reportSonioxFailure(error, 'response_json'); fail(502, 'soniox_invalid_response'); }
           if (!data || typeof data.api_key !== 'string' || !data.api_key) fail(502, 'soniox_invalid_response');
-          return response(200, { api_key: data.api_key, expires_at: data.expires_at }, headers);
+          return response(200, { api_key: data.api_key, expires_at: data.expires_at }, {
+            ...headers, 'Server-Timing': `relay-quota;dur=${admitted - started}, soniox-issuer;dur=${Date.now() - admitted}`,
+          });
         }
         const body = ['POST', 'PUT'].includes(request.method) ? await readJson(request) : undefined;
         let status = 200, result, wroteMedia = false;
@@ -136,7 +150,10 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
           // An idempotent retry can leave an unreferenced upload for bounded GC.
           for (const field of ['audio', 'image']) if (value[field]) { value[field] = await blobs.put(value[field]); wroteMedia = true; }
           result = await mutate(machine => machine.addRequest(structuredClone(value), hash, requestBytes)); status = 202;
-        } else if (request.method === 'GET' && path === '/v1/snapshot') result = publicSnapshot(await mutate(machine => machine.snapshot(config.imagesEnabled, Boolean(config.sonioxApiKey))));
+        } else if (request.method === 'GET' && path === '/v1/snapshot') {
+          result = publicSnapshot(await mutate(machine => machine.snapshot(config.imagesEnabled, Boolean(config.sonioxApiKey))));
+          if (liveVoice) result.capabilities.live_transcription = true;
+        }
         else if (request.method === 'GET' && path.startsWith('/v1/files/')) {
           let name;
           try { name = decodeURIComponent(path.slice('/v1/files/'.length)); } catch { fail(400, 'invalid_filename'); }

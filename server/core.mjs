@@ -24,6 +24,8 @@ export const MAX_MESSAGES = 100;
 export const MAX_JOBS = 200;
 export const LEASE_MS = 180_000;
 export const JOB_TTL_MS = 15 * 60_000;
+export const SONIOX_TOKEN_LIMIT = 5;
+export const SONIOX_TOKEN_WINDOW_MS = 60_000;
 export const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,200}$/;
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 export const TERMINAL = new Set(['done', 'error']);
@@ -460,7 +462,12 @@ export function createMachine(state, {now = Date.now} = {}) {
   }
   function setProfile(profile) { state.profile = profile; if (profile.avatar_file && profile.avatar) state.files[profile.avatar_file] = profile.avatar; trimMessages(); return {ok:true}; }
   function snapshot(imagesEnabled, sonioxConfigured = false) { return {messages:state.messages,spaces:state.spaces,...(state.profile === undefined ? {} : {profile:state.profile}),device:{connected:Boolean(state.deviceSeen) && now()-state.deviceSeen<45000,last_seen:state.deviceSeen?Math.floor(state.deviceSeen/1000):undefined},capabilities:{audio:true,images:imagesEnabled,spaces:true,soniox:Boolean(sonioxConfigured)}}; }
-  function useSoniox() { state.sonioxCalls = state.sonioxCalls.filter(time=>now()-time<60000); if(state.sonioxCalls.length>=5)fail(429,'soniox_token_rate_limit'); state.sonioxCalls.push(now()); }
+  function useSoniox() {
+    const time = now();
+    state.sonioxCalls = state.sonioxCalls.filter(call => call > time - SONIOX_TOKEN_WINDOW_MS);
+    if (state.sonioxCalls.length >= SONIOX_TOKEN_LIMIT) fail(429, 'soniox_token_rate_limit');
+    state.sonioxCalls.push(time);
+  }
   function serialize() { state.streams = Object.fromEntries([...streamBuffers].map(([id,bytes])=>[id,encodeBase64(bytes)])); state.pending=Object.fromEntries(beforeAck); return state; }
   return {state,sweep,addRequest,handleDeviceEvent,leaseNext,takeRequest,publishMessage,setSpaces,upsertSpace,setProfile,snapshot,useSoniox,serialize};
 }

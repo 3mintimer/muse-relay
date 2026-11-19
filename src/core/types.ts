@@ -59,7 +59,7 @@ export interface Snapshot {
   spaces: Space[];
   profile?: MuseProfile;
   device?: { connected: boolean; last_seen?: number };
-  capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean };
+  capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean; live_transcription?: boolean };
 }
 export interface RelayRequest {
   id: string;

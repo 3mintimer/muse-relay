@@ -8,6 +8,13 @@
       "when": 1794889289462,
       "tag": "0000_relay",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795045389036,
+      "tag": "0001_soniox_quota",
+      "breakpoints": true
     }
   ]
 }

@@ -51,13 +51,14 @@ node server/cloudflare/build.mjs --outdir /path/to/hosting-project/dist
 | Secret | `DEVICE_TOKEN` | ATOM 用。上記と別の値 |
 | Secret | `MUSE_TOKEN` | Muse の出力用。上記と別の値 |
 | Secret・任意 | `SONIOX_API_KEY` | Soniox の長期キー。端末には渡さない |
+| Variable・任意 | `SONIOX_RELAY_LIVE` | WebSocket 対応ホストで中継側のリアルタイム文字起こしを使う場合に `true` |
 | Variable | `ALLOWED_ORIGINS` | 許可 Origin のカンマ区切り。例: `https://app.example,http://127.0.0.1:*` |
 | Variable・任意 | `PUBLIC_URL` | 自分の HTTPS URL。設定した場合は HTTPS であることを検証 |
 | Variable・任意 | `GADGET_IMAGES_ENABLED` | 検証済みの機器で画像入力を使う場合だけ `true` |
 
 Origin は完全一致で照合します。Even iPhone のポートが起動ごとに変わる場合だけ、予約値 `http://127.0.0.1:*` を追加します。正規の `http://127.0.0.1` とその有効なポートに限定され、HTTPS・別ホスト・userinfo・パス・query・fragment は許可しません。応答の `Access-Control-Allow-Origin` は要求元の値をそのまま返します。一般の `*` は使えません。
 
-`null` Origin は使用する EvenHub WebView がそれを送る場合だけ別途追加します。Origin の許可や OPTIONS の通過は認証を置き換えません。Origin がない ATOM/Muse クライアントを含め、各データAPIで役割別 Bearer 認証が必要です。
+`null` Origin は使用する EvenHub WebView がそれを送る場合だけ別途追加します。Origin の許可や OPTIONS の通過は認証を置き換えません。Origin がない ATOM/Muse クライアントを含め、データ用の HTTP API で役割別 Bearer 認証が必要です。
 
 Sites を使う場合、個人の作業ディレクトリにある `.openai/hosting.json` の binding は `hosting.example.json` と同じ `"d1":"DB","r2":"BUCKET"` です。個人の Site ID はその作業ディレクトリだけに設定します。Sites の packaging helper 用に `server/cloudflare/drizzle/` を作業ディレクトリの `drizzle/` にコピーしてください。Sites が migration を適用してから Worker をアップロードします。通常の Cloudflare 環境でも、最初の起動前に同じ SQL を D1 へ適用します。リクエスト処理中にテーブルを作成・変更しません。
 
@@ -69,6 +70,14 @@ OAI-Sites-Authorization: Bearer <本人のゲートウェイキー>
 ```
 
 2 つのヘッダーを併用します。後者はホスト側で検証され、Worker の役割別認証を置き換えません。アプリ・ATOM・Muse に設定する値は各ユーザーのローカル設定です。CORS preflight は両ヘッダーを許可しますが、ホスト側の preflight 通過も確認が必要です。
+
+## 中継側のリアルタイム文字起こし
+
+Muse Relay 0.3.12 以降の「中継先で文字起こし」は、中継が `capabilities.live_transcription` を返す場合に録音中の字幕を表示します。Worker は `/v1/voice/live` で話者フィルター適用後の16 kHzモノラルPCMを受け取ります。サーバー側のキーで Soniox に接続して途中結果と確定文をアプリへ返し、アプリが通常の依頼経路で確定文を Muse に送ります。この機能を通知しない中継には送信時に WAV が届きます。
+
+`SONIOX_API_KEY` をシークレットとして保存し、D1のマイグレーションを適用して `SONIOX_RELAY_LIVE=true` でデプロイします。ホストは WebSocket アップグレードを転送し、アプリの Origin を許可する必要があります。ブラウザーは WebSocket のサブプロトコル候補にスマートフォン用トークンを添えて Worker に接続します。`OAI-Sites-Authorization` ヘッダーを必須とする所有者限定ゲートウェイでは、ブラウザーの WebSocket 接続にそのヘッダーを付けられません。
+
+ライブ接続と一時キー発行は合計で直近1分に5回までです。ライブ音声は転送中だけ保持し、D1やR2に書き込みません。短く話して指を離す前に字幕が届き、Muse側で入力が確定文として表示されることを確認します。
 
 ## 保存と同時実行
 
@@ -122,7 +131,7 @@ sequenceDiagram
 
 ## 確認した範囲
 
-1 つの SQLite/R2 代替による結合テストで、同時リース競合・新しい Worker invocation への引継ぎ・ACK 前イベント・分割された日本語・重複イベント・画像と Spaces・孤立添付の削除を確認します。Node 参考実装の既存テストも使用します。Cloudflare 実環境、Sites ゲートウェイ、Muse、Soniox、ATOM の通信成功をこのテストだけで保証するものではありません。
+SQLite/R2 代替による結合テストでは、同時リース競合、新しい Worker への引継ぎ、ACK 前イベント、分割された日本語、重複イベント、画像と Spaces、孤立添付の削除、ライブ字幕の認証・フレーム・回数制限を確認します。Node 参考実装は別途テストします。配備先でホスティングゲートウェイ、Soniox、Muse の接続を確認してください。
 
 スキーマを変更するときだけ:
 

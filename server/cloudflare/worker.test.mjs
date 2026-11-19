@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createWorker } from './worker.mjs';
 import { D1StateStore } from './storage.mjs';
+import { linkLiveVoice, LIVE_VOICE_PROTOCOL } from './live-voice.mjs';
 import { createMachine, fingerprint, validateRequest } from '../core.mjs';
 
 // Execute the adapter's actual SQL. Each batch is a SQLite transaction, like D1.
@@ -33,10 +34,115 @@ class TestR2 {
   async delete(key) { this.objects.delete(key); }
 }
 
+async function applyMigrations(DB) {
+  const dir = new URL('./drizzle/', import.meta.url);
+  for (const file of (await readdir(dir)).filter(name => name.endsWith('.sql')).sort())
+    DB.sqlite.exec(await readFile(new URL(file, dir), 'utf8'));
+}
+
+test('live transcription is opt-in and requires the phone credential and upgrade before Soniox', async t => {
+  const DB = new TestD1(), BUCKET = new TestR2();
+  t.after(() => DB.sqlite.close());
+  await applyMigrations(DB);
+  const env = { DB, BUCKET, RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40),
+    SONIOX_API_KEY: 'synthetic-key', ALLOWED_ORIGINS: 'http://127.0.0.1:*' };
+  let sonioxCalls = 0;
+  const worker = createWorker({ fetchImpl: async (url, options) => {
+    sonioxCalls++;
+    assert.equal(url, 'https://stt-rt.soniox.com/transcribe-websocket');
+    assert.deepEqual(options.headers, { upgrade: 'websocket', authorization: 'Bearer synthetic-key' });
+    return new Response(null, { status: 503 });
+  } });
+  const snapshot = async () => (await worker.fetch(new Request('https://relay.example/v1/snapshot', {
+    headers: { authorization: `Bearer ${env.RELAY_TOKEN}` },
+  }), env)).json();
+  const stream = (token, origin = 'http://127.0.0.1:53210', upgrade = 'websocket') => worker.fetch(new Request('https://relay.example/v1/voice/live', {
+    headers: { 'sec-websocket-protocol': `${LIVE_VOICE_PROTOCOL}, ${token}`, upgrade, origin },
+  }), env);
+  assert.equal((await snapshot()).capabilities.live_transcription, undefined);
+  assert.equal((await stream(env.RELAY_TOKEN)).status, 503);
+  env.SONIOX_RELAY_LIVE = 'true';
+  assert.equal((await snapshot()).capabilities.live_transcription, true);
+  assert.equal((await stream(env.DEVICE_TOKEN)).status, 401);
+  assert.equal((await stream(env.MUSE_TOKEN)).status, 401);
+  assert.equal((await stream(env.RELAY_TOKEN, 'https://example.net')).status, 403);
+  assert.equal((await stream(env.RELAY_TOKEN, undefined, '')).status, 426);
+  assert.equal(sonioxCalls, 0);
+  assert.equal((await stream(env.RELAY_TOKEN)).status, 502);
+  assert.equal(sonioxCalls, 1);
+});
+
+test('live relay forwards bounded PCM and interim/final tokens without forwarding caller configuration', () => {
+  class Socket extends EventTarget {
+    sent = [];
+    closed = [];
+    accept() {}
+    send(data) { this.sent.push(data); }
+    receive(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
+    close(code) { this.closed.push(code); }
+  }
+  const phone = new Socket(), soniox = new Socket();
+  linkLiveVoice(phone, soniox);
+  phone.receive(JSON.stringify({ model: 'user-chosen-model', api_key: 'untrusted', language_hints: ['ja'] }));
+  assert.deepEqual(JSON.parse(soniox.sent[0]), {
+    model: 'stt-rt-v6', audio_format: 'pcm_s16le', sample_rate: 16000, num_channels: 1, language_hints: ['ja'], enable_endpoint_detection: true,
+  });
+  const audio = new Uint8Array([0, 1, 2, 3]).buffer;
+  phone.receive(audio);
+  assert.equal(soniox.sent[1], audio);
+  soniox.receive(JSON.stringify({ tokens: [{ text: '予定', is_final: false, start_ms: 42 }], request_id: 'upstream-id' }));
+  assert.deepEqual(JSON.parse(phone.sent[0]), { tokens: [{ text: '予定', is_final: false }], finished: false });
+  assert.deepEqual(phone.closed, []);
+  phone.receive('');
+  soniox.receive(JSON.stringify({ tokens: [{ text: '予定の確認', is_final: true }], finished: true }));
+  assert.equal(soniox.sent[2], '');
+  assert.deepEqual(JSON.parse(phone.sent[1]), { tokens: [{ text: '予定の確認', is_final: true }], finished: true });
+  assert.deepEqual(phone.closed, [1000]);
+  assert.deepEqual(soniox.closed, [1000]);
+
+  const oversized = new Socket(), limited = new Socket();
+  linkLiveVoice(oversized, limited);
+  oversized.receive('{"language_hints":["ja"]}');
+  const frame = new ArrayBuffer(64_000);
+  for (let sent = 0; sent < 16; sent++) oversized.receive(frame);
+  assert.equal(limited.sent.length, 16, 'only 30 seconds of PCM reach Soniox');
+  assert.deepEqual(oversized.closed, [1009]);
+  assert.deepEqual(limited.closed, [1009]);
+});
+
+test('Soniox admission keeps the legacy rolling quota without rewriting the relay state', async t => {
+  const DB = new TestD1(), BUCKET = new TestR2();
+  t.after(() => DB.sqlite.close());
+  await applyMigrations(DB);
+  let clock = Date.now();
+  const seed = [clock - 50000, clock - 3000, clock - 2000, clock - 1000];
+  const store = new D1StateStore(DB);
+  await store.update(state => { state.sonioxCalls = seed; });
+  const prior = (await store.load()).revision;
+  const env = { DB, BUCKET, RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40), SONIOX_API_KEY: 'synthetic-issuer-key' };
+  let issued = 0;
+  const call = (token = env.RELAY_TOKEN) => createWorker({
+    now: () => clock, fetchImpl: async () => {
+      issued++;
+      return Response.json({ api_key: 'snx_temp_test' });
+    },
+  }).fetch(new Request('https://relay.example/v1/soniox-token', { method: 'POST', headers: { authorization: `Bearer ${token}` } }), env);
+  assert.equal((await call(env.DEVICE_TOKEN)).status, 401);
+  const concurrent = await Promise.all([call(), call()]);
+  assert.deepEqual(concurrent.map(reply => reply.status).sort(), [200, 429]);
+  assert.equal(issued, 1);
+  assert.equal((await store.load()).revision, prior, 'issuance does not contend for the relay state pointer');
+  clock += 10000;
+  assert.equal((await call()).status, 200, 'the oldest legacy call has left the minute');
+  assert.equal((await call()).status, 429);
+  assert.equal(issued, 2);
+  assert.equal((await store.load()).revision, prior);
+});
+
 test('Muse reads back a slider export and updates one space without losing other spaces', async t => {
   const DB = new TestD1(), BUCKET = new TestR2();
   t.after(() => DB.sqlite.close());
-  DB.sqlite.exec(await readFile(new URL('./drizzle/0000_relay.sql', import.meta.url), 'utf8'));
+  await applyMigrations(DB);
   const env = { DB, BUCKET, RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40) };
   const call = (path, token, method = 'GET', body) => createWorker().fetch(new Request(`https://relay.example${path}`, {
     method, headers: token ? { authorization: `Bearer ${token}` } : {}, body: body && JSON.stringify(body),
@@ -94,7 +200,7 @@ test('Muse reads back a slider export and updates one space without losing other
 
 test('Worker persists CAS leases, streams, attachments, and issues bounded Soniox keys', async t => {
   const DB = new TestD1(), BUCKET = new TestR2();
-  DB.sqlite.exec(await readFile(new URL('./drizzle/0000_relay.sql', import.meta.url), 'utf8'));
+  await applyMigrations(DB);
   const env = { DB, BUCKET, RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40), ALLOWED_ORIGINS: 'https://app.example,http://127.0.0.1:*' };
   let clock = Date.now(), sequence = 0, sessionId;
   // A fresh Worker factory for every call: no in-memory queue or stream buffer survives.
@@ -124,6 +230,7 @@ test('Worker persists CAS leases, streams, attachments, and issues bounded Sonio
     try {
       const issued = await call('/v1/soniox-token', env.RELAY_TOKEN, {});
       assert.equal(issued.status, 200);
+      assert.match(issued.headers.get('server-timing'), /^relay-quota;dur=\d+, soniox-issuer;dur=\d+$/);
       assert.deepEqual(issued.body, { api_key: 'snx_temp_test', expires_at: '2026-11-17T00:00:00Z' });
       assert.equal(upstreamRequests[0].url, 'https://api.soniox.com/v1/auth/temporary-api-key');
       assert.equal(upstreamRequests[0].options.headers.authorization, `Bearer ${env.SONIOX_API_KEY}`);

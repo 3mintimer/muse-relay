@@ -1,4 +1,4 @@
-import { emptyState, validateState, encodeBase64, decodeBase64, fail } from '../core.mjs';
+import { emptyState, validateState, encodeBase64, decodeBase64, fail, SONIOX_TOKEN_LIMIT, SONIOX_TOKEN_WINDOW_MS } from '../core.mjs';
 
 const CHUNK_BYTES = 128 * 1024;
 const MAX_STATE_BYTES = 8 * 1024 * 1024;
@@ -41,6 +41,29 @@ export class D1StateStore {
       if (await this.compareAndSwap(revision, state)) return result;
     }
     fail(409, 'relay_busy_retry');
+  }
+  async reserveSonioxToken(time) {
+    const cutoff = time - SONIOX_TOKEN_WINDOW_MS;
+    // D1 serializes this update, so concurrent issuers see the same rolling quota.
+    const reserve = this.db.prepare(`
+      UPDATE relay_soniox_quota
+      SET allowed = (SELECT COUNT(*) FROM json_each(calls) WHERE value > ?) < ?,
+          calls = (SELECT json_group_array(value) FROM (
+            SELECT value FROM json_each(relay_soniox_quota.calls) WHERE value > ?
+            UNION ALL
+            SELECT ? WHERE (SELECT COUNT(*) FROM json_each(relay_soniox_quota.calls) WHERE value > ?) < ?
+          ))
+      WHERE id = 1 RETURNING allowed
+    `).bind(cutoff, SONIOX_TOKEN_LIMIT, cutoff, time, cutoff, SONIOX_TOKEN_LIMIT);
+    let { results: rows } = await reserve.all();
+    if (!rows.length) {
+      // The first request after an upgrade carries the current window over from the old store.
+      const { state } = await this.load();
+      const calls = state.sonioxCalls.filter(call => Number.isFinite(call) && call > cutoff);
+      await this.db.prepare('INSERT OR IGNORE INTO relay_soniox_quota (id, calls) VALUES (1, ?)').bind(JSON.stringify(calls)).run();
+      ({ results: rows } = await reserve.all());
+    }
+    if (rows[0]?.allowed !== 1) fail(429, 'soniox_token_rate_limit');
   }
 }
 

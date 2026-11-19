@@ -18,3 +18,9 @@ export const relayBlobs = sqliteTable('relay_blobs', {
   byteLength: integer('byte_length').notNull(),
   checkedAt: integer('checked_at').notNull().default(0),
 }, table => [index('relay_blobs_collection').on(table.checkedAt, table.createdAt)]);
+
+export const relaySonioxQuota = sqliteTable('relay_soniox_quota', {
+  id: integer('id').primaryKey(),
+  calls: text('calls').notNull(),
+  allowed: integer('allowed').notNull().default(0),
+}, table => [check('relay_soniox_quota_singleton', sql`${table.id} = 1`)]);

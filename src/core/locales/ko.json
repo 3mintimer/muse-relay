@@ -1,4 +1,6 @@
 {
+  "Live captions through your HTTPS relay": "HTTPS 중계를 통한 실시간 자막",
+  "Your HTTPS relay transcribes audio as you speak and shows captions on G2 and your phone. Muse receives the final text.": "말하는 동안 HTTPS 중계가 음성을 받아쓰고 G2와 스마트폰에 자막을 표시합니다. Muse에는 확정된 텍스트가 전달됩니다.",
   "Setup guide": "설정 가이드",
   "Build a relay": "릴레이 만들기",
   "Send feedback": "의견 보내기",

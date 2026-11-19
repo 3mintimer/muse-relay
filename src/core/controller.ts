@@ -369,7 +369,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(!checked.returnToChatAfterSend)followingChatId=undefined;
       displayDeadline=0;
       if(clear){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();relay=checked.configured?makeRelay(checked):undefined;state.connected=false;delete state.snapshot.profile;avatarFailedKey='';}
+      if(connectionChanged){replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();relay=checked.configured?makeRelay(checked):undefined;state.connected=false;delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
@@ -773,10 +773,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       // Arm audio before sending any display updates or waiting for Soniox.
       state.recording=true;
       const opening=glasses.microphone(true,state.settings.mic==='phone');
-      if(state.settings.voice==='soniox'){
-        soniox=new SonioxStream(value=>{state.transcript=value;emit();if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);},voiceFailed);
+      const relayLiveVoice=state.settings.voice==='muse'&&state.settings.relay==='gadget'&&state.snapshot.capabilities?.live_transcription===true;
+      if(state.settings.voice==='soniox'||relayLiveVoice){
+        soniox=new SonioxStream(value=>{
+          if(value===state.transcript)return;
+          state.transcript=value;emit();
+          if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);
+        },voiceFailed);
         // SonioxStream reports failures through voiceFailed and queues audio until ready.
-        void soniox.start(state.settings).catch(()=>{});
+        void soniox.start(state.settings,relayLiveVoice).catch(()=>{});
       }
       await opening;
       state.notice='';

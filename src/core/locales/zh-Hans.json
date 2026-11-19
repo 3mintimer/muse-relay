@@ -1,4 +1,6 @@
 {
+  "Live captions through your HTTPS relay": "通过 HTTPS 中继显示实时字幕",
+  "Your HTTPS relay transcribes audio as you speak and shows captions on G2 and your phone. Muse receives the final text.": "说话时，HTTPS 中继会转录音频，并在 G2 和手机上显示字幕。Muse 会收到最终文本。",
   "Setup guide": "设置指南",
   "Build a relay": "搭建中继",
   "Send feedback": "发送反馈",

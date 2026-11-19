@@ -474,6 +474,55 @@ test('speaker selection filters Muse recordings without changing timing, default
   assert.match(app.controller.state.notice,/話者を判定できません/);
 });
 
+test('relay transcription sends G2 captions during a hold and submits only the final text',async t=>{
+  const original=globalThis.WebSocket, phoneToken='p'.repeat(40);
+  const frames:Buffer[]=[];
+  let socket:Socket|undefined, mic=false;
+  class Socket {
+    static OPEN=1; readyState=0; bufferedAmount=0;
+    onopen?:()=>void; onclose?:()=>void; onmessage?:(event:{data:string})=>void;
+    constructor(url:string,protocols:string[]){
+      assert.equal(url,'wss://relay.example.test/v1/voice/live');
+      assert.deepEqual(protocols,['muse-relay-voice',phoneToken]);
+      socket=this;
+    }
+    open(){this.readyState=1;this.onopen?.();}
+    caption(text:string,finished=false){this.onmessage?.({data:JSON.stringify({tokens:[{text,is_final:finished}],finished})});}
+    send(value:string|ArrayBuffer){
+      if(value instanceof ArrayBuffer)frames.push(Buffer.from(value));
+      else if(value==='')this.caption('電車の予定を確認',true);
+      else assert.deepEqual(JSON.parse(value).language_hints,['ja']);
+    }
+    close(){this.readyState=3;this.onclose?.();}
+  }
+  globalThis.WebSocket=Socket as unknown as typeof WebSocket;
+  t.after(()=>{globalThis.WebSocket=original;});
+  const app=await appFixture(t,{...fixture(),capabilities:{audio:true,images:false,spaces:true,live_transcription:true}},true,
+    {voice:'muse',mic:'glasses',speakerFilter:'self',relayToken:phoneToken});
+  app.setSonioxKey(async()=>assert.fail('relay transcription must not ask for a direct key'));
+  app.bridge.audioControl=async(open=false)=>{mic=open;return true;};
+
+  app.emit({sysEvent:{eventType:9}});await settle();
+  assert.equal(mic,true);
+  app.emit({audioEvent:{audioPcm:new Uint8Array(19200).fill(19),speakerRole:'self'}});
+  app.emit({audioEvent:{audioPcm:new Uint8Array(3200).fill(99),speakerRole:'other'}});
+  assert.deepEqual(frames,[]);
+  socket!.open();await settle();
+  assert.deepEqual(Buffer.concat(frames),Buffer.concat([Buffer.alloc(19200,19),Buffer.alloc(3200)]));
+  socket!.caption('電車の予定');
+  t.mock.timers.tick(400);await settle();
+  assert.equal(app.controller.state.transcript,'電車の予定');
+  assert.match(app.text(),/電車の予定/);
+  assert.equal(mic,true);
+  assert.deepEqual(app.sent,[]);
+
+  app.emit({sysEvent:{eventType:10}});await settle();
+  assert.equal(mic,false);
+  assert.equal(app.sent[0]?.text,'電車の予定を確認');
+  assert.equal(app.sent[0]?.audio,undefined);
+  assert.equal(app.controller.state.snapshot.messages.find(message=>message.id===app.sent[0]!.id)?.text,'電車の予定を確認');
+});
+
 test('space microphone filters audio before Soniox and keeps the selected item',async t=>{
   const original=globalThis.WebSocket;
   const audioFrames:Uint8Array[]=[];

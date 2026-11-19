@@ -311,7 +311,7 @@ test('Soniox connection check rejects an authentication error after the socket o
   finally {globalThis.WebSocket=oldSocket;}
 });
 
-test('Soniox drains recorded audio at its PCM pace and queues newer audio behind it',async t=>{
+test('Soniox flushes a two-second startup backlog and keeps up with live audio',async t=>{
   t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
   const sent:Array<{value:string|ArrayBuffer;time:number}>=[];
   let socket:Socket|undefined;
@@ -334,15 +334,56 @@ test('Soniox drains recorded audio at its PCM pace and queues newer audio behind
   const stream=new SonioxStream(()=>{},()=>{});
   try{
     const opening=stream.start({...defaults,sonioxAuth:'api-key',sonioxApiKey:'synthetic-direct'});
-    stream.push(new Uint8Array(6400).fill(1));
+    for(let i=0;i<20;i++){
+      t.mock.timers.tick(100);
+      stream.push(new Uint8Array(3200).fill(i+1));
+    }
     assert.equal(sent.length,0);
     socket!.open();await opening;
+    assert.equal(sent.length,21,'all twenty frames are sent when the socket opens');
+    assert.ok(sent.every(frame=>frame.time===2000));
+    for(let i=20;i<60;i++){
+      t.mock.timers.tick(100);
+      stream.push(new Uint8Array(3200).fill(i+1));
+      assert.equal(sent.at(-1)!.time,Date.now(),'the current frame is sent as soon as it arrives');
+    }
+    await stream.finish();
+    assert.deepEqual(sent.slice(1,-1).map(({value})=>new Uint8Array(value as ArrayBuffer)[0]),Array.from({length:60},(_,i)=>i+1));
+    assert.deepEqual(sent.at(-1),{value:'',time:6000});
+  }finally{stream.cancel();globalThis.WebSocket=prior;}
+});
+
+test('Soniox preserves new audio order when startup flushing hits socket backpressure',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const sent:number[]=[];
+  let socket:Socket|undefined;
+  class Socket {
+    static OPEN=1;
+    readyState=1;bufferedAmount=0;
+    onopen?:()=>void;
+    onclose?:()=>void;
+    constructor(){socket=this;}
+    send(value:string|ArrayBuffer){
+      if(typeof value==='string')return;
+      sent.push(new Uint8Array(value)[0]!);
+      if(sent.length===1)this.bufferedAmount=512000;
+    }
+    close(){this.readyState=3;this.onclose?.();}
+  }
+  const prior=globalThis.WebSocket;
+  globalThis.WebSocket=Socket as unknown as typeof WebSocket;
+  const stream=new SonioxStream(()=>{},()=>{});
+  try{
+    const opening=stream.start({...defaults,sonioxAuth:'api-key',sonioxApiKey:'synthetic-direct'});
+    stream.push(new Uint8Array(3200).fill(1));
     stream.push(new Uint8Array(3200).fill(2));
-    const finishing=stream.finish();
-    assert.equal(sent.length,2,'only the configuration and first 100 ms of audio are sent immediately');
-    for(let i=0;i<3;i++){t.mock.timers.tick(100);await new Promise<void>(resolve=>setImmediate(resolve));}
-    await finishing;
-    assert.deepEqual(sent.slice(1).map(({value,time})=>[typeof value==='string'?value:new Uint8Array(value)[0],time]),[[1,0],[1,100],[2,200],['',300]]);
+    socket!.onopen?.();await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.deepEqual(sent,[1]);
+    stream.push(new Uint8Array(3200).fill(3));
+    socket!.bufferedAmount=0;t.mock.timers.tick(20);
+    await opening;
+    stream.push(new Uint8Array(3200).fill(4));
+    assert.deepEqual(sent,[1,2,3,4]);
   }finally{stream.cancel();globalThis.WebSocket=prior;}
 });
 
@@ -364,6 +405,11 @@ test('Muse requests follow the selected voice route, keep credentials private an
         assert.match(setup,/custom relay already transcribes WAV on the server/);
         assert.match(setup,/id equal to the request id/);
         assert.match(space,/use its configured transcriber/);
+        const liveSetup=museSetupPrompt(settings,true);
+        assert.match(liveSetup,/relay uses Soniox to return interim captions/);
+        assert.match(liveSetup,/Muse receives the final text/);
+        assert.doesNotMatch(liveSetup,/DO-NOT-COPY|private.example|private-speech.example|Muse WAV/);
+        assert.match(spacePrompt(settings,{name:'Notes',purpose:'Take notes',layout:'list',controls:['microphone']},true),/final Soniox text/);
       }
     }
   }

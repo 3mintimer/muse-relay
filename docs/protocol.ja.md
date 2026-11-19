@@ -90,7 +90,7 @@ Gadgetの添付形式:
 | `spaces` | リスト／カードと操作部品の定義（任意） |
 | `profile` | Museの名前・設定済みアバター（任意）。`{name?,avatar?,avatar_file?,mime_type?,updated_at?}` |
 | `device` | Gadget参照実装の接続状態（任意） |
-| `capabilities` | `images` はアプリからMuseへの画像送信可否。受信画像の表示とは別。任意の `soniox` はサーバーに長期キーが設定されているかの boolean で、接続検証済みを意味しない |
+| `capabilities` | `images` はアプリからMuseへの画像送信可否。任意の `soniox` はサーバー側でキーが設定済みかを示す。任意の `live_transcription:true` は対応アプリの「中継先で文字起こし」でリアルタイム字幕を有効にする |
 
 ### 文字起こしと返信の対応
 
@@ -103,7 +103,7 @@ Museの回答と文字起こしは別々の結果です。表示できる入力�
 |---|---|
 | Gist参考watcher | ハンドラーの `transcript` → `You.text`。`You.id` は元の依頼ID。省略時は依頼の `text` を使用し、音声だけの依頼では空の場合がある |
 | Gadget参考中継 | 音声依頼では、ACKのIDに一致するSDK `message.user` の `payload.display_text` / `payload.text` / `payload.content` から元の `You.text` を更新。SDKから表示できる文字起こしが届かない場合もある |
-| Soniox・両方式 | 確定文がアプリ依頼の `text` と端末内のYouメッセージになる。中継は文字起こし用WAVではなくテキストを受け取る |
+| Soniox直接接続・中継側のリアルタイム文字起こし | 確定文がアプリ依頼の `text` と端末内のYouメッセージになる。Museには確定文が届く |
 
 入力のIDと回答の `reply_to` に、同じ元のアプリ依頼IDを使います。
 
@@ -270,6 +270,7 @@ secret GistはURLを知る人が閲覧できる非公開一覧であり、内容
 | スマートフォン用 | `POST /v1/requests` | 共通依頼。HTTP 202は受付のみ |
 | スマートフォン用 | `GET /v1/files/:name` | 添付JSON |
 | スマートフォン用 | `POST /v1/soniox-token` | Soniox一時キー |
+| スマートフォン用 | `GET /v1/voice/live`（WebSocketアップグレード） | 任意の中継側リアルタイム文字起こし |
 | Muse用 | `POST /v1/messages` | テキスト・画像の出力 |
 | Muse用 | `GET /v1/spaces` | 現在のエクスポート `{spaces:[...]}`。チャットは含まない |
 | Muse用 | `PUT /v1/spaces/:id` | 本文の `id` がURLと一致する1件を追加・置換。他のスペースは保持 |
@@ -406,8 +407,11 @@ Museが作成したスペースを宣言的なJSONとして表示します。`la
 ```mermaid
 flowchart LR
   Mic[G2 / スマートフォンのマイク] --> Choice{音声設定}
-  Choice -->|Muse| WAV[16kHz / 16bit / mono WAV]
+  Choice -->|中継側字幕なし| WAV[16kHz / 16bit / mono WAV]
   WAV --> Relay[選択した中継] --> Muse[Muse側で文字起こし・応答]
+  Choice -->|中継側リアルタイム字幕| Live[HTTPS中継とSoniox]
+  Live -->|途中の文字| Glasses
+  Live -->|アプリ経由で確定文| Relay
   Choice -->|Soniox| STT[Soniox WebSocket]
   Key[本人がアプリへ入力したAPIキー] -.-> STT
   Token[任意の一時キー発行サーバー] -.->|60秒有効 / 1回だけ| STT
@@ -420,6 +424,12 @@ Soniox認証は、アプリに入力した本人のAPIキー、または発行�
 入力の文字起こしと対応する回答には[文字起こしの契約](#文字起こしと返信の対応)を使います。Sonioxの確定文は既にアプリの入力なので、再文字起こししません。
 
 一時キー応答: `{"api_key":"snx_temp_...","expires_at":"..."}`。参照サーバーは発行時に `usage_type:transcribe_websocket`、`expires_in_seconds:60`、`single_use:true`、`max_session_duration_seconds:150` を指定します。[Soniox仕様](https://docs.soniox.com/authentication/temporary-api-keys)
+
+### 中継側でリアルタイム字幕を返す
+
+Gadget中継では `capabilities.live_transcription:true` を返すと有効になります。アプリは `wss:` の `/v1/voice/live` に接続し、WebSocketのサブプロトコル候補に `muse-relay-voice` とスマートフォン用トークンを指定します。中継が応答するサブプロトコルは `muse-relay-voice` です。中継は自分のキーでSonioxに接続し、HTTPルートと同じOrigin制限を適用します。
+
+最初のテキストフレームは `language_hints:["ja"]` を含むJSONです。言語コードは1つです。続いて16 kHz・符号付き16 bitリトルエンディアン・モノラルPCMを64 KiB以下のバイナリフレームで送り、空のテキストフレームで終了します。話者フィルターはアプリで適用します。応答は `tokens:[{text,is_final}]` と `finished`、または `error_code` です。PCMの上限は30秒です。完了後は通常のチャット・スペース項目と一緒に確定文を `POST /v1/requests` へ送ります。この機能を通知しない中継には「中継先で文字起こし」で送信時にWAVが1件届きます。
 
 ## 上限・保持
 

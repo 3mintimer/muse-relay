@@ -51,13 +51,14 @@ This builds only. It does not create a Site, register secrets, deploy, or change
 | Secret | `DEVICE_TOKEN` | ATOM key, different from the above |
 | Secret | `MUSE_TOKEN` | Muse export key, different from the above |
 | Optional secret | `SONIOX_API_KEY` | Long-term Soniox key; never passed to the device |
+| Optional variable | `SONIOX_RELAY_LIVE` | Set `true` to enable live relay transcription on a WebSocket-capable host |
 | Variable | `ALLOWED_ORIGINS` | Comma-separated allowed Origins, e.g. `https://app.example,http://127.0.0.1:*` |
 | Optional variable | `PUBLIC_URL` | Your HTTPS URL; checked for HTTPS when provided |
 | Optional variable | `GADGET_IMAGES_ENABLED` | Set `true` only for image input on a verified device |
 
 Origins match exactly. If the Even iPhone app's port changes on startup, add the reserved value `http://127.0.0.1:*`. It allows only canonical `http://127.0.0.1` Origins and valid ports, excluding HTTPS, other hosts, userinfo, paths, queries, and fragments. `Access-Control-Allow-Origin` echoes the actual accepted Origin. A general `*` is not allowed.
 
-Add `null` separately only if your EvenHub WebView sends that Origin. Origin permission and successful OPTIONS do not replace authentication. All data APIs require a role-specific Bearer token, including ATOM/Muse clients without an Origin.
+Add `null` separately only if your EvenHub WebView sends that Origin. Origin permission and successful OPTIONS do not replace authentication. HTTP data APIs require a role-specific Bearer token, including ATOM/Muse clients without an Origin.
 
 For Sites, bindings in your private workspace's `.openai/hosting.json` are `"d1":"DB","r2":"BUCKET"`, as in `hosting.example.json`. Keep your Site ID in that workspace only. Copy `server/cloudflare/drizzle/` to the workspace's `drizzle/` for the Sites packaging helper. Sites applies migrations before uploading the Worker. On regular Cloudflare hosting, apply the same SQL to D1 before first startup. Request handlers do not create or alter tables.
 
@@ -69,6 +70,14 @@ OAI-Sites-Authorization: Bearer <your-gateway-key>
 ```
 
 Use both headers. The host validates the latter; it does not replace Worker role authentication. Values configured on the app, ATOM, and Muse belong in each user's local settings. Worker CORS allows both headers, but you must also verify that the hosting gateway accepts preflight requests.
+
+## Live relay transcription
+
+With Muse Relay 0.3.12 or later, **Transcribe via relay** shows captions during recording if the relay advertises `capabilities.live_transcription`. The Worker receives filtered 16 kHz mono PCM over `/v1/voice/live`, connects to Soniox using its server key, and relays interim and final results to the app. The app submits the final text to Muse through the regular request route. WAV remains the input format for this setting on relays that omit the capability.
+
+Store `SONIOX_API_KEY` as a secret, apply the D1 migrations, set `SONIOX_RELAY_LIVE=true`, and deploy. The host must forward WebSocket upgrades and allow the app's Origin. The browser authenticates to the Worker using the phone token in the WebSocket protocols list. An owner-only gateway that requires `OAI-Sites-Authorization` cannot use this browser route because the WebSocket API cannot attach that header.
+
+Live connections and temporary-key issuance share the existing five admissions per rolling minute. Live PCM is only in transit. The Worker does not write it to D1 or R2. For a smoke test, hold to record a short phrase and check that captions arrive before you release, then confirm the Muse input is the final transcript.
 
 ## Storage and concurrency
 
@@ -122,7 +131,7 @@ Image output and input are separate. Muse image exports through `POST /v1/messag
 
 ## Verification scope
 
-One integration test with SQLite/R2 substitutes checks concurrent leases, restoration in a new Worker invocation, pre-ACK events, split Japanese UTF-8, duplicate events, images/Spaces, and orphan cleanup. Existing Node reference tests are also used. These tests alone do not establish successful communication with real Cloudflare, Sites gateways, Muse, Soniox, or ATOM.
+Integration tests with SQLite/R2 substitutes cover concurrent leases, restoration in a new Worker invocation, pre-ACK events, split Japanese UTF-8, duplicate events, images/Spaces, orphan cleanup, and live transcription authorization, framing, and quotas. The Node reference tests run separately. Verify your hosting gateway, Soniox, and Muse connection on the deployed relay.
 
 Only when changing the schema:
 

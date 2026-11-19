@@ -30,7 +30,7 @@ export interface SpacePromptOptions {
 }
 
 /** A focused creation request. Connection secrets and personal URLs stay in settings. */
-export function spacePrompt(settings: Settings, options: SpacePromptOptions): string {
+export function spacePrompt(settings: Settings, options: SpacePromptOptions, relayLiveVoice = false): string {
   const controls = {
     button: {type:'button', label:'Run', confirm:'Run this action?'},
     slider: {type:'slider', min:5, max:60, step:5, value:25, unit:'min'},
@@ -41,7 +41,7 @@ export function spacePrompt(settings: Settings, options: SpacePromptOptions): st
   const transport = settings.relay === 'gist'
     ? 'GitHub Gist: write muse-relay-spaces.json as {spaces:[...]}. Read immutable muse-relay-request-<id>.json files; a voice attachment is audio_file/audio_mime/audio_name and the referenced file contains base64 WAV. The optional adapters/gist handler can return spaces in its result. Use the existing configured Gist writer, preserve other exports, and keep a single writer.'
     : 'Muse Gadget SDK via my existing HTTPS relay/home gadget: use the separate MUSE_TOKEN for GET <relay>/v1/spaces and PUT <relay>/v1/spaces/<id>. Put the single space object with the same ID as in the URL. On an older relay, only use the existing full-list write flow if you have the complete export to preserve. Reuse the configured secure credentials; the phone token cannot publish. If needed, the hosting gateway key goes only to that relay origin. SDK display.draw_* does not create a G2 space.';
-  const voice = !options.controls.includes('microphone') ? '' : settings.voice === 'soniox'
+  const voice = !options.controls.includes('microphone') ? '' : settings.voice === 'soniox' || (settings.relay === 'gadget' && relayLiveVoice)
     ? 'Microphone actions carry final Soniox text. Use it directly; do not transcribe it again.'
     : `A submitted microphone action carries one 16 kHz, 16-bit mono WAV from the ${settings.mic === 'phone' ? 'phone' : 'G2'} microphone. ${relayTranscription(settings)} Use the result to update the space.`;
   return [
@@ -70,9 +70,10 @@ export function avatarPrompt(settings: Settings): string {
 }
 
 /** Copy the selected behavior, never credentials or personal endpoint values. */
-export function museSetupPrompt(settings: Settings): string {
+export function museSetupPrompt(settings: Settings, relayLiveVoice = false): string {
   const gist = settings.relay === 'gist';
   const soniox = settings.voice === 'soniox';
+  const live = !gist && !soniox && relayLiveVoice;
   const language = languageName(settings.language);
   const microphone = settings.mic === 'phone' ? 'phone microphone' : 'G2 glasses microphone';
   const transport = gist
@@ -86,7 +87,8 @@ If the relay hosting requires a gateway key, send OAI-Sites-Authorization: Beare
   const voice = soniox
     ? `Voice mode: direct Soniox transcription. The app streams audio from the ${microphone} directly to Soniox. Soniox recognizes the speech; the app displays interim words on G2 and the phone. On submit, only the final text goes through the selected relay to Muse. Use that text directly; do not install a Whisper model or transcribe it again for this mode.
 ${sonioxInstruction(settings)} ${speakerInstruction(settings)}`
-    : `Voice mode: transcription via the selected relay. On submit, the app sends one 16kHz, 16-bit mono WAV from the ${microphone}; it does not stream microphone audio to the relay while recording. ${relayTranscription(settings)} ${gist
+    : live ? `Voice mode: live transcription via my HTTPS relay. During recording the app sends audio from the ${microphone} to the relay, and the relay uses Soniox to return interim captions to G2 and the phone. Muse receives the final text. Use it directly and link the reply with reply_to equal to the original request id. Leave Soniox authentication on the configured relay. ${speakerInstruction(settings)}`
+      : `Voice mode: transcription via the selected relay. On submit, the app sends one 16kHz, 16-bit mono WAV from the ${microphone}; it does not stream microphone audio to the relay while recording. ${relayTranscription(settings)} ${gist
       ? 'Update the from:"You" message with id equal to the original request id, setting text to the transcript. Set the Muse reply reply_to to that same request id. When using adapters/gist, return the transcript in the handler transcript field and let the watcher publish it.'
       : 'In the snapshot, update the original from:"You" message with id equal to the request id, setting text to the transcript. The reference relay gets that text from the matching SDK message.user event (display_text/text/content); a custom relay can use its server-side transcript. Set the Muse reply reply_to to that same request id. Publish only Muse replies through /v1/messages. If the selected transcriber returns no text, the input stays labeled as a voice message.'} Configure only this selected voice mode; Soniox setup is not required. ${speakerInstruction(settings)}`;
 
@@ -105,6 +107,6 @@ ${sonioxInstruction(settings)} ${speakerInstruction(settings)}`
     'Handle each request id once using durable claims and completion records. Mark it complete only after the reply is saved; do not blindly replay a request whose outcome is unknown. Use lightweight polling, not a recurring AI task. No new request means no AI run.',
     spaces,
     images,
-    `Keep secrets out of all relay content. First verify one owner-sent chat request and its matching reply. Only after I record, verify the selected ${soniox ? 'Soniox text' : 'Muse WAV'} flow and ${microphone}.${settings.images ? ' Verify an image only when I request one.' : ''} Distinguish receipt, Muse processing, app display, and physical G2 display; report only what was actually checked.`,
+    `Keep secrets out of all relay content. First verify one owner-sent chat request and its matching reply. Only after I record, verify the selected ${soniox ? 'Soniox text' : live ? 'live relay text' : 'Muse WAV'} flow and ${microphone}.${settings.images ? ' Verify an image only when I request one.' : ''} Distinguish receipt, Muse processing, app display, and physical G2 display; report only what was actually checked.`,
   ].join('\n\n');
 }

@@ -90,7 +90,7 @@ Gadget attachment format:
 | `spaces` | List/card and control definitions, optional |
 | `profile` | Muse's name/configured avatar, optional: `{name?,avatar?,avatar_file?,mime_type?,updated_at?}` |
 | `device` | Reference Gadget connection state, optional |
-| `capabilities` | `images` permits image input from app to Muse, independently of received-image display. Optional boolean `soniox` says a long-lived key is configured on the server, not that connectivity has been verified |
+| `capabilities` | `images` permits image input from app to Muse. Optional `soniox` indicates a configured server key. Optional `live_transcription:true` enables live captions in Transcribe via relay on compatible app builds |
 
 ### Voice transcripts and reply matching
 
@@ -103,7 +103,7 @@ Receiving a Muse answer and receiving a transcript are separate results. Without
 |---|---|
 | Gist reference watcher | Handler `transcript` → `You.text`, with `You.id` equal to the original request ID. If omitted, the watcher uses request `text`, which may be empty for audio |
 | Gadget reference relay | For an audio request, an SDK `message.user` whose message ID matches an ACK ID updates the original `You.text` from `payload.display_text`, `payload.text`, or `payload.content`. The SDK may supply no displayable transcript |
-| Soniox, either relay | Final text becomes the app request's `text` and its local You message. The relay receives text rather than a WAV to transcribe |
+| Soniox direct or live relay | Final text becomes the app request's `text` and its local You message. Muse receives the final text |
 
 Use the original app request ID for both the input and the answer's `reply_to`:
 
@@ -270,6 +270,7 @@ The phone connects to your HTTPS relay. In the reference setup, ATOM S3 at home 
 | Phone | `POST /v1/requests` | Common request. HTTP 202 means acceptance only |
 | Phone | `GET /v1/files/:name` | Attachment JSON |
 | Phone | `POST /v1/soniox-token` | Soniox temporary key |
+| Phone | `GET /v1/voice/live` (WebSocket upgrade) | Optional live relay transcription |
 | Muse | `POST /v1/messages` | Text/image output |
 | Muse | `GET /v1/spaces` | Current `{spaces:[...]}` exports, without chat |
 | Muse | `PUT /v1/spaces/:id` | Add/replace one Space whose body ID matches the URL; preserve others |
@@ -406,8 +407,11 @@ With images enabled, items may include an `image` attachment. Custom Gist implem
 ```mermaid
 flowchart LR
   Mic[G2 / phone microphone] --> Choice{Voice setting}
-  Choice -->|Muse| WAV[16 kHz / 16-bit / mono WAV]
+  Choice -->|Relay without live support| WAV[16 kHz / 16-bit / mono WAV]
   WAV --> Relay[Selected relay] --> Muse[Muse transcription and reply]
+  Choice -->|Live relay| Live[HTTPS relay with Soniox]
+  Live -->|Interim text| Glasses
+  Live -->|Final text via app| Relay
   Choice -->|Soniox| STT[Soniox WebSocket]
   Key[Owner's API key entered in app] -.-> STT
   Token[Optional temporary-key issuer] -.->|60 seconds / single use| STT
@@ -420,6 +424,12 @@ Choose your API key entered in the app or a temporary key from an issuer. Direct
 For input transcription and its matching answer, use the [transcript contract](#voice-transcripts-and-reply-matching). Soniox final text is already the app input; do not transcribe it again.
 
 Temporary-key response: `{"api_key":"snx_temp_...","expires_at":"..."}`. The reference issuer requests `usage_type:transcribe_websocket`, `expires_in_seconds:60`, `single_use:true`, and `max_session_duration_seconds:150`. [Soniox contract](https://docs.soniox.com/authentication/temporary-api-keys)
+
+### Live captions through the relay
+
+A Gadget relay can opt in with `capabilities.live_transcription:true`. Connect to `/v1/voice/live` over `wss:` with `muse-relay-voice` and the phone token in the offered WebSocket subprotocols. The relay returns only `muse-relay-voice` as the negotiated protocol and authenticates to Soniox with its own key. It applies the same Origin policy as the HTTP routes.
+
+Send a JSON text frame with `language_hints:["ja"]` (one language code), followed by signed little-endian 16-bit mono PCM at 16 kHz in binary frames up to 64 KiB each. The app filters speaker frames before sending. Send an empty text frame to end the stream. Responses contain `tokens:[{text,is_final}]` and `finished`, or an `error_code`. The session accepts up to 30 seconds of PCM. On completion the app submits the final text through `POST /v1/requests` with the normal chat or Space fields. Relays that omit the capability receive one WAV on send in Transcribe via relay mode.
 
 ## Limits and retention
 
