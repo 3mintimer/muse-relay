@@ -818,15 +818,16 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     body.append(el('div', 'even-card angle-card', chart, button(t('デフォルトにリセット', 'Reset to default'), () => {
       changed('headWakeAngle', defaults.headWakeAngle); render();
     }, {secondary:true, icon:'refresh', className:'small-button'})),
-    el('div', 'even-card', toggle(t('表示と同時に録音', 'Record on wake'), draft.headWakeMic, value => {changed('headWakeMic', value); render();}),
+    el('div', '',
       button(measuringZero ? t('正面を向いて静止', 'Face forward and hold still') : t('0°位置を再調整', 'Recalibrate zero'), () => {
         measuringZero = true; calibrationStatus = ''; render();
         void controller.measureNeutralPitch().then(angle => {
           changed('neutralPitch', angle); calibrationStatus = t('0°を設定しました', 'Zero position set');
         }, () => { calibrationStatus = t('角度を取得できません', 'Angle unavailable'); })
           .finally(() => { measuringZero = false; render(); });
-      }, {secondary: true, icon:'glasses', disabled: measuringZero || !controller.state.glasses, className:'full-width'}),
-      calibrationStatus ? el('output','even-help',calibrationStatus) : null));
+      }, {secondary: true, icon:'calibrate', disabled: measuringZero || !controller.state.glasses, className:'calibration-action'}),
+      calibrationStatus ? el('output','even-help calibration-result',calibrationStatus) : null),
+    el('div', 'even-card', toggle(t('表示と同時に録音', 'Record on wake'), draft.headWakeMic, value => { changed('headWakeMic', value); render(); })));
     return group;
   }
   function settingsContent() {

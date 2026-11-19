@@ -13,6 +13,7 @@ const paths = {
   settings: 'M4 7h16 M4 17h16 M8 4v6 M16 14v6',
   mic: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z M5 11v1a7 7 0 0 0 14 0v-1 M12 19v3 M8 22h8',
   send: 'M4 12h16 M14 6l6 6-6 6',
+  calibrate: 'M12 2v4 M12 18v4 M2 12h4 M18 12h4 M19 12a7 7 0 1 1-14 0 7 7 0 1 1 14 0 M14 12a2 2 0 1 1-4 0 2 2 0 1 1 4 0',
   refresh: 'M20 10a8 8 0 0 0-14-5L3 8 M3 3v5h5 M4 14a8 8 0 0 0 14 5l3-3 M21 21v-5h-5',
   glasses: 'M2 9h8v7H2z M14 9h8v7h-8z M10 11h4 M2 9l2-4 M22 9l-2-4',
   image: 'M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01',

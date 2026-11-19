@@ -192,7 +192,13 @@
 }
 .even-ui .even-button:active { opacity: .82; }
 .even-ui .even-button:disabled { background: var(--even-input); color: var(--even-disabled); }
-.even-ui .even-button--secondary { background: var(--even-surface); color: var(--even-text); }
+.even-ui .even-button--secondary {
+  color: var(--even-text);
+  background: var(--even-surface);
+  border: 1px solid var(--even-border);
+  border-color: color-mix(in srgb, var(--even-muted) 58%, var(--even-surface));
+}
+.even-ui .even-button--secondary:disabled { border-color: var(--even-border); }
 .even-ui .even-button--highlighted:not(:disabled) { background: var(--even-highlight); color: var(--even-on-highlight); }
 .even-ui .even-field { display: block; margin: 0 0 8px; }
 .even-ui .even-input {
