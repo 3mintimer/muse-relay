@@ -1,5 +1,15 @@
 // English source keys; protocol identifiers and numbered placeholders remain unchanged.
 export default {
+  "Live captions on compatible HTTPS relays": "兼容的 HTTPS 中继支持实时字幕",
+  "A compatible HTTPS relay shows live captions while you speak and sends final text to Muse. Other relays receive a WAV on send.": "兼容的 HTTPS 中继会在你说话时显示实时字幕，并将最终文本发送给 Muse。其他中继会在发送时接收 WAV。",
+  "Send voice through your relay": "通过你的中继发送语音",
+  "Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one 16 kHz, 16-bit mono WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.": "保持选择通过中继转录。如果已配置的 HTTPS 中继报告 capabilities.live_transcription，录音时使用其 Soniox 字幕，并且只将最终文本发送给 Muse。将 Soniox 密钥保存在中继。仅支持 WAV 的中继会在发送时通过配对的 Gadget SDK 转发 16 kHz、16 位单声道 WAV。若匹配的 message.user 带有转录，则使用该结果。将 Muse 回复的 reply_to 设置为原请求 ID，并保留 G2 说话人筛选。",
+  "Verify the saved audio route with a short recording. For live captions, check that text arrives before release and that the final text matches the Muse reply's request ID.": "录一小段语音以验证已保存的音频路径。使用实时字幕时，确认松开前已收到文字，并且 Muse 回复对应最终文本的请求 ID。",
+  "Live captions through your HTTPS relay": "通过 HTTPS 中继显示实时字幕",
+  "On the Cloudflare reference relay, store SONIOX_API_KEY as a secret, set SONIOX_RELAY_LIVE=true, apply the D1 migrations, and deploy to a host that accepts WebSocket upgrades.": "在 Cloudflare 参考中继上，将 SONIOX_API_KEY 保存为机密，设置 SONIOX_RELAY_LIVE=true，应用 D1 迁移，并部署到支持 WebSocket 升级的主机。",
+  "Keep Transcribe via relay selected in the app. Try a short recording and look for captions on G2 and your phone before you send. Check that Muse receives the final text and replies to it.": "在应用中保持选择通过中继转录。简短录音，确认发送前 G2 和手机上都有字幕。确认 Muse 收到最终文本并回复。",
+  "Cloudflare relay setup →": "设置 Cloudflare 中继 →",
+  "Voice & images → Transcription service → Transcribe via relay. Select the microphone, save, record a short phrase, then send.": "语音和图像 → 转录服务 → 通过中继转录。选择麦克风并保存，然后录一句简短的话并发送。",
   "Language": "显示语言",
   "Handler": "处理程序",
   "Your secret GitHub Gist and a token with gist scope": "你的私密 GitHub Gist 和具有 gist 权限的令牌",

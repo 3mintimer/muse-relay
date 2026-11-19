@@ -1,5 +1,15 @@
 // English source keys; protocol identifiers and numbered placeholders remain unchanged.
 export default {
+  "Live captions on compatible HTTPS relays": "相容的 HTTPS 中繼支援即時字幕",
+  "A compatible HTTPS relay shows live captions while you speak and sends final text to Muse. Other relays receive a WAV on send.": "相容的 HTTPS 中繼會在你說話時顯示即時字幕，並將最終文字傳送給 Muse。其他中繼會在傳送時收到 WAV。",
+  "Send voice through your relay": "透過你的中繼傳送語音",
+  "Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one 16 kHz, 16-bit mono WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.": "保留透過中繼轉錄的選項。如果已設定的 HTTPS 中繼回報 capabilities.live_transcription，錄音時使用其中繼的 Soniox 字幕，並只將最終文字傳送給 Muse。將 Soniox 金鑰保存在中繼。僅支援 WAV 的中繼在傳送時會透過已配對的 Gadget SDK 轉發 16 kHz、16 位元單聲道 WAV。若相符的 message.user 含有轉錄文字，則使用該結果。將 Muse 回覆的 reply_to 設為原始請求 ID，並保留 G2 說話者篩選。",
+  "Verify the saved audio route with a short recording. For live captions, check that text arrives before release and that the final text matches the Muse reply's request ID.": "錄一小段語音以確認已儲存的音訊路徑。使用即時字幕時，確認放開前已收到文字，並且 Muse 回覆對應最終文字的請求 ID。",
+  "Live captions through your HTTPS relay": "透過 HTTPS 中繼顯示即時字幕",
+  "On the Cloudflare reference relay, store SONIOX_API_KEY as a secret, set SONIOX_RELAY_LIVE=true, apply the D1 migrations, and deploy to a host that accepts WebSocket upgrades.": "在 Cloudflare 參考中繼上，將 SONIOX_API_KEY 儲存為機密、設定 SONIOX_RELAY_LIVE=true、套用 D1 遷移，並部署至支援 WebSocket 升級的主機。",
+  "Keep Transcribe via relay selected in the app. Try a short recording and look for captions on G2 and your phone before you send. Check that Muse receives the final text and replies to it.": "在應用程式中保留透過中繼轉錄的選項。錄一小段語音，在送出前確認 G2 和手機皆出現字幕。確認 Muse 收到最終文字並回覆。",
+  "Cloudflare relay setup →": "設定 Cloudflare 中繼 →",
+  "Voice & images → Transcription service → Transcribe via relay. Select the microphone, save, record a short phrase, then send.": "語音與影像 → 轉錄服務 → 透過中繼轉錄。選擇麥克風並儲存，錄一句話後送出。",
   "Language": "顯示語言",
   "Handler": "處理程式",
   "Your secret GitHub Gist and a token with gist scope": "你的私密 GitHub Gist 和具有 gist 權限的權杖",

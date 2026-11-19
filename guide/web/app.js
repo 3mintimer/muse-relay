@@ -56,6 +56,7 @@ const routes = () => ({
   },
 });
 const voiceName = () => state.voice === 'muse' ? t("Transcribe via relay") : state.voice === 'soniox-key' ? t("Soniox · Enter API key") : t("Soniox · Temporary key server");
+const gadgetVoice = () => t("A compatible HTTPS relay shows live captions while you speak and sends final text to Muse. Other relays receive a WAV on send.");
 
 function renderRoute() {
   const route = routes()[state.route];
@@ -94,7 +95,9 @@ function stepContent() {
   };
   if (state.step === 2) return {
     title: t("Choose transcription and microphone"),
-    actions: [t("Choose Transcription service, then set Microphone to G2 glasses or Phone."), state.voice === 'muse' ? t("The WAV goes to the relay when you send. There are no captions while recording.") : t("Set the Soniox connection method, then select Check Soniox connection."), t("Turn on Enable images only if needed. Copy the Muse instructions after choosing these settings.")],
+    actions: [t("Choose Transcription service, then set Microphone to G2 glasses or Phone."), state.voice === 'muse'
+      ? isGist ? t("The WAV goes to the relay when you send. There are no captions while recording.") : gadgetVoice()
+      : t("Set the Soniox connection method, then select Check Soniox connection."), t("Turn on Enable images only if needed. Copy the Muse instructions after choosing these settings.")],
     fields: [[t("Transcription service"), state.voice === 'muse' ? t("Transcribe via relay") : t("Soniox (direct from app)")], [t("Microphone"), t("G2 glasses / Phone")], [t("Enable images"), state.images ? t("On") : t("Off")]], link: [t("Audio routes and settings →"), '#voice'],
   };
   return {
@@ -123,12 +126,14 @@ function renderStep() {
 
 function renderVoice() {
   const isGist = state.route === 'gist';
+  $('#relay-voice-description').textContent = isGist ? t("Record, then send") : t("Live captions on compatible HTTPS relays");
   let flow, settings, keyFlow;
   if (state.voice === 'muse') {
-    $('#voice-title').textContent = t("Send the audio file on submit");
-    flow = [t("G2 / phone"), t("On send →"), routes()[state.route].medium, '→', isGist ? t("Muse-side handler") : `${routes()[state.route].device} → Muse`];
-    keyFlow = t("No captions appear while recording. A returned transcript appears in chat when available.");
-    settings = [[t("App selection"), t("Transcribe via relay")], [t("Processing"), isGist ? t("Implement transcription in the Muse-side handler") : t("The Gadget forwards WAV to Muse through the SDK")], [t("Recording limit"), isGist ? t("120 seconds") : t("30 seconds")], [t("Extra voice service"), t("Soniox is not needed for this mode")]];
+    $('#voice-title').textContent = isGist ? t("Send the audio file on submit") : t("Send voice through your relay");
+    flow = [t("G2 / phone"), isGist ? t("On send →") : t("Audio →"), routes()[state.route].medium, '→', isGist ? t("Muse-side handler") : `${routes()[state.route].device} → Muse`];
+    keyFlow = isGist ? t("No captions appear while recording. A returned transcript appears in chat when available.") : gadgetVoice();
+    settings = [[t("App selection"), t("Transcribe via relay")], [t("Recording limit"), isGist ? t("120 seconds") : t("30 seconds")]];
+    if (isGist) settings.push([t("Processing"), t("Implement transcription in the Muse-side handler")]);
   } else {
     $('#voice-title').textContent = t("Show words on G2 and phone as you speak");
     flow = [t("G2 / phone"), t("Audio →"), 'Soniox', t("Text →"), t("App"), t("Final text →"), routes()[state.route].medium];
@@ -201,9 +206,8 @@ function voicePrompt() {
   if (state.voice === 'soniox-server') return t("Voice uses Soniox (direct from app) and Temporary key server. {0}\nKeep the long-term Soniox key only on the token server and issue temporary keys for transcribe_websocket. Audio travels directly from the app to Soniox, not through the token server. Show interim words on G2 and the phone; send only final text to {1}. Do not transcribe again on the Muse side. Check the official format and limits at https://docs.soniox.com/authentication/temporary-api-keys and in the existing reference implementation.", [state.route === 'gist'
     ? t("Provide a separate authenticated HTTPS temporary-key endpoint and let me configure its URL and dedicated credentials in the app. Do not store long-term or temporary keys in Gist.")
     : t("With the reference relay's POST /v1/soniox-token, the app reuses its relay URL and phone credentials. Never inherit credentials for a token endpoint on another origin."), routes()[state.route].medium]);
-  return t("Voice uses Transcribe via relay. Do not stream audio to the relay while recording; send one 16 kHz, 16-bit mono WAV on submit. {0}\nDo not require Soniox for this mode. Do not infer or reconstruct excluded or unclassified speech that the G2 speaker filter replaced with silence.", [state.route === 'gist'
-    ? t("Implement Whisper-compatible or another configured transcription in the Muse-side handler. Return transcript to the reference watcher. Update the from:\"You\" message whose id matches the original request ID, and use that ID for the Muse reply_to.")
-    : t("Forward WAV to Muse through the paired Gadget SDK. When the matching SDK message.user contains a transcript, the reference relay updates the original You message. If no transcript is returned, show a voice message instead of claiming transcription succeeded.")]);
+  if (state.route !== 'gist') return t("Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one 16 kHz, 16-bit mono WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.");
+  return t("Voice uses Transcribe via relay. Do not stream audio to the relay while recording; send one 16 kHz, 16-bit mono WAV on submit. {0}\nDo not require Soniox for this mode. Do not infer or reconstruct excluded or unclassified speech that the G2 speaker filter replaced with silence.", [t("Implement Whisper-compatible or another configured transcription in the Muse-side handler. Return transcript to the reference watcher. Update the from:\"You\" message whose id matches the original request ID, and use that ID for the Muse reply_to.")]);
 }
 function imagesPrompt() {
   if (!state.images) return t("Images are off. Use text replies and Spaces understandable from text alone. Do not require enabling images or creating an avatar during connection setup.");
@@ -239,7 +243,9 @@ function renderPrompt() {
   const parts = [t("For Muse Relay, please {0}. Public protocol: {1}", [state.topic === 'connection' ? t("set up the relay in my environment") : state.topic === 'reuse' ? t("extend my existing G2Muse setup") : state.topic === 'voice' ? t("check and implement voice settings") : state.topic === 'space' ? t("create a Space") : state.topic === 'history' ? t("review history and cleanup") : t("retrieve the configured avatar"), contractLink]), safeConfiguration()];
   if (state.topic === 'connection') parts.push(transportPrompt(), voicePrompt(), imagesPrompt(), t("Persist claims and results by request ID to avoid duplicate execution. Never blindly resend a request whose outcome is unknown. Use lightweight polling and call Muse only for new requests. Do not create Spaces or an avatar during connection setup; wait for a separate request."));
   else if (state.topic === 'reuse') parts.push(reusePrompt());
-  else if (state.topic === 'voice') parts.push(t("The current relay is {0}. Preserve existing chat and credential separation.", [route.name]), voicePrompt(), t("Use the selected microphone only when I record. Check Soniox connection uses one second of silence and may count toward usage. Verify authentication separately from real speech transcription."));
+  else if (state.topic === 'voice') parts.push(t("The current relay is {0}. Preserve existing chat and credential separation.", [route.name]), voicePrompt(), state.voice === 'muse'
+    ? t("Verify the saved audio route with a short recording. For live captions, check that text arrives before release and that the final text matches the Muse reply's request ID.")
+    : t("Use the selected microphone only when I record. Check Soniox connection uses one second of silence and may count toward usage. Verify authentication separately from real speech transcription."));
   else if (state.topic === 'space') parts.push(spacePrompt());
   else if (state.topic === 'history') parts.push(historyPrompt());
   else parts.push(avatarPrompt());
