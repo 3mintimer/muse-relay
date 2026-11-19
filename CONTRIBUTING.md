@@ -28,6 +28,7 @@ npm run build
 | Area | Relevant checks |
 |---|---|
 | App logic and G2 navigation | Relevant files from `npx tsx --test tests/core.test.ts tests/navigation.test.ts tests/images.test.ts` |
+| Phone UI | After building, run `node --test tests/phone-ui.test.mjs` with Chrome installed to check touch scrolling and saving |
 | Node relay | `node --test tests/server.test.mjs` |
 | Worker relay | `node --test server/cloudflare/worker.test.mjs` |
 | Gist watcher | `node --test adapters/gist/watcher.test.mjs` |
@@ -35,6 +36,12 @@ npm run build
 | Documentation only | Check links, steps, and consistency with the UI |
 
 Keep tests focused on reproducing the problem or verifying the public contract. Distinguish physical-device results from Simulator or synthetic-input checks. If you do not have the hardware, say so.
+
+### Phone scroll checks
+
+- Open the changed screen in the Even app. Swipe to the bottom and back to the top. Check that you can tap the last action above the bottom navigation. In a long chat history, scroll from the oldest message back to the composer.
+- On screens with text fields, repeat with the keyboard open. In Settings, swipe from the connection field to the last control and back. Tap Save settings during a relay refresh, then reopen Settings and check that the change persisted.
+- On the head-angle chart, swipe vertically on the background. The page should scroll and the angle should stay the same. Drag the round marker and check that the angle changes.
 
 ## Maintenance workflow
 
