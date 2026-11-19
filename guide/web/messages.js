@@ -1,6 +1,16 @@
 // English is the canonical message key; values are Japanese.
 // Numeric placeholders are substituted by i18n.js; protocol JSON remains literal.
 export const japanese = {
+  "Live captions on compatible HTTPS relays": "対応する HTTPS 中継でリアルタイム字幕",
+  "A compatible HTTPS relay shows live captions while you speak and sends final text to Muse. Other relays receive a WAV on send.": "対応する HTTPS 中継では、話している間に字幕が表示され、Muse には確定した文字が届きます。未対応の中継には送信時に WAV が届きます。",
+  "Send voice through your relay": "中継経由で音声を送る",
+  "Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one 16 kHz, 16-bit mono WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.": "アプリの「中継先で文字起こし」を使います。設定済み HTTPS 中継の capabilities.live_transcription が有効なら、録音中は中継の Soniox 字幕を使い、Muse には確定文だけを送ります。Soniox キーは中継に保管します。WAV のみ対応する中継では、送信時に16 kHz・16 bit・モノラル WAV をペアリング済み Gadget SDK 経由で渡し、対応する message.user に文字起こしがあれば使用します。Muse の返信の reply_to に元の依頼 ID を指定し、G2 の話者フィルターを維持します。",
+  "Verify the saved audio route with a short recording. For live captions, check that text arrives before release and that the final text matches the Muse reply's request ID.": "短い録音で保存済みの音声経路を確認します。リアルタイム字幕を使う場合は、録音を終える前に字幕が表示され、確定文への Muse の返信が同じ依頼 ID に対応することを確認します。",
+  "Live captions through your HTTPS relay": "HTTPS 中継でリアルタイム字幕を使う",
+  "On the Cloudflare reference relay, store SONIOX_API_KEY as a secret, set SONIOX_RELAY_LIVE=true, apply the D1 migrations, and deploy to a host that accepts WebSocket upgrades.": "Cloudflare の参考中継では、SONIOX_API_KEY をシークレットとして保存し、SONIOX_RELAY_LIVE=true を設定します。D1 のマイグレーションを適用し、WebSocket アップグレードに対応するホストへデプロイします。",
+  "Keep Transcribe via relay selected in the app. Try a short recording and look for captions on G2 and your phone before you send. Check that Muse receives the final text and replies to it.": "アプリでは「中継先で文字起こし」を選びます。短く話して、送信前に G2 とスマホへ字幕が出ることを確認します。送信後、確定文が Muse に届き、その発言への返信が返ることを確認します。",
+  "Cloudflare relay setup →": "Cloudflare 中継の設定 →",
+  "Voice & images → Transcription service → Transcribe via relay. Select the microphone, save, record a short phrase, then send.": "「音声と画像 → 文字起こし先 → 中継先で文字起こし」を選びます。マイクを選んで保存し、短く話して送信します。",
   "Language": "表示言語",
   "Handler": "受信処理",
   "Your secret GitHub Gist and a token with gist scope": "GitHubのSecret Gistとgist権限のトークン",
