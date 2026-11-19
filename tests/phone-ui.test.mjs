@@ -10,6 +10,7 @@ async function openPhone(t, snapshot = { messages: [], spaces: [] }) {
   const browser = await chromium.launch({ channel: 'chrome' });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 375, height: 660 }, isMobile: true, hasTouch: true });
+  page.setDefaultTimeout(8000);
   await page.addInitScript(() => {
     if (!localStorage.getItem('muse-relay-state-v1')) {
       localStorage.setItem('muse-relay-state-v1', JSON.stringify({ settings: {
@@ -32,30 +33,39 @@ async function drag(touch, start, end) {
     const y = start.y + (end.y - start.y) * i / 5;
     await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] });
   }
+  // Pause with the finger down so lifting it ends the drag without a fling.
+  await new Promise(resolve => setTimeout(resolve, 180));
   await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
 // Locator.tap() scrolls offscreen elements into view. Require a reachable touch
 // point first so the browser cannot rescue a broken WebView layout.
 async function swipeToControl(touch, control) {
+  let lastPosition;
   for (let i = 0; i < 30; i++) {
-    const { x, y, height, reachable } = await control.evaluate(el => {
+    const position = await control.evaluate(async el => {
+      // Read hit targets after the compositor has finished the preceding swipe.
+      let top;
+      do {
+        top = el.getBoundingClientRect().top;
+        await new Promise(requestAnimationFrame);
+      } while (el.getBoundingClientRect().top !== top);
       const r = el.getBoundingClientRect();
       const x = r.left + r.width / 2, y = r.top + r.height / 2;
       const height = visualViewport.height;
       const reachable = r.top >= 0 && r.bottom <= height &&
         [r.top + 1, y, r.bottom - 1].every(at => el.contains(document.elementFromPoint(x, at)));
-      return { x, y, height, reachable };
+      return { x, y, height, reachable, scrollTop: el.closest('.app-scroll')?.scrollTop };
     });
+    const { x, y, height, reachable } = position;
     if (reachable) return { x, y };
+    lastPosition = position;
     const upper = height * 0.15, lower = height * 0.64;
     const distance = Math.max(upper - lower, Math.min(lower - upper, height * 0.4 - y));
-    await touch.send('Input.synthesizeScrollGesture', {
-      x: 26, y: distance < 0 ? lower : upper, yDistance: distance,
-      gestureSourceType: 'touch', speed: 1000, preventFling: true
-    });
+    const start = { x: 26, y: distance < 0 ? lower : upper };
+    await drag(touch, start, { x: start.x, y: start.y + distance });
   }
-  assert.fail(`Vertical swipes could not reach ${control}`);
+  assert.fail(`Vertical swipes could not reach ${control}: ${JSON.stringify(lastPosition)}`);
 }
 
 test('chat history scrolls to the oldest message and back to the composer', { timeout: 30_000 }, async t => {
