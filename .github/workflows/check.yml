@@ -24,6 +24,7 @@ jobs:
       - run: npm test
       - run: node --test tests/release.test.mjs
       - run: npm run build
+      - run: node --test tests/phone-ui.test.mjs
       - run: npm run pack
       - name: Keep the verified Even Hub package
         if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/main')

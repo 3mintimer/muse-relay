@@ -11,7 +11,8 @@
 .space-choice { flex: 1 1 140px; width: 0; }
 .space-action-status, .space-transcript { flex: 1 0 100%; margin: 0; font-size: 13px; white-space: pre-wrap; }
 .space-action-status.error { color: var(--even-danger); }
-html, body, #app { min-height: 100%; background: var(--even-bg); }
+html, body, #app { background: var(--even-bg); }
+#app { position: fixed; inset: var(--app-top, 0px) 0 auto; height: 100%; height: var(--app-height, 100dvh); }
 body { margin: 0; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
@@ -20,10 +21,11 @@ button { -webkit-user-select: none; user-select: none; }
 .icon { display: inline-block; width: 22px; height: 22px; flex: 0 0 22px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 .even-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; line-height: 1.4; }
 .even-button .icon { width: 20px; height: 20px; flex-basis: 20px; }
-.app-shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; max-width: 700px; margin: 0 auto; padding-bottom: var(--composer-keyboard-inset, 0px); background: var(--even-bg); }
+.app-shell { height: 100%; display: flex; flex-direction: column; max-width: 700px; margin: 0 auto; background: var(--even-bg); }
+.app-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
 .app-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); }
 .app-header h1 { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.4; }
-.page { flex: 1 0 auto; min-width: 0; padding: 12px max(12px, env(safe-area-inset-right, 0px)) 24px max(12px, env(safe-area-inset-left, 0px)); }
+.page { min-width: 0; padding: 12px max(12px, env(safe-area-inset-right, 0px)) 24px max(12px, env(safe-area-inset-left, 0px)); }
 .page-title { font-size: 19px; font-weight: 500; margin: 0 0 16px; line-height: 1.5; }
 .page-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
 .page-toolbar .page-title { margin: 0; flex: 1 1 auto; }
@@ -99,7 +101,7 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .prompt-text { margin: 12px 0; font-size: 12px !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; }
 .import-box { margin-bottom: 18px; }
 .import-box > .field { margin-top: 16px; }
-.import-text { font-size: 13px !important; }
+.import-text { font-size: 16px; }
 .check-summary:not(:empty) { padding: 8px 16px; margin-top: 16px; background: var(--even-surface); border-radius: 8px; }
 .check-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; font-size: 14px; }
 .check-row .icon { width: 18px; height: 18px; flex-basis: 18px; }
@@ -179,15 +181,15 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .space-item h3 { margin: 0; }
 .settings-save { margin: 0 0 24px; }
 .danger-button { color: var(--even-danger) !important; }
-.app-nav { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; z-index: 5; background: var(--even-bg); border: 0; box-shadow: none; }
+.app-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; z-index: 5; background: var(--even-bg); border: 0; box-shadow: none; }
 .app-nav .nav-button { border: 0; display: flex; flex-direction: column; gap: 5px; padding: 8px 4px; font-size: 11px; border-radius: 6px; background: transparent; }
 .app-nav .nav-button .icon { width: 21px; height: 21px; }
 .app-nav .nav-button.is-current { background: var(--even-surface); color: var(--even-text); }
 .app-nav .nav-button.is-current .icon { stroke-width: 2.1; }
 .app-nav .nav-button:not(.is-current) { color: var(--even-muted); }
 .app-nav::before, .app-nav::after { content: none; }
-.composer-editing .app-nav { position: static; }
-.tutorial-dialog { box-sizing: border-box; width: min(94vw, 440px); max-height: 90dvh; border: 0; border-radius: 10px; padding: 20px; color: var(--even-text); background: var(--even-bg); overflow: auto; }
+.wizard-page { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.tutorial-dialog { position: fixed; top: calc(var(--app-top, 0px) + var(--app-height, 100dvh) / 2); bottom: auto; transform: translateY(-50%); margin: 0 auto; box-sizing: border-box; width: min(94vw, 440px); max-height: 90dvh; max-height: min(90dvh, calc(var(--app-height, 100dvh) - 16px)); border: 0; border-radius: 10px; padding: 20px; color: var(--even-text); background: var(--even-bg); overflow: auto; }
 .tutorial-dialog::backdrop { background: #0008; }
 .tutorial-dialog .page-toolbar { justify-content: space-between; gap: 8px; }
 .tutorial-dialog .page-toolbar .muted { flex: 1 1 120px; font-size: 12px; }
@@ -255,7 +257,8 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 [data-group="head-wake"] .settings-group-body { display: grid; gap: 12px; }
 .even-ui .angle-card .even-button { background: var(--even-bg); margin: 8px auto 2px; padding-inline: 20px; }
 .angle-card { display: grid; justify-items: center; padding: 12px; }
-.head-angle { display: block; width: 100%; max-width: 420px; color: var(--even-text); touch-action: none; cursor: pointer; }
+.head-angle { display: block; width: 100%; max-width: 420px; color: var(--even-text); touch-action: pan-y pinch-zoom; cursor: pointer; }
+.angle-handle { touch-action: none; }
 .head-angle .wake-zone { fill: var(--even-highlight); }
 .angle-scale path { fill: none; stroke: var(--even-muted); stroke-width: 1.4; }
 .angle-scale text { fill: var(--even-muted); font-size: 10px; text-anchor: middle;  }

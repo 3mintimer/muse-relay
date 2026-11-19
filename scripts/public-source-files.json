@@ -41,6 +41,7 @@
     "changelog/0.3.16.md",
     "changelog/0.3.17.md",
     "changelog/0.3.18.md",
+    "changelog/0.3.19.md",
     "docs/atoms3.ja.md",
     "docs/atoms3.md",
     "docs/data.ja.md",
@@ -187,6 +188,7 @@
     "tests/glass-text.test.ts",
     "tests/images.test.ts",
     "tests/navigation.test.ts",
+    "tests/phone-ui.test.mjs",
     "tests/release.test.mjs",
     "tests/server.test.mjs",
     "tsconfig.json"

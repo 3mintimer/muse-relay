@@ -37,7 +37,6 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   let spaceToRemove: {id: string; title: string} | null = null;
   const spaceDrafts=new Map<string,{signature:string;value:number|string}>();
   let spaceConfirm:{spaceId:string;itemId:string;title:string;message:string}|undefined;
-  let draggingSlider=false;
   let uiError = '';
   let uiNotice = '';
   let working = false;
@@ -67,6 +66,12 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   let historyMode: 'older' | 'read' = 'older';
   let renderPending = false;
   let viewportFrame = 0;
+  let pressedPointer: number | null = null;
+  let deferredRender = false;
+  let renderedPage = '';
+  const scrollArea = el('div', 'app-scroll');
+  const shell = el('div', 'app-shell', scrollArea);
+  root.replaceChildren(shell);
   const t = (ja: string, en: string, values: Record<string, string | number> = {}) => translate(draft.language, ja, en, values);
   const languageOptions = (): [Language, string][] => [['system', t('端末に合わせる', 'Follow phone')], ...locales.map(locale => [locale.code, locale.label] as [Language, string])];
   const signature = (settings = draft) => JSON.stringify([settings.relay, settings.gistId, settings.githubToken, settings.relayUrl, settings.relayToken, settings.gatewayToken]);
@@ -166,12 +171,15 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     }
     labelEl.append(wrap); return labelEl;
   }
+  function onSelect(input: HTMLSelectElement, change: (value: string) => void) {
+    input.onchange = event => change((event.currentTarget as HTMLSelectElement).value);
+  }
   function select<K extends keyof Settings>(key: K, label: string, options: [Settings[K], string][], after?: () => void, selectedValue = draft[key]) {
     const row = el('label', 'even-row select-row', el('span', 'even-row-label', label));
     const input = el('select', 'compact-select'); focusKey(input, `select-${key}`); input.setAttribute('aria-label', label);
     for (const [value, name] of options) { const option = el('option', '', name); option.value = String(value); option.selected = selectedValue === value; input.append(option); }
-    input.addEventListener('change', () => {
-      const value = typeof draft[key] === 'number' ? Number(input.value) : input.value;
+    onSelect(input, selected => {
+      const value = typeof draft[key] === 'number' ? Number(selected) : selected;
       changed(key, value as Settings[K]); after?.(); render();
     });
     row.append(input); return row;
@@ -447,7 +455,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       feedbackLocation = 'page';
       if (step === 1 && !(draft.relay === 'gist' ? draft.gistId.trim() && draft.githubToken.trim() : draft.relayUrl.trim() && draft.relayToken.trim())) { uiError = t('接続先とトークンを入力してください。', 'Enter the endpoint and access token.'); render(); return; }
       if (step === 2 && draft.voice === 'soniox' && ['missing', 'invalid'].includes(voiceReadiness().kind)) { uiError = t('Sonioxを設定するか、「{method}」を選んでください。', 'Set up Soniox or choose “{method}”.', { method: voiceTitle('muse') }); render(); return; }
-      step++; uiError = ''; render(); window.scrollTo({ top: 0 });
+      step++; uiError = ''; render();
     }, { icon: 'arrow', disabled: working }));
     else actions.append(button(t('保存して開く', 'Save and open'), () => { void run(async () => {
       await saveDraft(true); wizard = false; view = 'chat';
@@ -566,7 +574,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const title = space?.title || t('未受信のスペース', 'Space not received');
     const card = el('article', 'even-card space-card');
     if (editingSpaces) card.append(el('h3', 'space-card-title', title));
-    else card.append(button(title, () => { activeSpace = id; render(); window.scrollTo({ top: 0 }); }, { secondary: true, icon: 'arrow', className: 'space-open', disabled: !space }));
+    else card.append(button(title, () => { activeSpace = id; render(); }, { secondary: true, icon: 'arrow', className: 'space-open', disabled: !space }));
     const actions = el('div', 'space-actions', el('span', 'muted', space ? t('{count} 件', '{count} items', { count: space.items.length }) : id));
     if (editingSpaces) {
       const move = (offset: number) => { void run(async () => {
@@ -616,7 +624,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function spaceAddContent() {
     const s = controller.state;
     const content = el('div', 'spaces-content');
-    content.append(button(t('スペース一覧', 'All spaces'), () => { spaceAddPage = null; render(); window.scrollTo({ top: 0 }); }, { secondary: true, icon: 'back', className: 'quiet-button' }),
+    content.append(button(t('スペース一覧', 'All spaces'), () => { spaceAddPage = null; render(); }, { secondary: true, icon: 'back', className: 'quiet-button' }),
       el('h2', 'page-title', t('スペースを追加', 'Add a space')));
     if (spaceAddPage === 'choose') {
       content.append(el('div', 'space-add-choices',
@@ -635,7 +643,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       const presets = el('label', 'field', el('span', 'field-label', t('例から始める', 'Start from an example')));
       const preset = el('select', 'even-input'); preset.setAttribute('aria-label', t('例から始める', 'Start from an example')); focusKey(preset, 'space-example');
       for (const example of spaceExamples()) { const option = el('option', '', example.label); option.value = example.id; option.selected = spaceExample === example.id; preset.append(option); }
-      preset.addEventListener('change', () => { useSpaceExample(preset.value as SpaceExample); render(); }); presets.append(preset);
+      onSelect(preset, value => { useSpaceExample(value as SpaceExample); render(); }); presets.append(preset);
       form.append(presets, spaceCreationField('name', t('名前', 'Name')), spaceCreationField('purpose', t('用途', 'Purpose')));
       const layout = el('fieldset', 'space-layout-choices', el('legend', 'field-label', t('表示形式', 'Layout')));
       for (const mode of ['list', 'cards'] as const) {
@@ -649,7 +657,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       const types: [SpacePromptControl, string][] = [['button', t('ボタン', 'Button')], ['slider', t('スライダー', 'Slider')], ['choice', t('選択肢', 'Choice')], ['microphone', t('マイク', 'Microphone')]];
       for (const [type, label] of types) controls.append(toggle(label, spaceCreation!.controls.includes(type), checked => { spaceCreation!.controls = checked ? [...spaceCreation!.controls, type] : spaceCreation!.controls.filter(item => item !== type); }));
       form.append(controls); content.append(form);
-      const next = button(t('依頼文を作る', 'Create request'), () => { spaceAddPage = 'prompt'; render(); window.scrollTo({ top: 0 }); }, { icon: 'arrow', className: 'full-width', disabled: !spaceCreation!.name.trim() || !spaceCreation!.purpose.trim() }); next.dataset.spaceCreate = '';
+      const next = button(t('依頼文を作る', 'Create request'), () => { spaceAddPage = 'prompt'; render(); }, { icon: 'arrow', className: 'full-width', disabled: !spaceCreation!.name.trim() || !spaceCreation!.purpose.trim() }); next.dataset.spaceCreate = '';
       content.append(el('div', 'wizard-actions', next));
     } else if (spaceAddPage === 'prompt') {
       const request = spacePrompt(s.settings, spaceCreation!, s.snapshot.capabilities?.live_transcription === true);
@@ -662,10 +670,10 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         }); }, { icon: 'copy', disabled: !editable() }),
         button(t('チャットの下書きへ', 'Add to chat draft'), () => {
           if (!addToChatDraft(request)) return;
-          spaceAddPage = 'receive'; render(); window.scrollTo({ top: 0 });
+          spaceAddPage = 'receive'; render();
         }, { secondary: true, icon: 'chat' })));
       content.append(el('div', 'wizard-actions', button(t('編集', 'Edit'), () => { spaceAddPage = 'create'; render(); }, { secondary: true, icon: 'back' }),
-        button(t('受信を確認', 'Check for received spaces'), () => { spaceAddPage = 'receive'; render(); window.scrollTo({ top: 0 }); }, { icon: 'arrow' })));
+        button(t('受信を確認', 'Check for received spaces'), () => { spaceAddPage = 'receive'; render(); }, { icon: 'arrow' })));
     } else {
       if (!s.settings.configured) { content.append(notConfigured()); return content; }
       const registrationFull = s.selectedSpaceIds.length >= 15;
@@ -680,7 +688,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
           content.append(el('article', 'even-card space-received', el('div', 'space-received-copy', el('h3', '', space.title), el('span', 'muted', t('{count} 件', '{count} items', { count: space.items.length }))),
             button(added ? t('追加済み', 'Added') : t('追加', 'Add'), () => { void run(() => controller.selectSpaces([...controller.state.selectedSpaceIds, space.id])); }, { secondary: added, icon: added ? 'check' : 'arrow', className: 'small-button', disabled: added || registrationFull || !editable() })));
         }
-        content.append(button(t('完了', 'Done'), () => { spaceAddPage = null; editingSpaces = false; render(); window.scrollTo({ top: 0 }); }, { secondary: true, className: 'full-width' }));
+        content.append(button(t('完了', 'Done'), () => { spaceAddPage = null; editingSpaces = false; render(); }, { secondary: true, className: 'full-width' }));
       }
     }
     return content;
@@ -707,16 +715,13 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         input.setAttribute('aria-label',item.title);focusKey(input,`space-${key}`);
         const output=el('output','space-value',`${value}${control.unit?' '+control.unit:''}`);
         input.addEventListener('input',()=>{const next=sliderValue(control,Number(input.value));spaceDrafts.set(key,{signature,value:next});output.textContent=`${next}${control.unit?' '+control.unit:''}`;});
-        input.addEventListener('pointerdown',event=>{draggingSlider=true;input.setPointerCapture(event.pointerId);});
-        const finish=()=>{draggingSlider=false;scheduleRender();};
-        input.addEventListener('pointerup',finish);input.addEventListener('pointercancel',finish);input.addEventListener('lostpointercapture',finish);
         block.append(el('div','space-slider',el('div','space-value-row',output,el('span','muted',`${control.min}–${control.max}`)),input),send);
       }else{
         const input=el('select','even-input space-choice');input.disabled=disabled;input.setAttribute('aria-label',item.title);focusKey(input,`space-${key}`);
         const placeholder=el('option','',t('選択','Choose'));placeholder.value='';placeholder.disabled=true;input.append(placeholder);
         for(const option of control.options){const node=el('option','',option.title);node.value=option.id;input.append(node);}
         input.value=String(value??'');send.disabled=disabled||!input.value;
-        input.addEventListener('change',()=>{spaceDrafts.set(key,{signature,value:input.value});send.disabled=disabled;});block.append(input,send);
+        onSelect(input,value=>{spaceDrafts.set(key,{signature,value});send.disabled=disabled;});block.append(input,send);
       }
     }
     if(control.type==='microphone'){
@@ -750,7 +755,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       }
     } else {
       content.append(el('div', 'page-toolbar', el('h2', 'page-title', t('スペース', 'Spaces')),
-        button(t('追加', 'Add'), () => { spaceAddPage = 'choose'; editingSpaces = false; render(); window.scrollTo({ top: 0 }); }, { icon: 'spaces', className: 'small-button' }),
+        button(t('追加', 'Add'), () => { spaceAddPage = 'choose'; editingSpaces = false; render(); }, { icon: 'spaces', className: 'small-button' }),
         button(t('更新', 'Refresh'), () => { void run(() => controller.refresh()); }, { secondary: true, icon: 'refresh', className: 'small-button', disabled: !s.settings.configured || !editable() })));
       if (!s.settings.configured) content.append(notConfigured());
       else if (!s.selectedSpaceIds.length) content.append(el('div', 'empty-state', icon('spaces'), el('h3', '', t('スペースはまだありません', 'No spaces yet')),
@@ -797,7 +802,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       block.append(text, el('div', 'space-prompt-actions', button(t('コピー', 'Copy'), () => { void run(async () => {
         try { await navigator.clipboard.writeText(request); uiNotice = t('コピーしました。Muse に貼り付けてください。', 'Copied. Paste it into Muse.'); }
         catch { const current = root.querySelector<HTMLTextAreaElement>('[data-focus="avatar-prompt"]'); current?.focus(); current?.select(); uiNotice = t('選択した内容をコピーしてください。', 'Copy the selected text.'); }
-      }); }, { icon: 'copy', disabled: !editable() }), button(t('チャットの下書きへ', 'Add to chat draft'), () => { if (addToChatDraft(request)) { render(); window.scrollTo({ top: 0 }); } }, { secondary: true, icon: 'chat' })));
+      }); }, { icon: 'copy', disabled: !editable() }), button(t('チャットの下書きへ', 'Add to chat draft'), () => { if (addToChatDraft(request)) { render(); } }, { secondary: true, icon: 'chat' })));
     }
     return block;
   }
@@ -811,9 +816,9 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const group = settingsGroup('head-wake', title, draft.headWake ? draft.headWakeAngle + '°' : t('オフ', 'Off'), el('div', 'even-card', enable));
     if (!draft.headWake) return group;
     const body = group.querySelector('.settings-group-body')!;
-    const chart = headAngleDial(title, draft.headWakeAngle, angle => changed('headWakeAngle', angle), active => {
-      draggingSlider = active;
-      if (!active) scheduleRender();
+    const chart = headAngleDial(title, draft.headWakeAngle, angle => {
+      changed('headWakeAngle', angle);
+      scheduleRender();
     });
     body.append(el('div', 'even-card angle-card', chart, button(t('デフォルトにリセット', 'Reset to default'), () => {
       changed('headWakeAngle', defaults.headWakeAngle); render();
@@ -879,7 +884,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function navigation() {
     const nav = el('nav', 'even-bottom-bar app-nav'); nav.setAttribute('aria-label', t('アプリメニュー', 'App navigation'));
     for (const [name, label, nameIcon] of [['chat', t('チャット', 'Chat'), 'chat'], ['spaces', t('スペース', 'Spaces'), 'spaces'], ['settings', t('設定', 'Settings'), 'settings']] as const) {
-      const b = button(label, () => { view = name; uiError = ''; uiNotice = ''; render(); window.scrollTo({ top: 0 }); }, { secondary: true, icon: nameIcon, className: `nav-button ${name === view ? 'is-current' : ''}` });
+      const b = button(label, () => { view = name; uiError = ''; uiNotice = ''; render(); scrollArea.scrollTop = 0; }, { secondary: true, icon: nameIcon, className: `nav-button ${name === view ? 'is-current' : ''}` });
       if (name === view) b.setAttribute('aria-current', 'page'); nav.append(b);
     }
     return nav;
@@ -935,12 +940,18 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     button(t('非表示をすべて戻す', 'Restore all hidden messages'), () => { historyOpen = false; void run(() => controller.restoreHiddenMessages()); }, { secondary: true, icon: 'back', className: 'full-width restore-history', disabled: !controller.state.hiddenIds.length || !editable() }));
     dialog.addEventListener('cancel', event => { event.preventDefault(); historyOpen = false; render(); }); return dialog;
   }
-  // Keep focused drafting fields and their connected ancestors in place during polling.
-  // Replacing/re-focusing them dismisses or repositions the iOS keyboard.
-  function preserveFocusedField(current: HTMLElement, next: HTMLElement, input: HTMLInputElement | HTMLTextAreaElement, nextInput: HTMLInputElement | HTMLTextAreaElement): boolean {
+  // Keep the keyboard or native picker attached when a poll refreshes its surroundings.
+  type FormField = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+  function preserveFocusedField(current: HTMLElement, next: HTMLElement, input: FormField, nextInput: FormField): boolean {
     if (current === input) {
+      if (input instanceof HTMLSelectElement && nextInput instanceof HTMLSelectElement) {
+        if (input.innerHTML !== nextInput.innerHTML) return false;
+        input.onchange = nextInput.onchange;
+      } else if (!(input instanceof HTMLSelectElement) && !(nextInput instanceof HTMLSelectElement)) {
+        input.placeholder = nextInput.placeholder;
+      } else return false;
       if (input.value !== nextInput.value) input.value = nextInput.value;
-      input.disabled = nextInput.disabled; input.placeholder = nextInput.placeholder;
+      input.disabled = nextInput.disabled;
       input.setAttribute('aria-label', nextInput.getAttribute('aria-label') || '');
       return true;
     }
@@ -948,6 +959,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const nextBranch = Array.from(next.children).find(child => child.contains(nextInput));
     if (!(currentBranch instanceof HTMLElement) || !(nextBranch instanceof HTMLElement)
       || !preserveFocusedField(currentBranch, nextBranch, input, nextInput)) return false;
+    // The visibility toggle is bound to this password field. Keep them together.
+    if (current.classList.contains('secret-field') && currentBranch === input) return true;
     current.className = next.className;
     if (current instanceof HTMLDetailsElement && next instanceof HTMLDetailsElement) current.open = next.open;
     for (const child of Array.from(current.childNodes)) if (child !== currentBranch) child.remove();
@@ -958,61 +971,86 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     }
     return true;
   }
-  function updateComposerViewport() {
-    const input = document.activeElement;
-    const editing = input instanceof HTMLTextAreaElement && input.dataset.focus === 'composer' && root.contains(input);
-    root.classList.toggle('composer-editing', editing);
+  function updateViewport(revealField: boolean) {
     const viewport = window.visualViewport;
-    const inset = editing && viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
-    root.style.setProperty('--composer-keyboard-inset', `${inset > 80 ? inset : 0}px`);
-    if (!editing) return;
-    const top = viewport?.offsetTop || 0;
-    const bottom = top + (viewport?.height || window.innerHeight);
-    const inputBounds = input.getBoundingClientRect();
-    const controls = input.closest('form')?.querySelector('.composer-actions')?.getBoundingClientRect();
-    const targetBottom = controls && controls.bottom - inputBounds.top < bottom - top - 24 ? controls.bottom : inputBounds.bottom;
-    if (targetBottom > bottom - 12) window.scrollBy({ top: targetBottom - bottom + 12, behavior: 'instant' });
-    else if (inputBounds.top < top + 12) window.scrollBy({ top: inputBounds.top - top - 12, behavior: 'instant' });
+    // WebViews can resize only the visual viewport while the keyboard is open.
+    // Leave browser pinch zoom in control of the layout.
+    if (viewport && viewport.scale === 1) {
+      root.style.setProperty('--app-height', viewport.height + 'px');
+      root.style.setProperty('--app-top', viewport.offsetTop + 'px');
+    } else {
+      root.style.removeProperty('--app-height');
+      root.style.removeProperty('--app-top');
+    }
+    const field = document.activeElement;
+    if (!revealField || (viewport && viewport.scale !== 1) || !scrollArea.contains(field)
+      || !(field instanceof HTMLTextAreaElement || (field instanceof HTMLInputElement && ['text', 'password'].includes(field.type)))) return;
+    const bounds = scrollArea.getBoundingClientRect();
+    const input = field.getBoundingClientRect();
+    const actions = field.closest('.composer')?.querySelector('.composer-actions')?.getBoundingClientRect();
+    const bottom = actions && actions.bottom - input.top <= bounds.height - 24 ? actions.bottom : input.bottom;
+    if (bottom > bounds.bottom - 12) scrollArea.scrollTop += bottom - bounds.bottom + 12;
+    else if (input.top < bounds.top + 12) scrollArea.scrollTop += input.top - bounds.top - 12;
   }
   function scheduleViewportUpdate() {
     cancelAnimationFrame(viewportFrame);
-    viewportFrame = requestAnimationFrame(updateComposerViewport);
+    viewportFrame = requestAnimationFrame(() => updateViewport(true));
+  }
+  const followViewportPan = () => updateViewport(false);
+  // Rebuilding a pressed button between pointerdown and click loses the tap.
+  function pointerDown(event: PointerEvent) {
+    if (event.isPrimary) pressedPointer = event.pointerId;
+  }
+  function finishPress(event?: PointerEvent) {
+    if (event && event.pointerId !== pressedPointer) return;
+    pressedPointer = null;
+    if (deferredRender) scheduleRender();
   }
   function render() {
-    if(draggingSlider)return;
+    if (pressedPointer !== null) { deferredRender = true; return; }
+    deferredRender = false;
     theme();
-    const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-    const focus = focused?.dataset.focus;
+    const focused = document.activeElement as HTMLElement | null;
+    const pageKey = wizard ? 'setup-' + step : view === 'spaces' ? JSON.stringify([view, spaceAddPage, activeSpace]) : view;
+    const samePage = pageKey === renderedPage;
+    renderedPage = pageKey;
+    const focus = samePage ? focused?.dataset.focus : undefined;
     const selection = focused && (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) ? [focused.selectionStart, focused.selectionEnd] as const : null;
-    const scroll = window.scrollY;
-    const shell = el('div', 'app-shell', header());
-    if (controller.state.settingsLoadFailed) shell.append(el('div', 'form-card', small(controller.state.persistence === 'local'
+    const content = el('div', 'app-content', header());
+    const scroll = samePage ? scrollArea.scrollTop : 0;
+    const oldDialog = shell.querySelector('dialog');
+    let nav: HTMLElement | undefined;
+    if (controller.state.settingsLoadFailed) content.append(el('div', 'form-card', small(controller.state.persistence === 'local'
       ? t('Even側の設定を読み込めませんでした。この端末のバックアップを表示しています。', 'Could not load settings from Even. Showing this device’s backup.')
       : t('設定を読み込めませんでした。保存済みの接続情報は変更していません。', 'Could not load settings. Stored connection details have not been changed.')),
       button(t('設定を再読み込み', 'Reload settings'), () => { void run(() => controller.reloadSettings()); }, { secondary: true, icon: 'refresh', disabled: !editable() })));
     if (controller.state.persistence === 'loading') {
       const loading = el('p', 'feedback', t('設定を読み込み中…', 'Loading settings…')); loading.setAttribute('role', 'status');
-      shell.append(el('main', 'page', loading));
-    } else if (wizard) shell.append(wizardContent());
+      content.append(el('main', 'page', loading));
+    } else if (wizard) content.append(wizardContent());
     else {
       const page = el('main', 'page', status());
       page.append(notifications(), view === 'chat' ? chatContent() : view === 'spaces' ? spacesContent() : settingsContent());
-      shell.append(page, navigation());
+      content.append(page); nav = navigation();
     }
     const dialog = help ? helpDialog() : spaceConfirm ? spaceConfirmation() : spaceToRemove ? removeSpaceDialog() : tutorial ? tutorialDialog() : confirmForget ? forgetDialog() : historyOpen ? historyDialog() : null;
-    if (dialog) shell.append(dialog);
-    const currentShell = root.firstElementChild;
-    const drafting = focus === 'composer' || focus?.startsWith('space-create-') || focus?.startsWith('setting-');
-    const nextField = drafting ? shell.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-focus="${CSS.escape(focus!)}"]`) : null;
-    const preserved = !dialog && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) && currentShell instanceof HTMLElement && nextField
-      ? preserveFocusedField(currentShell, shell, focused, nextField) : false;
-    if (!preserved) root.replaceChildren(shell);
-    if (dialog) dialog.showModal();
+    const dialogScroll = dialog && dialog.getAttribute('aria-labelledby') === oldDialog?.getAttribute('aria-labelledby') ? oldDialog.scrollTop : 0;
+    const currentContent = scrollArea.firstElementChild;
+    const drafting = focused instanceof HTMLSelectElement || focus === 'composer' || focus === 'import-config' || focus?.startsWith('space-create-') || focus?.startsWith('setting-');
+    const nextField = drafting && focus ? content.querySelector<FormField>(`[data-focus="${CSS.escape(focus)}"]`) : null;
+    const preserved = !dialog && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement || focused instanceof HTMLSelectElement) && currentContent instanceof HTMLElement && nextField
+      ? preserveFocusedField(currentContent, content, focused, nextField) : false;
+    if (!preserved) scrollArea.replaceChildren(content);
+    shell.querySelector('nav')?.remove();
+    if (nav) shell.append(nav);
+    oldDialog?.remove();
+    if (dialog) { shell.append(dialog); dialog.showModal(); }
     if (focus && !preserved && (!dialog || dialog.querySelector(`[data-focus="${CSS.escape(focus)}"]`))) {
       const target = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-focus="${CSS.escape(focus)}"]`);
       if (target) { target.focus({ preventScroll: true }); if (selection && selection[0] !== null && selection[1] !== null && typeof target.setSelectionRange === 'function') { try { target.setSelectionRange(selection[0], selection[1]); } catch { /* select / non-text input */ } } }
     }
-    if (!preserved) window.scrollTo({ top: scroll, behavior: 'instant' });
+    if (scrollArea.scrollTop !== scroll) scrollArea.scrollTop = scroll;
+    if (dialog) dialog.scrollTop = dialogScroll;
   }
   const unsubscribe = controller.subscribe(() => {
     const nextSettings = controller.state.settings;
@@ -1031,16 +1069,26 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     scheduleRender();
   });
   root.addEventListener('focusin', scheduleViewportUpdate);
-  root.addEventListener('focusout', scheduleViewportUpdate);
+  root.addEventListener('pointerdown', pointerDown, true);
+  window.addEventListener('pointerup', finishPress, true);
+  window.addEventListener('pointercancel', finishPress, true);
+  const cancelPress = () => finishPress();
+  window.addEventListener('blur', cancelPress);
+  window.visualViewport?.addEventListener('scroll', followViewportPan);
   window.visualViewport?.addEventListener('resize', scheduleViewportUpdate);
   window.addEventListener('resize', scheduleViewportUpdate);
+  updateViewport(false);
   render();
   return () => {
     unsubscribe(); cancelAnimationFrame(viewportFrame);
     root.removeEventListener('focusin', scheduleViewportUpdate);
-    root.removeEventListener('focusout', scheduleViewportUpdate);
+    root.removeEventListener('pointerdown', pointerDown, true);
+    window.removeEventListener('pointerup', finishPress, true);
+    window.removeEventListener('pointercancel', finishPress, true);
+    window.removeEventListener('blur', cancelPress);
+    window.visualViewport?.removeEventListener('scroll', followViewportPan);
     window.visualViewport?.removeEventListener('resize', scheduleViewportUpdate);
     window.removeEventListener('resize', scheduleViewportUpdate);
-    root.classList.remove('composer-editing'); root.style.removeProperty('--composer-keyboard-inset');
+    root.style.removeProperty('--app-height'); root.style.removeProperty('--app-top');
   };
 }
