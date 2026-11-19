@@ -169,3 +169,53 @@ export async function checkSonioxConnection(settings: Settings): Promise<void> {
   try { await stream.start(settings); stream.push(new Uint8Array(32000)); await stream.finish(); }
   finally { stream.cancel(); }
 }
+
+// The deployed relay accepts 30 seconds per live socket. Finish each part
+// independently while the next socket buffers its opening audio.
+export class RelayVoiceSession {
+  private parts: { stream: SonioxStream; text: string; result?: Promise<string> }[] = [];
+  private bytes = 0;
+  private stopped = false;
+  private settings: Settings;
+  private onText: (text: string) => void;
+  private onError: (error: Error) => void;
+  constructor(settings: Settings, onText: (text: string) => void, onError: (error: Error) => void) {
+    this.settings = settings; this.onText = onText; this.onError = onError;
+  }
+
+  private openPart() {
+    const part = {text: '', stream: new SonioxStream(text => {
+      if (this.stopped) return;
+      part.text = text;
+      this.onText(this.parts.map(part => part.text).filter(Boolean).join(' '));
+    }, this.onError), result: undefined as Promise<string> | undefined};
+    this.parts.push(part);
+    this.bytes = 0;
+    return part.stream.start(this.settings, true);
+  }
+
+  start() { return this.openPart(); }
+  push(pcm: Uint8Array) {
+    const limit = 30 * 32000;
+    for (let offset = 0; offset < pcm.length;) {
+      if (this.bytes === limit) {
+        const previous = this.parts.at(-1)!;
+        previous.result = previous.stream.finish();
+        void previous.result.catch(() => {}); // The stream reports failures to the controller.
+        void this.openPart().catch(() => {});
+      }
+      const count = Math.min(limit - this.bytes, pcm.length - offset);
+      this.parts.at(-1)!.stream.push(pcm.subarray(offset, offset + count));
+      this.bytes += count;
+      offset += count;
+    }
+  }
+  async finish() {
+    const texts = await Promise.all(this.parts.map(part => part.result ?? part.stream.finish()));
+    return texts.filter(Boolean).join(' ');
+  }
+  cancel() {
+    this.stopped = true;
+    for (const part of this.parts) part.stream.cancel();
+  }
+}

@@ -1,5 +1,5 @@
 import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
-import { AudioInputSource, AudioSpeakerRole } from '@evenrealities/even_hub_sdk';
+import { ImuReportPace, AudioInputSource, AudioSpeakerRole } from '@evenrealities/even_hub_sdk';
 import { getTextWidth } from '@evenrealities/pretext';
 import type { AppController, AppState, Attachment, Message, Relay, RelayRequest, Settings, SpaceItem, SpaceControl, MuseProfile } from './types';
 import { defaults, validateSettings } from './config';
@@ -8,9 +8,10 @@ import { GadgetRelay } from '../relay/gadget';
 import { Glasses, glassBodyRows, type GlassMenuItem, type GlassTextStyle } from './glasses';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, resizeImage, wav } from './media';
-import { SonioxStream } from './soniox';
+import { RelayVoiceSession, SonioxStream } from './soniox';
 import { LOCAL_STATE_KEY, StateStorage, type SavedState } from './persistence';
 import { resolveLocale, translate } from './i18n';
+import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from './chat';
@@ -83,7 +84,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let selectedAudioBytes=0,classifiedAudioBytes=0;
   let pendingStop:'send'|'cancel'|undefined;
   let voiceFailure:unknown;
-  let soniox:SonioxStream|undefined,liveUpdate:ReturnType<typeof setTimeout>|undefined;
+  let soniox:SonioxStream|RelayVoiceSession|undefined,liveUpdate:ReturnType<typeof setTimeout>|undefined;
   let foregroundAbort=new AbortController();
   const localSent:Message[]=[];
   const replyPoll=new ReplyPoll();
@@ -97,6 +98,48 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let homeClockTimer:ReturnType<typeof setTimeout>|undefined;
   let avatarJob:Promise<void>|undefined,avatarFailedKey='',avatarRetryKey='',avatarRetryAfter=0;
   const glasses=new Glasses(handleEvent,options.bridgeFactory);
+  const raise = new HeadRaise();
+  let imuRequested = false;
+  let calibration: {sample: (pitch: number) => void; cancel: () => void} | undefined;
+
+  async function syncImu() {
+    const wanted = glasses.ready && !disposed && (state.settings.headWake || !!calibration);
+    if (wanted === imuRequested) return;
+    imuRequested = wanted;
+    raise.reset();
+    try {
+      if (!await glasses.run(b => b.imuControl(wanted, ImuReportPace.P100))) throw new Error('IMU');
+    } catch (err) {
+      if (wanted === imuRequested) imuRequested = false;
+      if (wanted && !disposed) throw err;
+    }
+  }
+  function measureNeutralPitch(): Promise<number> {
+    if (!glasses.ready || disposed || calibration) return Promise.reject(new Error('IMU'));
+    raise.reset();
+    return new Promise((resolve, reject) => {
+      const samples: number[] = [];
+      let last = 0;
+      function finish(value?: number) {
+        clearTimeout(timer);
+        calibration = undefined;
+        raise.reset();
+        fire(syncImu());
+        if (value === undefined) reject(new Error('IMU'));
+        else resolve(value);
+      }
+      const timer = setTimeout(() => finish(), 6000);
+      const session = {cancel: () => finish(), sample(pitch: number) {
+        const now = Date.now();
+        if (now - last > 500 || samples.some(p => Math.abs(p - pitch) > 2)) samples.length = 0;
+        last = now;
+        samples.push(pitch);
+        if (samples.length >= 6) finish(samples.reduce((sum, p) => sum + p, 0) / samples.length);
+      }};
+      calibration = session;
+      void syncImu().catch(() => { if (calibration === session) session.cancel(); });
+    });
+  }
   let nativeHost=false;
   const nativeStorage={load:()=>glasses.load(),save:(value:string)=>glasses.save(value)};
   const storage=new StateStorage({
@@ -348,6 +391,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       relay=state.settings.configured?makeRelay(state.settings):undefined;state.connected=false;
     }
     persistenceReady=result.writable;state.persistence=result.mode;state.settingsLoadFailed=result.failed;
+    raise.reset();fire(syncImu());
     document.documentElement.dataset.evenTheme=state.settings.theme;syncProfileAvatar();emit();armPoll(0);
   }
   const savedNotice=(mode:AppState['persistence'])=>mode==='native'
@@ -375,6 +419,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
           :text('このブラウザーの接続情報を削除しました。','Connection details removed from this browser.')):savedNotice(state.persistence);
       if(clear){localSent.length=0;screen='home';state.selectedMessageId=undefined;feedback=undefined;}
+      raise.reset();fire(syncImu());
       document.documentElement.dataset.evenTheme=checked.theme;
       try{localStorage.setItem('muse-relay-theme',checked.theme);}catch{/* Cosmetic preference only. */}
       emit();if(connectionChanged)armPoll(0);else armPoll();
@@ -746,9 +791,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   function ingest(audio:NonNullable<EvenHubEvent['audioEvent']>){
     if(!state.recording||pendingStop)return;
-    const pcm=audio.audioPcm;
-    const limit=(state.settings.relay==='gadget'?30:120)*32000;
-    if(captureBytes+pcm.length>limit){fire(act(()=>stopRecording(false),undefined,undefined,false));return;}
+    const limit = 120 * 32000;
+    const pcm = audio.audioPcm.subarray(0, limit - captureBytes);
     const filter=state.settings.mic==='glasses'?state.settings.speakerFilter:'all';
     const classified=audio.source!==AudioInputSource.Phone&&(audio.speakerRole===AudioSpeakerRole.Self||audio.speakerRole===AudioSpeakerRole.Other);
     const selected=filter==='all'||(classified&&audio.speakerRole===filter);
@@ -758,6 +802,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const audioFrame=selected?pcm:new Uint8Array(pcm.length);captureBytes+=audioFrame.length;
     if(!soniox)capture.push(selected?pcm.slice():audioFrame);
     else try{soniox.push(audioFrame);}catch(e){voiceFailed(e);}
+    if (captureBytes === limit) fire(act(() => stopRecording(false), undefined, undefined, false));
   }
   async function startRecording(mode:'hold'|'toggle'='toggle',target?:ControlTarget){
     if(state.recording||voiceBusy||state.busy)return;
@@ -775,17 +820,18 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const opening=glasses.microphone(true,state.settings.mic==='phone');
       const relayLiveVoice=state.settings.voice==='muse'&&state.settings.relay==='gadget'&&state.snapshot.capabilities?.live_transcription===true;
       if(state.settings.voice==='soniox'||relayLiveVoice){
-        soniox=new SonioxStream(value=>{
+        const onText = (value: string) => {
           if(value===state.transcript)return;
           state.transcript=value;emit();
           if(state.recording&&!liveUpdate)liveUpdate=setTimeout(()=>{liveUpdate=undefined;fire(render());},400);
-        },voiceFailed);
+        };
+        soniox = relayLiveVoice ? new RelayVoiceSession(state.settings, onText, voiceFailed) : new SonioxStream(onText, voiceFailed);
         // SonioxStream reports failures through voiceFailed and queues audio until ready.
-        void soniox.start(state.settings,relayLiveVoice).catch(()=>{});
+        void soniox.start(state.settings).catch(()=>{});
       }
       await opening;
       state.notice='';
-      recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,undefined,false)),state.settings.relay==='gadget'?30000:120000);
+      recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,undefined,false)),120000);
     }catch(e){
       state.recording=false;recordingSpace=undefined;if(target)state.spaceAction=undefined;
       soniox?.cancel();soniox=undefined;capture=[];clearTimeout(liveUpdate);liveUpdate=undefined;
@@ -844,7 +890,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         req=voiceRequest(transcript);
       }else{
         req=voiceRequest('');
-        req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture))};
+        req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture, state.settings.relay === 'gadget' && captureBytes > 1_099_956))};
       }
       voiceSending=true;voiceStatus=text('送信中…','Sending…');void render().catch(error);
       state.busy=false;await send(req);if(!target)sentChatId=req.id;
@@ -858,6 +904,18 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   function handleEvent(e:EvenHubEvent){
     if(e.audioEvent){ingest(e.audioEvent);return;}
     if(disposed)return;
+    if(e.sysEvent?.eventType === 8){
+      const pitch = e.sysEvent.imuData && headPitch(e.sysEvent.imuData);
+      if (pitch === undefined || !active || contextualOpen || !imuRequested) return;
+      if (calibration) { calibration.sample(pitch); return; }
+      const s = state.settings;
+      if (s.headWake && raise.sample(pitch - s.neutralPitch, s.headWakeAngle, Date.now())
+        && state.displaySleeping && !state.busy && !voiceBusy && state.persistence !== 'loading') {
+        if (s.headWakeMic && s.configured) fire(act(() => startRecording('toggle'), undefined, undefined, false));
+        else fire(restoreDisplay());
+      }
+      return;
+    }
     if(state.persistence==='loading'&&e.menuItemClickEvent)return;
     if(e.menuItemClickEvent){
       const id=e.menuItemClickEvent.itemID;
@@ -879,9 +937,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const type=e.sysEvent?.eventType??e.listEvent?.eventType??e.textEvent?.eventType??0;
     if(state.persistence==='loading'&&![4,5,6,7].includes(type))return;
     // 4 -> menu selection -> 5 is the OS contextual overlay, not app teardown.
-    if(type===4){contextualOpen=true;++renderSerial;glasses.invalidateRender();syncDisplayTimers();return;}
+    if(type===4){raise.reset();calibration?.cancel();contextualOpen=true;++renderSerial;glasses.invalidateRender();syncDisplayTimers();return;}
     if(type===5){contextualOpen=false;const action=pendingMenuAction;pendingMenuAction=undefined;syncDisplayTimers(true);if(active)fire(action?action():state.displaySleeping?restoreDisplay():render());return;}
-    if(type===6||type===7){active=false;disposed=true;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
+    if(type===6||type===7){active=false;disposed=true;calibration?.cancel();fire(syncImu());replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
     if(contextualOpen||!active)return;
     if([0,1,2,3,9,10].includes(type))syncDisplayTimers(true);
     if(state.displaySleeping){
@@ -1004,12 +1062,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       await dispatchSpaceAction(spaceRequest(target,value));
     }),
     showGlassesMenu:()=>guarded(showMenu),
+    measureNeutralPitch,
     restoreDisplay:()=>guarded(restoreDisplay),
     async clearCredentials(){await guarded(async()=>{await stopRecording(true);await persistSettings({...defaults,theme:state.settings.theme,language:state.settings.language},true);});},
   };
   async function startGlasses(){
     if(disposed)return;
-    try{await glasses.start();state.glasses=true;emit();await render();}
+    try{await glasses.start();state.glasses=true;fire(syncImu());emit();await render();}
     catch{if(!state.notice)state.notice=text('グラス表示を開始できません。設定はスマートフォンで確認できます。','Unable to start the glasses display. Your settings are available on the phone.');emit();}
   }
   let initialRestoreDone=false;
@@ -1035,6 +1094,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(document.hidden){active=false;contextualOpen=false;pendingMenuAction=undefined;++actionSerial;++renderSerial;glasses.invalidateRender();clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());}
     else{active=true;contextualOpen=false;foregroundAbort=new AbortController();if(feedback?.kind==='busy')feedback=undefined;fire(render());armPoll(0);}
   });
-  window.addEventListener('pagehide',()=>{active=false;disposed=true;++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
+  window.addEventListener('pagehide',()=>{active=false;disposed=true;calibration?.cancel();fire(syncImu());++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
   return api;
 }

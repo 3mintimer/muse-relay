@@ -407,7 +407,7 @@ With images enabled, items may include an `image` attachment. Custom Gist implem
 ```mermaid
 flowchart LR
   Mic[G2 / phone microphone] --> Choice{Voice setting}
-  Choice -->|Relay without live support| WAV[16 kHz / 16-bit / mono WAV]
+  Choice -->|Relay without live support| WAV[Mono PCM WAV]
   WAV --> Relay[Selected relay] --> Muse[Muse transcription and reply]
   Choice -->|Live relay| Live[HTTPS relay with Soniox]
   Live -->|Interim text| Glasses
@@ -429,7 +429,7 @@ Temporary-key response: `{"api_key":"snx_temp_...","expires_at":"..."}`. The ref
 
 A Gadget relay can opt in with `capabilities.live_transcription:true`. Connect to `/v1/voice/live` over `wss:` with `muse-relay-voice` and the phone token in the offered WebSocket subprotocols. The relay returns only `muse-relay-voice` as the negotiated protocol and authenticates to Soniox with its own key. It applies the same Origin policy as the HTTP routes.
 
-Send a JSON text frame with `language_hints:["ja"]` (one language code), followed by signed little-endian 16-bit mono PCM at 16 kHz in binary frames up to 64 KiB each. The app filters speaker frames before sending. Send an empty text frame to end the stream. Responses contain `tokens:[{text,is_final}]` and `finished`, or an `error_code`. The session accepts up to 30 seconds of PCM. On completion the app submits the final text through `POST /v1/requests` with the normal chat or Space fields. Relays that omit the capability receive one WAV on send in Transcribe via relay mode.
+Send a JSON text frame with `language_hints:["ja"]` (one language code), followed by signed little-endian 16-bit mono PCM at 16 kHz in binary frames up to 64 KiB each. The app filters speaker frames before sending. Send an empty text frame to end the stream. Responses contain `tokens:[{text,is_final}]` and `finished`, or an `error_code`. Each socket accepts up to 30 seconds of PCM. The app joins the final transcripts in order and submits one request for a recording of up to two minutes. On completion the app submits the final text through `POST /v1/requests` with the normal chat or Space fields. Relays that omit the capability receive one WAV on send in Transcribe via relay mode.
 
 ## Limits and retention
 
@@ -437,7 +437,7 @@ These are app and bundled reference limits. Custom relays must respect the app's
 
 | Item | v1 implementation |
 |---|---|
-| Recording | Gist up to 120 seconds / Gadget up to 30 seconds |
+| Recording | Gist up to 120 seconds / Gadget up to 120 seconds |
 | Gist outgoing attachment | At most 5,500,000 base64 characters each |
 | Gist readable file | At most 6,000,000 characters; reference watcher uses 6,000,000 bytes |
 | Gadget audio | WAV up to 1,100,000 bytes |

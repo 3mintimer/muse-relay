@@ -1,5 +1,6 @@
 import type { AppController, Attachment, Settings, Snapshot, Space, SpaceItem, Message } from '../core/types';
-import { endpoint, resolveSonioxConnection, sonioxAuthMode } from '../core/config';
+import { headAngleDial } from './head-angle';
+import { defaults, endpoint, resolveSonioxConnection, sonioxAuthMode } from '../core/config';
 import { button, el, externalLink, icon, type IconName } from './dom';
 import { avatarPrompt, museSetupPrompt, spacePrompt, type SpacePromptControl, type SpacePromptOptions } from './prompts';
 import { locales, resolveLocale, translate } from '../core/i18n';
@@ -52,6 +53,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   const settingsGroups = new Set<string>();
   let voiceTest: { signature: string; ok: boolean; message: string } | null = null;
   let avatarRequestOpen = false;
+  let calibrationStatus = '';
+  let measuringZero = false;
   let importOpen = false;
   let gistInitializerOpen = false;
   let originHelpOpen = false;
@@ -798,6 +801,34 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     }
     return block;
   }
+  function headWakeSettings() {
+    const title = t('頭上げ表示', 'Head-up display');
+    const enable = toggle(t('頭を上げて表示', 'Raise head to wake'), draft.headWake, enabled => {
+      changed('headWake', enabled);
+      if (enabled && !draft.autoHideSeconds) changed('autoHideSeconds', 15);
+      render();
+    });
+    const group = settingsGroup('head-wake', title, draft.headWake ? draft.headWakeAngle + '°' : t('オフ', 'Off'), el('div', 'even-card', enable));
+    if (!draft.headWake) return group;
+    const body = group.querySelector('.settings-group-body')!;
+    const chart = headAngleDial(title, draft.headWakeAngle, angle => changed('headWakeAngle', angle), active => {
+      draggingSlider = active;
+      if (!active) scheduleRender();
+    });
+    body.append(el('div', 'even-card angle-card', chart, button(t('デフォルトにリセット', 'Reset to default'), () => {
+      changed('headWakeAngle', defaults.headWakeAngle); render();
+    }, {secondary:true, icon:'refresh', className:'small-button'})),
+    el('div', 'even-card', toggle(t('表示と同時に録音', 'Record on wake'), draft.headWakeMic, value => {changed('headWakeMic', value); render();}),
+      button(measuringZero ? t('正面を向いて静止', 'Face forward and hold still') : t('0°位置を再調整', 'Recalibrate zero'), () => {
+        measuringZero = true; calibrationStatus = ''; render();
+        void controller.measureNeutralPitch().then(angle => {
+          changed('neutralPitch', angle); calibrationStatus = t('0°を設定しました', 'Zero position set');
+        }, () => { calibrationStatus = t('角度を取得できません', 'Angle unavailable'); })
+          .finally(() => { measuringZero = false; render(); });
+      }, {secondary: true, icon:'glasses', disabled: measuringZero || !controller.state.glasses, className:'full-width'}),
+      calibrationStatus ? el('output','even-help',calibrationStatus) : null));
+    return group;
+  }
   function settingsContent() {
     const content = el('div', 'settings-content', el('h2', 'page-title', t('設定', 'Settings')));
     const storage = controller.state.persistence;
@@ -808,10 +839,11 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     chatLayout.classList.add('chat-layout-row');
     content.append(settingsGroup('glasses', t('G2 表示', 'G2 display'), draft.autoHideSeconds ? t('{seconds} 秒', '{seconds} seconds', {seconds: draft.autoHideSeconds}) : t('自動非表示オフ', 'Auto-hide off'), el('div', 'even-card',
       chatLayout,
-      select('autoHideSeconds', t('自動で非表示', 'Auto-hide display'), [0, 5, 10, 15, 20, 25, 30].map(seconds => [seconds, seconds ? t('{seconds} 秒', '{seconds} seconds', { seconds }) : t('オフ', 'Off')])),
+      select('autoHideSeconds', t('自動で非表示', 'Auto-hide display'), [0, 5, 10, 15, 20, 25, 30].map(seconds => [seconds, seconds ? t('{seconds} 秒', '{seconds} seconds', { seconds }) : t('オフ', 'Off')]), () => { if (!draft.autoHideSeconds) changed('headWake', false); }),
       toggle(t('送信後にチャットへ戻る', 'Return to chat after sending'), draft.returnToChatAfterSend, value => { changed('returnToChatAfterSend', value); render(); }, t('チャット送信のみ', 'Chat messages only')),
       avatarSettings(),
       button(t('復帰操作を試す', 'Try restoring the display'), () => { tutorial = true; tutorialMode = 'chat'; tutorialStep = 4; tutorialDemo = false; render(); }, { secondary: true, icon: 'help', className: 'full-width' }))));
+    content.append(headWakeSettings());
     content.append(settingsGroup('display', t('表示', 'Display'), draft.language === 'system' ? t('端末に合わせる', 'Follow phone') : languageOptions().find(([id]) => id === draft.language)![1], el('div', 'even-card',
       select('theme', t('テーマ', 'Theme'), [['system', t('システム', 'System')], ['light', t('ライト', 'Light')], ['dark', t('ダーク', 'Dark')]], theme),
       select('language', t('表示言語', 'Language'), languageOptions()),
@@ -856,7 +888,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const titles = spaces ? [t('リストで選択','Select from a list'),t('ボタンを実行','Run a button'),t('スライダーを調整','Adjust a slider'),t('マイクで入力','Use voice input'),t('ダブルタップで戻る','Double-tap to go back')]
       : [t('スワイプで移動','Swipe to navigate'),t('タップで開く','Tap to open'),t('長押しで話す','Hold to speak'),t('ダブルタップで戻る','Double-tap to go back'),t('非表示から戻る','Restore a hidden display')];
     const instructions = spaces ? [t('上下にスワイプして行を選び、タップ。Contextual Menu でリスト／カード表示を切り替えます。','Swipe to select a row, then tap. Switch list/card view in the contextual menu.'),t('タップで送信。確認画面があるボタンは、もう一度タップで実行します。','Tap to send. A button with confirmation needs another tap to run.'),t('上スワイプで増加、下で減少。タップで送信、ダブルタップで中止。','Swipe up to increase, down to decrease. Tap to send, double-tap to cancel.'),t('マイクの行をタップで録音開始。タップで送信、ダブルタップで中止。','Tap a microphone row to record. Tap to send, double-tap to cancel.'),t('項目 → 項目一覧 → スペース一覧 → ホーム。カード表示では項目からスペース一覧へ戻ります。','Item → item list → Spaces → Home. Card view returns from an item to Spaces.')]
-      : [t('ホームでは項目を選択。チャットでは前後のメッセージへ切り替えます。','On Home, select an item. In Chat, move between messages.'),t('ホームの「チャット」をタップで開きます。本文ではタップで次のページへ。','Tap Chat on Home to open it. Tap the message for its next page.'),t('長押しで話し、離すと送信。「録音を開始」から始めた場合はタップで送信します。上限は {seconds} 秒です。','Hold to speak, then release to send. When started with Record voice, tap to send. Limit: {seconds} seconds.',{seconds:draft.relay==='gadget'?30:120}),t('チャットからホームへ戻ります。ホームでは終了確認、録音中は中止です。','Return from Chat to Home. On Home, open the exit confirmation; while recording, cancel.'),t('Ring／タッチパッドの最初の操作 → 直前画面。長押し → 復帰して録音。','First Ring/touchpad input → previous screen. Hold → restore and record.')];
+      : [t('ホームでは項目を選択。チャットでは前後のメッセージへ切り替えます。','On Home, select an item. In Chat, move between messages.'),t('ホームの「チャット」をタップで開きます。本文ではタップで次のページへ。','Tap Chat on Home to open it. Tap the message for its next page.'),t('長押しで話し、離すと送信。「録音を開始」から始めた場合はタップで送信します。上限は {seconds} 秒です。','Hold to speak, then release to send. When started with Record voice, tap to send. Limit: {seconds} seconds.',{seconds:120}),t('チャットからホームへ戻ります。ホームでは終了確認、録音中は中止です。','Return from Chat to Home. On Home, open the exit confirmation; while recording, cancel.'),t('Ring／タッチパッドの最初の操作 → 直前画面。長押し → 復帰して録音。','First Ring/touchpad input → previous screen. Hold → restore and record.')];
     const mock = spaces ? [t('今日の予定 · 3件\n要約する · 実行\n集中時間 · 25 分\nメモ · 音声','Today · 3 events\nSummarize · Run\nFocus time · 25 min\nNote · Voice'),t('中継が受け付けました','Accepted by relay'),t('集中時間\n30 分\n[======----------]','Focus time\n30 min\n[======----------]'),t('メモ\n録音中…','Note\nRecording…'),t('予定\n買い物\nメモ','Schedule\nShopping\nNotes')]
       : [t('Muse · 新しいメッセージ','Muse · New message'),t('メッセージの本文\nタップで次のページへ','Message text\nTap for the next page'),t('録音中…\n離すと送信','Recording…\nRelease to send'),t('チャット\nスペース\n録音を開始','Chat\nSpaces\nRecord voice'),t('メッセージの本文\nタップで次のページへ','Message text\nTap for the next page')];
     const dialog = el('dialog', 'tutorial-dialog'); dialog.setAttribute('aria-labelledby', 'tutorial-title');

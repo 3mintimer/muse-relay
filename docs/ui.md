@@ -163,6 +163,9 @@ stateDiagram-v2
 | Hidden | Clears body, footer, lists, and images. Receiving continues; new content alone does not wake the display |
 | First tap, swipe, or double tap | Restores the previous screen without activating an unseen item |
 | Hold | Wakes the display and starts the chat microphone; release to send |
+| Head-up display (Beta 0.3.13) | Choose the wake angle on the dial (10–60°, default 30°). Turning it on sets auto-hide to 15 seconds if previously off |
+| Recalibrate zero | Face forward and hold still, then save settings. Reset on the dial restores the 30° threshold |
+| Record on wake | Off by default. Raise your head from the app’s hidden display, tap the glasses to send, or double-tap to cancel. Recordings send automatically at two minutes |
 | Restore display on the phone | Returns to the same screen as glasses input |
 | Return to chat after sending | On by default. Shows chat after successfully sending text or chat audio; excludes failure, cancellation, and Space input |
 

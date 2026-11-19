@@ -16,7 +16,7 @@ Both use the same EvenHub app. Users supply the relay and Muse-side processing. 
 | Images within Spaces | Custom exporter; reference watcher's `spaces` output contains text and controls only | HTTPS output API |
 | Device online indication | Not applicable | Freshness of device heartbeats received by the relay |
 | Use away from home | Connect to GitHub | Keep the home device powered and on Wi-Fi; use a reachable HTTPS relay |
-| Current recording limit | 120 seconds | 30 seconds |
+| Current recording limit | 120 seconds | 120 seconds |
 | Polling after a send | Once after 2 seconds, then the normal interval | Every second while waiting for the matching reply, for a limited period |
 
 ```mermaid

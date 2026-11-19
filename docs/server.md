@@ -184,7 +184,7 @@ PNG / JPEG / WebP, at most 250,000 decoded bytes. PUT replaces the whole profile
 - Keeps the latest 100 messages and 200 request records, saved atomically to `.local/relay-state.json`.
 - Stores one profile separately from history limits. Node removes attachments no longer referenced after profile replacement/clear. Worker R2 uses the 24-hour grace period and bounded garbage collection.
 - Node is a single-process reference. Replace its queue with shared transactional storage before using replicas.
-- WAV limit: 1.1 MB. The app caps Gadget recording at 30 seconds for G2 PCM audio.
+- WAV limit: 1.1 MB. Longer recordings use 8 kHz, 8-bit mono PCM to fit up to 120 seconds in one WAV.
 - Gadget image-file input is disabled by default because it has not been physically verified. Use `GADGET_IMAGES_ENABLED=true` only after verification. Muse image replies (`POST /v1/messages`), Gist images, and Space-card images are separate display paths.
 - Soniox temporary keys: 60 seconds to start, single use, 150-second session. Issuance is limited to five per minute.
 - Message bodies and credentials are not written to access logs. You manage HTTPS host/proxy logging separately.

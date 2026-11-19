@@ -9,7 +9,7 @@ Muse Relay is an EvenHub app that connects your phone and Even G2 to a relay you
 | Data | Purpose and destination |
 | --- | --- |
 | Message text, request identifiers and timestamps | Send requests and display replies through your GitHub Gist or HTTPS relay and Muse |
-| Microphone audio | Capture only after you start recording. With Muse transcription, send the recording through your relay. With Soniox, stream audio directly to Soniox and send the resulting text through your relay |
+| Microphone audio | Start by touch or by raising your head if you enable Record on wake. Head angle is processed locally. With Muse transcription, send the recording through your relay. With Soniox, stream audio directly to Soniox and send the resulting text through your relay |
 | Selected photos | Resize and send the image you select or capture, when images are enabled |
 | Replies, exported Spaces, optional display name and avatar | Read from your configured relay and display in the app; show images when enabled |
 | Space controls | Send the selected action and value; a microphone control uses the chosen voice path |

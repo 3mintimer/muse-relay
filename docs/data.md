@@ -10,7 +10,7 @@ The shared app connects to a relay configured by its user. This source includes 
 | --- | --- | --- |
 | Send through Gist | Text, request ID/time, and selected attachments go to the GitHub API. Your Muse handler processes them and saves replies to Gist | [gist.ts](../src/relay/gist.ts), [watcher.mjs](../adapters/gist/watcher.mjs) |
 | Send through HTTPS | The same request goes to your configured relay. The Gadget fetches it over an outbound connection and forwards it to Muse | [gadget.ts](../src/relay/gadget.ts), [server/app.mjs](../server/app.mjs), [relay.c](../firmware/components/muse_relay/relay.c) |
-| Transcribe at the relay | Sends one WAV file (16 kHz / mono / PCM16) when submitted. Your handler processes it for Gist; Muse processes it through the SDK for the reference Gadget relay | [controller.ts](../src/core/controller.ts), [media.ts](../src/core/media.ts) |
+| Transcribe at the relay | Sends one WAV file (mono PCM, 16 kHz / 16 bit or 8 kHz / 8 bit for long Gadget recordings) when submitted. Your handler processes it for Gist; Muse processes it through the SDK for the reference Gadget relay | [controller.ts](../src/core/controller.ts), [media.ts](../src/core/media.ts) |
 | Soniox, directly from the app | Sends PCM while recording directly to Soniox with your API key or a temporary key. Displays captions on G2 and the phone; sends only final text to the relay on submission | [soniox.ts](../src/core/soniox.ts), [config.ts](../src/core/config.ts) |
 | Select and send an image | Resizes and re-encodes your selected image before sending it to the relay. Images are off by default | [media.ts](../src/core/media.ts), [controller.ts](../src/core/controller.ts) |
 | Receive and display | Reads replies, exported Spaces, and optional display name/avatar from the relay. Displays images when enabled | [protocol.ts](../src/relay/protocol.ts), [controller.ts](../src/core/controller.ts) |
@@ -85,7 +85,7 @@ Avatars come from the user's relay. Personal images are not included in the shar
 | Item | Purpose |
 | --- | --- |
 | `network` | Connects to the selected relay and, when used, Soniox and the temporary-key issuer |
-| `g2-microphone` / `phone-microphone` | Uses the selected microphone when the user starts recording |
+| `g2-microphone` / `phone-microphone` | Uses the selected microphone on touch or on head raise when Record on wake is enabled. Head motion stays on device |
 | `album` / `camera` | Opens photo selection/capture at the user's request when images are enabled |
 | GitHub token | Reads/writes the Gist API; never attached to raw-file URLs. A classic PAT's `gist` scope is not limited to one Gist. [GitHub scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) |
 | Relay tokens | Reference relays separate phone, device, and Muse-writer credentials. Knowing the URL alone does not authorize writing |

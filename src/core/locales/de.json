@@ -420,5 +420,13 @@
   "The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.": "Das SDK unterstützt Gerätedisplays, Tasten und Sensoren. Der ATOM-S3-Referenzbuild dient nur als Relay. Beide Methoden benötigen einen Datenexport für G2 Spaces.",
   "The request follows your selected settings and excludes keys and endpoints. Request Spaces and an avatar from their own screens.": "Die Anweisung folgt den gewählten Einstellungen und enthält keine Schlüssel oder Endpunkte. Spaces und Avatar über ihre eigenen Ansichten anfordern.",
   "Checks a session with one second of silence. No microphone is used and nothing is sent to Muse. This may count toward Soniox usage.": "Prüft eine Sitzung mit einer Sekunde Stille. Kein Mikrofon und keine Übertragung an Muse. Kann zum Soniox-Verbrauch zählen.",
-  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Ihr persönlicher Schlüssel wird in den Even-App-Einstellungen und der Gerätesicherung gespeichert und nur für Soniox verwendet. Er wird nicht an Muse, Gist oder das Relay gesendet. Mit einem Server für temporäre Schlüssel bleibt er außerhalb dieses Geräts."
+  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Ihr persönlicher Schlüssel wird in den Even-App-Einstellungen und der Gerätesicherung gespeichert und nur für Soniox verwendet. Er wird nicht an Muse, Gist oder das Relay gesendet. Mit einem Server für temporäre Schlüssel bleibt er außerhalb dieses Geräts.",
+  "Head-up display": "Kopfanhebung",
+  "Raise head to wake": "Zum Anzeigen Kopf heben",
+  "Reset to default": "Standard wiederherstellen",
+  "Record on wake": "Bei Aktivierung aufnehmen",
+  "Face forward and hold still": "Geradeaus schauen und stillhalten",
+  "Recalibrate zero": "Nullpunkt kalibrieren",
+  "Zero position set": "Nullpunkt eingestellt",
+  "Angle unavailable": "Winkel nicht verfügbar"
 }

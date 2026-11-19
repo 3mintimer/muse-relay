@@ -112,7 +112,7 @@ This is a single-user, single-ATOM configuration. Whole-state CAS targets small-
 | Item | Limit / removal condition |
 |---|---|
 | HTTP JSON body | 2,000,000 bytes |
-| WAV audio | 1,100,000 decoded bytes; the app caps Gadget recording at 30 seconds |
+| WAV audio | 1,100,000 decoded bytes; up to 120 seconds using 8 kHz, 8-bit mono PCM for long recordings |
 | Image | 250,000 bytes each; PNG / JPEG / WebP |
 | Space images | At most eight across all stored Spaces; each write also has the HTTP body limit |
 | Queue / history | 20 unfinished jobs, about 200 job records, 100 displayed messages |

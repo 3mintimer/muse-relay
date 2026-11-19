@@ -420,5 +420,13 @@
   "The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.": "SDK는 기기의 화면, 버튼, 센서를 사용할 수 있습니다. ATOM S3 참고 구현은 중계 전용입니다. 두 방식 모두 G2 스페이스용 데이터 내보내기가 필요합니다.",
   "The request follows your selected settings and excludes keys and endpoints. Request Spaces and an avatar from their own screens.": "선택한 설정에 따라 요청을 만들며 키와 접속 주소는 포함하지 않습니다. 스페이스와 아바타는 각각의 화면에서 요청하세요.",
   "Checks a session with one second of silence. No microphone is used and nothing is sent to Muse. This may count toward Soniox usage.": "1초의 무음으로 세션을 확인합니다. 마이크를 사용하거나 Muse로 전송하지 않습니다. Soniox 사용량에 포함될 수 있습니다.",
-  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "개인 키는 Even 앱 설정과 기기 백업에 저장되며 Soniox 연결에만 사용됩니다. Muse, Gist, 중계로 전송하지 않습니다. 기기에 저장하지 않으려면 임시 키 발급 서버를 선택하세요."
+  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "개인 키는 Even 앱 설정과 기기 백업에 저장되며 Soniox 연결에만 사용됩니다. Muse, Gist, 중계로 전송하지 않습니다. 기기에 저장하지 않으려면 임시 키 발급 서버를 선택하세요.",
+  "Head-up display": "고개 들어 표시",
+  "Raise head to wake": "고개를 들어 화면 켜기",
+  "Reset to default": "기본값으로 재설정",
+  "Record on wake": "화면을 켤 때 녹음",
+  "Face forward and hold still": "정면을 보고 잠시 멈추세요",
+  "Recalibrate zero": "0° 위치 재조정",
+  "Zero position set": "0° 위치 설정됨",
+  "Angle unavailable": "각도를 확인할 수 없음"
 }

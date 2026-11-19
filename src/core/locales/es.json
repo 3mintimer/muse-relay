@@ -420,5 +420,13 @@
   "The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.": "El SDK admite pantallas, botones y sensores. La versión de referencia para ATOM S3 solo sirve de enlace. Ambos métodos necesitan exportar datos para los espacios de G2.",
   "The request follows your selected settings and excludes keys and endpoints. Request Spaces and an avatar from their own screens.": "La solicitud sigue tus ajustes y no incluye claves ni direcciones. Solicita espacios y avatar desde sus pantallas.",
   "Checks a session with one second of silence. No microphone is used and nothing is sent to Muse. This may count toward Soniox usage.": "Comprueba una sesión con un segundo de silencio. No usa el micrófono ni envía nada a Muse. Puede contar como uso de Soniox.",
-  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Tu clave personal se guarda en los ajustes de Even y la copia local y solo se usa para Soniox. No se envía a Muse, Gist ni al enlace. Elige un servidor de claves temporales para no guardarla en este dispositivo."
+  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Tu clave personal se guarda en los ajustes de Even y la copia local y solo se usa para Soniox. No se envía a Muse, Gist ni al enlace. Elige un servidor de claves temporales para no guardarla en este dispositivo.",
+  "Head-up display": "Activación al alzar la cabeza",
+  "Raise head to wake": "Alzar la cabeza para activar",
+  "Reset to default": "Restablecer ángulo",
+  "Record on wake": "Grabar al activar",
+  "Face forward and hold still": "Mira al frente sin moverte",
+  "Recalibrate zero": "Recalibrar el punto cero",
+  "Zero position set": "Punto cero ajustado",
+  "Angle unavailable": "Ángulo no disponible"
 }

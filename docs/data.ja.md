@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Gist で送信 | テキスト、要求 ID・時刻、指定した添付を GitHub API へ。Muse 側のハンドラーが処理し返信を Gist に保存 | [gist.ts](../src/relay/gist.ts)、[watcher.mjs](../adapters/gist/watcher.mjs) |
 | HTTPS 中継で送信 | 同じ要求を設定した中継へ。Gadget が外向きの接続で取得し Muse へ渡す | [gadget.ts](../src/relay/gadget.ts)、[server/app.mjs](../server/app.mjs)、[relay.c](../firmware/components/muse_relay/relay.c) |
-| 中継先で文字起こし | 送信時に WAV（16 kHz / mono / PCM16）を1件渡す。Gistは利用者のハンドラー、参考GadgetはSDK経由でMuseが処理する | [controller.ts](../src/core/controller.ts)、[media.ts](../src/core/media.ts) |
+| 中継先で文字起こし | 送信時に WAV（モノラルPCM、通常16 kHz・16 bit、長いGadget録音は8 kHz・8 bit）を1件渡す。Gistは利用者のハンドラー、参考GadgetはSDK経由でMuseが処理する | [controller.ts](../src/core/controller.ts)、[media.ts](../src/core/media.ts) |
 | Soniox（アプリから直接） | 本人のAPIキーまたは一時キーで、録音中の PCM を Soniox へ直接送る。G2とスマホに字幕を表示し、送信時に確定文字だけを中継へ渡す | [soniox.ts](../src/core/soniox.ts)、[config.ts](../src/core/config.ts) |
 | 画像を選んで送信 | 利用者が選択した画像を縮小・再エンコードして中継へ送信。初期設定では画像オフ | [media.ts](../src/core/media.ts)、[controller.ts](../src/core/controller.ts) |
 | 受信・表示 | 返信、書き出されたスペース、任意の表示名・アバターを中継から読む。画像は有効にした場合に表示 | [protocol.ts](../src/relay/protocol.ts)、[controller.ts](../src/core/controller.ts) |
@@ -85,7 +85,7 @@ Node/Worker の要求が終了すると、キュー内の入力本文・添付�
 | 項目 | 用途 |
 | --- | --- |
 | `network` | 選択した中継、必要に応じて Soniox と一時キー発行先へ通信 |
-| `g2-microphone` / `phone-microphone` | 利用者が録音を開始したとき、選んだマイクを使用 |
+| `g2-microphone` / `phone-microphone` | タッチ操作、または「表示と同時に録音」を有効にしたときの頭上げで、選んだマイクを使用。頭の角度は端末内で処理 |
 | `album` / `camera` | 画像が有効なとき、利用者が写真選択・撮影を行う |
 | GitHub トークン | Gist API の読み書き。参照する生ファイル URL には付けない。classic PAT の `gist` 権限は単一 Gist 専用ではない。[GitHub のスコープ仕様](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) |
 | 中継のトークン | スマートフォン、機器、Muse の書き込み用を参考中継で分離。URL の共有だけで書き込める構成ではない |

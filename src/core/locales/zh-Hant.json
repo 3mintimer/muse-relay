@@ -420,5 +420,13 @@
   "The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.": "SDK 可操作裝置螢幕、按鈕和感測器。ATOM S3 參考實作僅用於中繼。兩種方式都需匯出資料以顯示 G2 空間。",
   "The request follows your selected settings and excludes keys and endpoints. Request Spaces and an avatar from their own screens.": "請求遵循所選設定，不包含金鑰和位址。請在各自頁面請求空間和頭像。",
   "Checks a session with one second of silence. No microphone is used and nothing is sent to Muse. This may count toward Soniox usage.": "使用一秒靜音驗證工作階段，不使用麥克風，也不傳送給 Muse。可能計入 Soniox 用量。",
-  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "個人金鑰保存在 Even 應用程式設定與裝置備份中，僅用於連線 Soniox，不傳送給 Muse、Gist 或中繼。如不想保存在裝置上，請選擇臨時金鑰伺服器。"
+  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "個人金鑰保存在 Even 應用程式設定與裝置備份中，僅用於連線 Soniox，不傳送給 Muse、Gist 或中繼。如不想保存在裝置上，請選擇臨時金鑰伺服器。",
+  "Head-up display": "抬頭顯示",
+  "Raise head to wake": "抬頭喚醒顯示",
+  "Reset to default": "還原預設角度",
+  "Record on wake": "喚醒時開始錄音",
+  "Face forward and hold still": "面向正前方並保持靜止",
+  "Recalibrate zero": "重新校準零點",
+  "Zero position set": "已設定零點",
+  "Angle unavailable": "無法取得角度"
 }

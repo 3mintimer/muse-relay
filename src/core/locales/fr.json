@@ -420,5 +420,13 @@
   "The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.": "Le SDK gère les écrans, boutons et capteurs. La version ATOM S3 de référence sert uniquement de relais. Les deux méthodes nécessitent un export pour les espaces G2.",
   "The request follows your selected settings and excludes keys and endpoints. Request Spaces and an avatar from their own screens.": "La demande suit vos réglages, sans clés ni adresses. Demandez les espaces et l’avatar depuis leurs écrans.",
   "Checks a session with one second of silence. No microphone is used and nothing is sent to Muse. This may count toward Soniox usage.": "Vérifie une session avec une seconde de silence. Aucun micro ni envoi à Muse. Cela peut compter dans l’utilisation Soniox.",
-  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Votre clé personnelle est stockée dans les réglages Even et la sauvegarde locale, uniquement pour Soniox. Elle n’est envoyée ni à Muse, ni à Gist, ni au relais. Choisissez un serveur de clés temporaires pour ne pas la stocker sur cet appareil."
+  "Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.": "Votre clé personnelle est stockée dans les réglages Even et la sauvegarde locale, uniquement pour Soniox. Elle n’est envoyée ni à Muse, ni à Gist, ni au relais. Choisissez un serveur de clés temporaires pour ne pas la stocker sur cet appareil.",
+  "Head-up display": "Affichage tête levée",
+  "Raise head to wake": "Lever la tête pour afficher",
+  "Reset to default": "Rétablir l’angle par défaut",
+  "Record on wake": "Enregistrer au réveil",
+  "Face forward and hold still": "Regardez droit devant vous sans bouger",
+  "Recalibrate zero": "Recalibrer le point zéro",
+  "Zero position set": "Point zéro réglé",
+  "Angle unavailable": "Angle indisponible"
 }

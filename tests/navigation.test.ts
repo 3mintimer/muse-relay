@@ -1220,7 +1220,7 @@ test('native background preserves microphone startup while ring cancellation and
   const schedule = globalThis.setTimeout, cancel = globalThis.clearTimeout;
   t.mock.method(globalThis, 'setTimeout', (callback: (...args: any[]) => void, delay?: number, ...args: any[]) => {
     const timer = schedule(callback, delay, ...args);
-    if (delay === 30000) deadlines.add(timer);
+    if (delay === 120000) deadlines.add(timer);
     return timer;
   });
   t.mock.method(globalThis, 'clearTimeout', (timer: ReturnType<typeof setTimeout>) => {
@@ -1250,4 +1250,102 @@ test('native background preserves microphone startup while ring cancellation and
   assert.deepEqual(calls, [true, false, true, false]);
   assert.equal(deadlines.size, 2, 'both recordings should have reached their deadline setup');
   assert.equal(cleared.size, deadlines.size, 'no recording deadline should survive either exit path');
+});
+
+test('head raise restores the hidden page once and opt-in temple controls send or cancel', async t => {
+  const app = await appFixture(t, fixture(), true);
+  const imu: boolean[] = [], mic: boolean[] = [];
+  Object.assign(app.bridge, {imuControl: async (on: boolean) => { imu.push(on); return true; }});
+  app.bridge.audioControl = async (on = false) => { mic.push(on); return true; };
+  function pose(degrees: number, times = 1) {
+    const a = degrees * Math.PI / 180;
+    for (let i = 0; i < times; i++) {
+      t.mock.timers.tick(100);
+      app.emit({sysEvent:{eventType:8, imuData:{x:Math.sin(a), z:Math.cos(a)}}});
+    }
+  }
+  const neutral = app.controller.measureNeutralPitch();
+  await settle(); pose(9, 6);
+  assert.ok(Math.abs(await neutral - 9) < 0.001);
+  await settle(); assert.deepEqual(imu, [true, false]);
+  await app.controller.saveSettings({...app.controller.state.settings, headWake:true, autoHideSeconds:5, headWakeAngle:44, neutralPitch:9});
+  await app.controller.showSpace('test-space');
+  const prior = app.text();
+  t.mock.timers.tick(5000); await settle();
+  pose(9); pose(48, 4); await settle(); assert.ok(app.controller.state.displaySleeping);
+  pose(55, 3); await settle();
+  assert.equal(app.text(), prior); assert.deepEqual(mic, []);
+  await app.controller.saveSettings({...app.controller.state.settings,headWakeMic:true});
+  t.mock.timers.tick(5000); await settle();
+  pose(56, 4); await settle(); assert.ok(app.controller.state.displaySleeping);
+  for (const type of [3, 0]) {
+    pose(9); pose(55, 3); await settle();
+    assert.ok(app.controller.state.recording);
+    assert.match(app.text(), /タップ.*送信/);
+    app.emit({sysEvent:{eventType:10,eventSource:3}});
+    assert.ok(app.controller.state.recording, 'release only ends hold-to-talk');
+    app.emit({audioEvent:{audioPcm:new Uint8Array(32000)}});
+    app.emit({sysEvent:{eventType:type,eventSource:3}}); await settle();
+    assert.equal(app.controller.state.recording,false);
+    if(type===3) assert.deepEqual(app.sent,[]);
+    t.mock.timers.tick(5000); await settle();
+  }
+  assert.equal(app.sent.length, 1);
+  assert.deepEqual(mic, [true,false,true,false]);
+  app.emit({sysEvent:{eventType:7}}); await settle();
+  assert.deepEqual(imu, [true,false,true,false]);
+});
+
+test('Gadget hold sends one two-minute WAV that fits the deployed relay', async t => {
+  const app = await appFixture(t, fixture(), true);
+  app.emit({sysEvent:{eventType:9,eventSource:1}}); await settle();
+  const frame = new Uint8Array(32000);
+  for (let i=0; i<120; i++) {
+    assert.ok(app.controller.state.recording);
+    app.emit({audioEvent:{audioPcm:frame}});
+    t.mock.timers.tick(1000);
+  }
+  await settle();
+  app.emit({sysEvent:{eventType:10,eventSource:1}}); await settle();
+  assert.equal(app.sent.length,1);
+  const audio = Buffer.from(app.sent[0]!.audio!.data_base64,'base64');
+  assert.equal(audio.readUint32LE(24),8000);
+  assert.equal(audio.readUInt16LE(34),8);
+  assert.equal(audio.readUInt32LE(40)/audio.readUInt32LE(28),120);
+  const {validateRequest} = await import('../server/core.mjs');
+  assert.doesNotThrow(() => validateRequest(app.sent[0], false));
+});
+
+test('two minutes of relay captions respect each socket duration and produce one ordered request', async t => {
+  const original = globalThis.WebSocket;
+  const sockets: Socket[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1; bufferedAmount = 0; bytes = 0; index = sockets.length;
+    onopen?: () => void; onmessage?: (event:{data:string}) => void;
+    constructor() { sockets.push(this); queueMicrotask(() => this.onopen?.()); }
+    send(value: string | ArrayBuffer) {
+      if (typeof value !== 'string') {
+        assert.ok(value.byteLength <= 65536);
+        this.bytes += value.byteLength;
+        assert.ok(this.bytes <= 30 * 32000);
+      } else if (!value) {
+        this.onmessage?.({data:JSON.stringify({finished:true, tokens:[{text:'part' + this.index,is_final:true}]})});
+      }
+    }
+    close() { this.readyState = 3; }
+  }
+  globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+  t.after(() => { globalThis.WebSocket = original; });
+  const app = await appFixture(t, {...fixture(),capabilities:{audio:true,images:false,spaces:true,live_transcription:true}}, true, {relayToken:'p'.repeat(40)});
+  await app.controller.toggleRecording();
+  const frame = new Uint8Array(32000);
+  for (let i=0; i<120; i++) {
+    app.emit({audioEvent:{audioPcm:frame}});
+    await settle();
+  }
+  assert.deepEqual(sockets.map(s => s.bytes), Array(4).fill(960000));
+  assert.equal(app.sent.length, 1);
+  assert.equal(app.sent[0]!.text, 'part0 part1 part2 part3');
+  assert.equal(app.sent[0]!.audio, undefined);
 });

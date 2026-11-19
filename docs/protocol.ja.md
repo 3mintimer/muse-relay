@@ -407,7 +407,7 @@ Museが作成したスペースを宣言的なJSONとして表示します。`la
 ```mermaid
 flowchart LR
   Mic[G2 / スマートフォンのマイク] --> Choice{音声設定}
-  Choice -->|中継側字幕なし| WAV[16kHz / 16bit / mono WAV]
+  Choice -->|中継側字幕なし| WAV[モノラルPCM WAV]
   WAV --> Relay[選択した中継] --> Muse[Muse側で文字起こし・応答]
   Choice -->|中継側リアルタイム字幕| Live[HTTPS中継とSoniox]
   Live -->|途中の文字| Glasses
@@ -429,7 +429,7 @@ Soniox認証は、アプリに入力した本人のAPIキー、または発行�
 
 Gadget中継では `capabilities.live_transcription:true` を返すと有効になります。アプリは `wss:` の `/v1/voice/live` に接続し、WebSocketのサブプロトコル候補に `muse-relay-voice` とスマートフォン用トークンを指定します。中継が応答するサブプロトコルは `muse-relay-voice` です。中継は自分のキーでSonioxに接続し、HTTPルートと同じOrigin制限を適用します。
 
-最初のテキストフレームは `language_hints:["ja"]` を含むJSONです。言語コードは1つです。続いて16 kHz・符号付き16 bitリトルエンディアン・モノラルPCMを64 KiB以下のバイナリフレームで送り、空のテキストフレームで終了します。話者フィルターはアプリで適用します。応答は `tokens:[{text,is_final}]` と `finished`、または `error_code` です。PCMの上限は30秒です。完了後は通常のチャット・スペース項目と一緒に確定文を `POST /v1/requests` へ送ります。この機能を通知しない中継には「中継先で文字起こし」で送信時にWAVが1件届きます。
+最初のテキストフレームは `language_hints:["ja"]` を含むJSONです。言語コードは1つです。続いて16 kHz・符号付き16 bitリトルエンディアン・モノラルPCMを64 KiB以下のバイナリフレームで送り、空のテキストフレームで終了します。話者フィルターはアプリで適用します。応答は `tokens:[{text,is_final}]` と `finished`、または `error_code` です。1接続のPCM上限は30秒です。アプリは最長2分の録音を分割し、確定文を順に連結して1件の依頼として送ります。完了後は通常のチャット・スペース項目と一緒に確定文を `POST /v1/requests` へ送ります。この機能を通知しない中継には「中継先で文字起こし」で送信時にWAVが1件届きます。
 
 ## 上限・保持
 
@@ -437,7 +437,7 @@ Gadget中継では `capabilities.live_transcription:true` を返すと有効に�
 
 | 対象 | v1実装 |
 |---|---|
-| 録音 | Gist 最大120秒 / Gadget 最大30秒 |
+| 録音 | Gist 最大120秒 / Gadget 最大120秒 |
 | Gist送信添付 | base64 5,500,000文字以下 / 個 |
 | Gist読取ファイル | 6,000,000文字以下。参照watcherは6,000,000バイト以下 |
 | Gadget音声 | WAV 1,100,000バイト以下 |

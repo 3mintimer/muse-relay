@@ -5,13 +5,28 @@ export function base64(bytes: Uint8Array): string {
   for (let i=0;i<bytes.length;i+=8192) text+=String.fromCharCode(...bytes.subarray(i,i+8192));
   return btoa(text);
 }
-export function wav(pcm: Uint8Array[]): Uint8Array {
-  const length=pcm.reduce((n,b)=>n+b.byteLength,0);
-  const out=new Uint8Array(44+length), v=new DataView(out.buffer);
+export function wav(pcm: Uint8Array[], compact = false): Uint8Array {
+  const inputLength=pcm.reduce((n,b)=>n+b.byteLength,0);
+  // A two-minute voice note fits the existing 1.1 MB Gadget WAV envelope
+  // as standard telephone-band mono PCM. Preserve full quality for shorter notes.
+  const length = compact ? Math.ceil(inputLength / 4) : inputLength;
+  const out=new Uint8Array(44+length+(length % 2)), v=new DataView(out.buffer);
   const str=(offset:number,s:string)=>{for(let i=0;i<s.length;i++)v.setUint8(offset+i,s.charCodeAt(i));};
-  str(0,'RIFF');v.setUint32(4,36+length,true);str(8,'WAVE');str(12,'fmt ');v.setUint32(16,16,true);
-  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);v.setUint32(28,32000,true);
-  v.setUint16(32,2,true);v.setUint16(34,16,true);str(36,'data');v.setUint32(40,length,true);
+  str(0,'RIFF');v.setUint32(4,out.byteLength-8,true);str(8,'WAVE');str(12,'fmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,compact ? 8000 : 16000,true);v.setUint32(28,compact ? 8000 : 32000,true);
+  v.setUint16(32,compact ? 1 : 2,true);v.setUint16(34,compact ? 8 : 16,true);str(36,'data');v.setUint32(40,length,true);
+  if (compact) {
+    const bytes = new Uint8Array(inputLength);
+    let cursor = 0;
+    for (const frame of pcm) { bytes.set(frame, cursor); cursor += frame.length; }
+    const samples = new DataView(bytes.buffer);
+    for (let i = 0; i < length; i++) {
+      const a = samples.getInt16(i * 4, true);
+      const b = i * 4 + 4 <= inputLength ? samples.getInt16(i * 4 + 2, true) : a;
+      out[44 + i] = 128 + ((a + b) >> 9);
+    }
+    return out;
+  }
   let offset=44;for(const b of pcm){out.set(b,offset);offset+=b.byteLength;}return out;
 }
 

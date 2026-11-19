@@ -243,3 +243,14 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .settings-save { margin-top: 12px; }
 .hint-link { background: transparent; justify-content: flex-start; }
 .app-header .muted { text-align: right; max-width: 45%; }
+
+[data-group="head-wake"] .settings-group-body { display: grid; gap: 12px; }
+.even-ui .angle-card .even-button { background: var(--even-bg); margin: 8px auto 2px; padding-inline: 20px; }
+.angle-card { display: grid; justify-items: center; padding: 12px; }
+.head-angle { display: block; width: 100%; max-width: 420px; color: var(--even-text); touch-action: none; cursor: pointer; }
+.head-angle .wake-zone { fill: var(--even-highlight); }
+.angle-scale path, .angle-profile { fill: none; stroke: var(--even-muted); stroke-width: 1.4; }
+.angle-scale text { fill: var(--even-muted); font-size: 10px; text-anchor: middle;  }
+.angle-scale .in-zone { fill: var(--even-on-highlight); }
+.angle-marker { stroke: currentColor; stroke-width: 2; fill: var(--even-surface); }
+.angle-value { fill: currentColor; font-size: 20px; font-variant-numeric: tabular-nums; }

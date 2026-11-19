@@ -132,7 +132,7 @@ function renderVoice() {
     $('#voice-title').textContent = isGist ? t("Send the audio file on submit") : t("Send voice through your relay");
     flow = [t("G2 / phone"), isGist ? t("On send →") : t("Audio →"), routes()[state.route].medium, '→', isGist ? t("Muse-side handler") : `${routes()[state.route].device} → Muse`];
     keyFlow = isGist ? t("No captions appear while recording. A returned transcript appears in chat when available.") : gadgetVoice();
-    settings = [[t("App selection"), t("Transcribe via relay")], [t("Recording limit"), isGist ? t("120 seconds") : t("30 seconds")]];
+    settings = [[t("App selection"), t("Transcribe via relay")], [t("Recording limit"), t("120 seconds") + " · Beta 0.3.13+"]];
     if (isGist) settings.push([t("Processing"), t("Implement transcription in the Muse-side handler")]);
   } else {
     $('#voice-title').textContent = t("Show words on G2 and phone as you speak");
@@ -206,7 +206,7 @@ function voicePrompt() {
   if (state.voice === 'soniox-server') return t("Voice uses Soniox (direct from app) and Temporary key server. {0}\nKeep the long-term Soniox key only on the token server and issue temporary keys for transcribe_websocket. Audio travels directly from the app to Soniox, not through the token server. Show interim words on G2 and the phone; send only final text to {1}. Do not transcribe again on the Muse side. Check the official format and limits at https://docs.soniox.com/authentication/temporary-api-keys and in the existing reference implementation.", [state.route === 'gist'
     ? t("Provide a separate authenticated HTTPS temporary-key endpoint and let me configure its URL and dedicated credentials in the app. Do not store long-term or temporary keys in Gist.")
     : t("With the reference relay's POST /v1/soniox-token, the app reuses its relay URL and phone credentials. Never inherit credentials for a token endpoint on another origin."), routes()[state.route].medium]);
-  if (state.route !== 'gist') return t("Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one 16 kHz, 16-bit mono WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.");
+  if (state.route !== 'gist') return t("Keep Transcribe via relay. If the configured HTTPS relay reports capabilities.live_transcription, use its Soniox captions during recording and send only final text to Muse. Keep the Soniox key on the relay. A WAV-only relay forwards one mono PCM WAV through the paired Gadget SDK on send. Use its matching message.user transcript when available. Link the Muse reply with reply_to equal to the original request ID and preserve the G2 speaker filter.");
   return t("Voice uses Transcribe via relay. Do not stream audio to the relay while recording; send one 16 kHz, 16-bit mono WAV on submit. {0}\nDo not require Soniox for this mode. Do not infer or reconstruct excluded or unclassified speech that the G2 speaker filter replaced with silence.", [t("Implement Whisper-compatible or another configured transcription in the Muse-side handler. Return transcript to the reference watcher. Update the from:\"You\" message whose id matches the original request ID, and use that ID for the Muse reply_to.")]);
 }
 function imagesPrompt() {

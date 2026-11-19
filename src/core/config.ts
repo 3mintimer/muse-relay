@@ -5,6 +5,7 @@ export const defaults: Settings = {
   relay: 'gist', gistId: '', githubToken: '', relayUrl: '', relayToken: '', gatewayToken: '',
   sonioxAuth: 'auto', sonioxApiKey: '', sonioxTokenUrl: '', sonioxTokenAuth: '', sonioxGatewayToken: '', voice: 'muse', mic: 'glasses', speakerFilter: 'all',
   theme: 'system', language: 'system',
+  headWake: false, headWakeMic: false, headWakeAngle: 30, neutralPitch: 0,
   pollSeconds: 15, autoHideSeconds: 0, returnToChatAfterSend: true, chatLayout: 'exchange', images: false, configured: false,
 };
 
@@ -59,6 +60,10 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
     || !['system','light','dark'].includes(result.theme)) throw new Error('Settings');
   result.pollSeconds = Math.max(5, Math.min(300, Math.round(Number(result.pollSeconds) || 15)));
   if (![0,5,10,15,20,25,30].includes(result.autoHideSeconds)) result.autoHideSeconds = 0;
+  result.headWake = result.headWake === true && result.autoHideSeconds > 0;
+  result.headWakeMic = result.headWakeMic === true;
+  if (!Number.isInteger(result.headWakeAngle) || result.headWakeAngle < 10 || result.headWakeAngle > 60) result.headWakeAngle = defaults.headWakeAngle;
+  if (!Number.isFinite(result.neutralPitch) || Math.abs(result.neutralPitch) > 90) result.neutralPitch = 0;
   if (typeof result.returnToChatAfterSend !== 'boolean') result.returnToChatAfterSend = defaults.returnToChatAfterSend;
   if (!['exchange','single'].includes(result.chatLayout)) result.chatLayout = defaults.chatLayout;
   for (const key of ['gatewayToken','sonioxGatewayToken'] as const) {

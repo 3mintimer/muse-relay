@@ -22,6 +22,10 @@ export interface Settings {
   language: Language;
   pollSeconds: number;
   autoHideSeconds: number;
+  headWake: boolean;
+  headWakeMic: boolean;
+  headWakeAngle: number;
+  neutralPitch: number;
   returnToChatAfterSend: boolean;
   chatLayout: 'exchange' | 'single';
   images: boolean;
@@ -120,6 +124,7 @@ export interface AppController {
   activateSpaceItem(spaceId:string,itemId:string):Promise<void>;
   submitSpaceAction(spaceId:string,itemId:string,value?:number|string):Promise<void>;
   showGlassesMenu(): Promise<void>;
+  measureNeutralPitch(): Promise<number>;
   restoreDisplay(): Promise<void>;
   clearCredentials(): Promise<void>;
 }

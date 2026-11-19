@@ -112,7 +112,7 @@ sequenceDiagram
 | 対象 | 上限・削除条件 |
 |---|---|
 | HTTP JSON body | 2,000,000 bytes |
-| WAV 音声 | デコード後 1,100,000 bytes。Gadget 録音はアプリ側で 30 秒 |
+| WAV 音声 | デコード後 1,100,000 bytes。長い録音は8 kHz・8 bitモノラルPCMで最大120秒 |
 | 画像 | 1 枚 250,000 bytes。PNG / JPEG / WebP |
 | Spaces の画像 | 保存済みのスペース全体で合計 8 枚まで。書き込みごとに HTTP body 上限も適用 |
 | キュー / 履歴 | 未完了 20 件、ジョブ記録は約 200 件、表示メッセージ 100 件 |
