@@ -16,7 +16,8 @@ export function headAngleDial(label: string, value: number, change: (angle: numb
   }
   const ticks = () => Array.from({length: 7}, (_, i) => {
     const a = 10 * i, [x,y] = point(a, 170);
-    return '<path d="M' + point(a, 192) + ' L' + point(a, 185) + '"/><text class="' + (a > value ? 'in-zone' : '') + '" x="' + x + '" y="' + (y + 4) + '">' + a + '°</text>';
+    const labelY = a === 0 ? y - 5 : y + 4;
+    return '<path d="M' + point(a, 192) + ' L' + point(a, 185) + '"/><text class="' + (a > value ? 'in-zone' : '') + '" x="' + x + '" y="' + labelY + '">' + a + '°</text>';
   }).join('');
   function draw() {
     const [x,y] = point(value, 192);
@@ -26,7 +27,12 @@ export function headAngleDial(label: string, value: number, change: (angle: numb
       <g class="angle-scale"><path d="M34 190 H226 A192 192 0 0 0 ${point(68,192)}"/>${ticks()}</g>
       <g class="angle-marker"><path d="M34 190 L${x} ${y}"/><circle cx="${x}" cy="${y}" r="7"/></g>
       <text class="angle-value" x="${x+13}" y="${y-5}">${value}°</text>
-      <path class="angle-profile" d="M8 204 v-12 q-8-12 1-20 q8-6 14 1 l2 6 4 4 -4 1 -1 7 -7 1 v12 z M13 177 h11"/>`;
+      <g class="angle-profile" aria-hidden="true" transform="translate(0 170) scale(.57)"
+         fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 59c4-4 6-8 6-13 0-4-4-7-7-13C3 16 14 5 29 5c12 0 20 7 20 18l1 6 5 8c1 2 0 3-2 3h-3l-1 6c-1 4-3 6-7 6l-6-1c-1 4 0 6 3 9"/>
+        <path d="M29 30c-2-4-7-3-7 1 0 4 2 7 5 7"/>
+        <path d="M15 26c8-2 13-2 22-1m-1-1c4-2 10-2 15-1l-1 7c0 3-2 4-6 4h-2c-3 0-5-2-5-5z" stroke-width="3.2"/>
+      </g>`;
   }
   function update(angle: number) {
     value = Math.min(60, Math.max(10, Math.round(angle)));

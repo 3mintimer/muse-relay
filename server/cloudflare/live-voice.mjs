@@ -5,13 +5,17 @@ const MAX_PCM_BYTES = 30 * 16000 * 2;
 const MAX_FRAME_BYTES = 64 * 1024;
 
 export async function openLiveVoice(fetchImpl, apiKey) {
+  // Aborting the upgrade fetch also closes its established WebSocket in Workers.
+  const handshake = new AbortController();
+  const timer = setTimeout(() => handshake.abort(), 8000);
   let response;
   try {
     response = await fetchImpl('https://stt-rt.soniox.com/transcribe-websocket', {
       headers: { upgrade: 'websocket', authorization: `Bearer ${apiKey}` },
-      redirect: 'manual', signal: AbortSignal.timeout(8000),
+      redirect: 'manual', signal: handshake.signal,
     });
   } catch { fail(502, 'soniox_upstream_unavailable'); }
+  finally { clearTimeout(timer); }
   if (response.status !== 101 || !response.webSocket) fail(502, 'soniox_upgrade_failed');
   const [client, phone] = Object.values(new WebSocketPair());
   linkLiveVoice(phone, response.webSocket);

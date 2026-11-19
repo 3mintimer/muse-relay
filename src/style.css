@@ -257,7 +257,7 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .angle-card { display: grid; justify-items: center; padding: 12px; }
 .head-angle { display: block; width: 100%; max-width: 420px; color: var(--even-text); touch-action: none; cursor: pointer; }
 .head-angle .wake-zone { fill: var(--even-highlight); }
-.angle-scale path, .angle-profile { fill: none; stroke: var(--even-muted); stroke-width: 1.4; }
+.angle-scale path { fill: none; stroke: var(--even-muted); stroke-width: 1.4; }
 .angle-scale text { fill: var(--even-muted); font-size: 10px; text-anchor: middle;  }
 .angle-scale .in-zone { fill: var(--even-on-highlight); }
 .angle-marker { stroke: currentColor; stroke-width: 2; fill: var(--even-surface); }
