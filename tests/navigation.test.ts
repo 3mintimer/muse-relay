@@ -325,11 +325,11 @@ test('space lists operate buttons, sliders and choices with explicit sends and l
   app.emit({textEvent:{eventType:1}});await until(()=>app.text().includes('30 分'),'adjust again');
   app.emit({sysEvent:{}});await until(()=>app.controller.state.spaceAction?.status==='sent','send once');
   assert.deepEqual(app.sent[0]!.space_action,{item_id:'slider',type:'slider',value:30});assert.equal(app.sent[0]!.kind,'space');
-  app.emit({sysEvent:{eventType:3}});await until(()=>app.items().length===5,'after sending return to list');
+  await until(()=>app.items().length===5,'after sending return to list');
   app.emit({listEvent:{currentSelectItemIndex:3}});await until(()=>app.items().includes('詳しく'),'choice list');
   app.emit({listEvent:{currentSelectItemIndex:1}});await until(()=>app.sent.length===2&&!app.controller.state.busy,'choice sends');
   assert.deepEqual(app.sent[1]!.space_action,{item_id:'choice',type:'choice',value:'full'});
-  app.emit({sysEvent:{eventType:3}});await until(()=>app.items().length===5,'list again');
+  await until(()=>app.items().length===5,'list again');
   app.setSend(async()=>new Response('{}',{status:503}));
   app.emit({listEvent:{currentSelectItemIndex:1}});await until(()=>app.controller.state.spaceAction?.status==='error','visible action error');
   app.setSend(async()=>new Response('{}'));app.emit({sysEvent:{}});
@@ -356,10 +356,10 @@ test('slider track fills the display at a constant width and Space rows keep use
 
 test('phone slider keeps the relay receipt when the glasses reject the result display',async t=>{
   const app=await appFixture(t,interactiveFixture());
-  const original=app.bridge.textContainerUpgrade;
+  const original=app.bridge.rebuildPageContainer;
   let resultDisplayFailed=false;
-  t.mock.method(app.bridge,'textContainerUpgrade',async (value: Parameters<typeof original>[0])=>{
-    if(value.content?.includes('中継が受け付けました')){resultDisplayFailed=true;return false;}
+  t.mock.method(app.bridge,'rebuildPageContainer',async (value: Parameters<typeof original>[0])=>{
+    if(value.listObject?.length){resultDisplayFailed=true;return false;}
     return original(value);
   });
   let completeSend:(response: Response)=>void=()=>{};
@@ -368,10 +368,9 @@ test('phone slider keeps the relay receipt when the glasses reject the result di
   await until(()=>app.sent.length===1&&app.text().includes('操作を送信中'),'pending feedback on the glasses');
   completeSend(new Response('{}',{status:202}));
   await pending;
-  await until(()=>resultDisplayFailed,'the actual receipt frame was rejected');
+  await until(()=>resultDisplayFailed,'the return to the list was rejected');
   assert.deepEqual(app.sent[0]!.space_action,{item_id:'slider',type:'slider',value:30});
   assert.equal(app.controller.state.spaceAction?.status,'sent');
-  assert.equal(app.controller.state.error,'');
   assert.equal(app.sent.length,1);
 });
 
@@ -384,7 +383,7 @@ test('space microphone keeps its target and cancellation never sends',async t=>{
   app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
   app.emit({sysEvent:{eventType:3}});await until(()=>!app.controller.state.recording&&!app.controller.state.busy,'cancel capture');
   assert.equal(app.sent.length,0);
-  app.emit({sysEvent:{}});await until(()=>app.items().length===5,'back after cancellation');
+  await until(()=>app.items().length===5,'back after cancellation');
   app.emit({listEvent:{currentSelectItemIndex:4}});await until(()=>app.controller.state.recording,'record again');
   app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
   app.document.hidden=true;app.document.dispatchEvent(new Event('visibilitychange'));
@@ -516,10 +515,20 @@ test('relay transcription sends G2 captions during a hold and submits only the f
   assert.equal(mic,true);
   assert.deepEqual(app.sent,[]);
 
+  const ack=deferred<Response>();app.setSend(()=>ack.promise);
   app.emit({sysEvent:{eventType:10}});await settle();
   assert.equal(mic,false);
   assert.equal(app.sent[0]?.text,'電車の予定を確認');
   assert.equal(app.sent[0]?.audio,undefined);
+  const id=app.sent[0]!.id;
+  app.setRead(async()=>response({...fixture(),messages:[
+    {id:'answer',reply_to:id,from:'Muse',type:'text',text:'電車は10時です',ts:11},
+    {id:'receipt',reply_to:id,from:'Relay',type:'text',text:'受付済み',ts:12},
+  ]}));
+  await app.controller.refresh();
+  ack.resolve(new Response('{}'));await settle();
+  assert.match(app.text(),/電車は10時です/);
+  assert.ok(app.frames.every(frame=>!frame.includes('応答を待っています')));
   assert.equal(app.controller.state.snapshot.messages.find(message=>message.id===app.sent[0]!.id)?.text,'電車の予定を確認');
 });
 
@@ -833,7 +842,8 @@ test('successful chat sends return to chat with an opt-out and failed sends neve
   const snapshot=fixture();snapshot.capabilities={audio:true,images:true,spaces:true};
   const app=await appFixture(t,snapshot,true,{autoHideSeconds:5});
   await app.controller.showSpace('test-space');
-  await app.controller.sendText('送った本文');assert.match(app.text(),/送った本文/);
+  await app.controller.sendText('送った本文');assert.match(bodyGeometry(app).body.content,/送った本文/);
+  assert.doesNotMatch(app.text(),/応答を待っています/);
   snapshot.messages.push({id:'text-reply',reply_to:app.sent[0]!.id,from:'Muse',type:'text',text:'テキストへの返信',ts:11});
   t.mock.timers.tick(1000);await settle();assert.match(app.text(),/テキストへの返信/);
   const pendingSend=deferred<Response>();app.setSend(()=>pendingSend.promise);
@@ -1124,7 +1134,7 @@ test('contextual refresh survives native background, retries failures, and abort
   app.overlay(1);
   await until(() => app.text().includes('更新中'), 'manual refresh should show progress on glasses');
   pending.resolve(response(fixture()));
-  await until(() => app.text().includes('更新しました'), 'successful refresh should be acknowledged');
+  await until(() => app.items().includes('チャット'), 'successful refresh should be acknowledged');
 
   pending = deferred<Response>();
   app.setRead(() => pending.promise);
@@ -1138,7 +1148,7 @@ test('contextual refresh survives native background, retries failures, and abort
   app.emit({ sysEvent: {} });
   await until(() => app.requests.length > beforeRetry, 'tap on the error should retry the request');
   pending.resolve(response(fixture()));
-  await until(() => app.text().includes('更新しました'), 'retry should recover without reopening the app');
+  await until(() => app.items().includes('チャット'), 'retry should recover without reopening the app');
 
   const holdUntilAborted = (options: RequestInit) => new Promise<Response>((_resolve, reject) => {
     options.signal!.addEventListener('abort', () => reject(new DOMException('Synthetic cancellation', 'AbortError')), { once: true });

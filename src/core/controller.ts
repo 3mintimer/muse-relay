@@ -80,7 +80,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   type ControlTarget={spaceId:string;itemId:string;title:string;control:SpaceControl};
   let spaceEditor:{target:ControlTarget;value?:number|string}|undefined,recordingSpace:ControlTarget|undefined;
   let readJob:Promise<void>|undefined,contextualOpen=false,pendingMenuAction:(()=>Promise<void>)|undefined;
-  let feedback:{kind:'busy'|'done'|'error';body:string;retry?:()=>Promise<void>;back?:()=>Promise<void>;waitForReply?:boolean;page?:number}|undefined;
+  let feedback:{kind:'busy'|'done'|'error';body:string;retry?:()=>Promise<void>;back?:()=>Promise<void>;page?:number}|undefined;
   let actionSerial=0,renderSerial=0,voiceStatus='',recordingMode:'hold'|'toggle'|'head'='toggle';
   let capture:Uint8Array[]=[],captureBytes=0,voiceBusy=false,voiceSending=false,recordingTimeout:ReturnType<typeof setTimeout>;
   let selectedAudioBytes=0,classifiedAudioBytes=0;
@@ -352,7 +352,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       ...(/^Space control/.test(e instanceof Error?e.message:'')?{back:spaceBack}
         :imageFailure(e instanceof Error?e.message:'')?{back:screen==='space'?showSpaces:showMenu}:{})};
   }
-  async function act(action:()=>Promise<void>,pending?:string,done?:()=>string,retry=true){
+  async function act(action:()=>Promise<void>,pending?:string,retry=true){
     if(disposed||!active)return;
     const id=++actionSerial;
     feedback=pending?{kind:'busy',body:pending}:undefined;
@@ -360,15 +360,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     try{
       if(pending)await render();
       await action();
-      if(id===actionSerial&&done){feedback={kind:'done',body:done()};await render();}
+      if(id===actionSerial&&pending){feedback=undefined;await render();}
     }catch(e){
       error(e);
       if(id!==actionSerial||!active||disposed)return;
-      feedback=failureFeedback(e,retry?()=>act(action,pending,done,retry):undefined);
+      feedback=failureFeedback(e,retry?()=>act(action,pending,retry):undefined);
       await render().catch(error);
     }
   }
-  const refreshFromGlasses=()=>act(()=>refresh(true),text('更新中…','Refreshing…'),()=>text('更新しました','Updated'));
+  const refreshFromGlasses=()=>act(()=>refresh(true),text('更新中…','Refreshing…'));
   const visible=()=>state.snapshot.messages.filter(m=>!state.hiddenIds.includes(m.id)).sort((a,b)=>b.ts-a.ts);
   const serializable=():SavedState=>({settings:state.settings,snapshot:{messages:state.snapshot.messages.slice(-50).map(({image,...m})=>m),
     spaces:state.snapshot.spaces.map(s=>({...s,items:s.items.map(({image,...i})=>i)})),
@@ -453,22 +453,22 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
     if(!selected)return {body:text('メッセージはありません\n録音またはスマートフォンから送信','No messages yet\nRecord voice or send from your phone'),footer:text('ダブルタップ: ホーム','Double-tap: home')};
     const exchange=state.settings.chatLayout==='exchange'?chatExchange(messages,selected.id,{legacy:state.settings.relay==='gist'}):undefined;
-    const message=exchange?.reply||selected,waiting=Boolean(exchange&&!exchange.reply);
+    const message=exchange?.reply||exchange?.input||selected;
     const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
     const stamp=(m:Message)=>new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
     let input:string|undefined;
-    if(exchange){
+    if(exchange?.reply){
       const original=messages.find(m=>m.id===exchange.input.reply_to&&m.from==='You')??exchange.input;
       input=excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:`${stamp(original)} · ${messageText(exchange.input)}`}),2);
     }
-    const body=waiting?text('Muse の応答を待っています','Waiting for Muse'):exchange?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp(message)}\n${messageText(message)}`;
-    const hasImage=!waiting&&state.settings.images&&Boolean(message.image||message.image_file);
+    const body=exchange?.reply?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp(message)}\n${messageText(message)}`;
+    const hasImage=state.settings.images&&Boolean(message.image||message.image_file);
     const pages=bodyPages(body,(index,total)=>`${index+1}/${total} · ${index<total-1
       ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
     if(page>=pages.length)page=0;
     const current=pages[page]!;
     return {body:current.body,footer:current.footer,messageId:message.id,readReplyId:exchange?.reply?.id,
-      photo:current.image?message:undefined,style:current.image?undefined:{input,bodyColor:!waiting&&message.from==='You'?1:4}};
+      photo:current.image?message:undefined,style:current.image?undefined:{input,bodyColor:message.from==='You'?1:4}};
   }
 
   async function render(forceChat=false){
@@ -682,7 +682,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(spaceItemId&&selectedSpace){const index=selectedSpace.items.findIndex(i=>i.id===spaceItemId);spaceItem=Math.max(0,index);}
       const arrivedReplies=takeReplies(snap.messages,previousMessages);
       const wakeReply=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
-        &&!state.busy&&!contextualOpen&&(!feedback||feedback.waitForReply)
+        &&!state.busy&&!contextualOpen&&!feedback
         ?arrivedReplies.filter(message=>autoHiddenReplies.has(message.reply_to!)).at(-1):undefined;
       const newMessages=snap.messages.filter(m=>!before.has(m.id)&&m.from!=='You');
       const sent=followingChatId?snap.messages.find(m=>m.id===followingChatId):undefined;
@@ -694,7 +694,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         // Other receives stay behind the blank display until an explicit gesture.
         state.selectedMessageId=reply.id;page=0;
         if(!state.displaySleeping&&!contextualOpen)await act(()=>openMessage(reply.id,false));
-      }else if(!state.displaySleeping&&newMessages.length&&!state.recording&&!voiceBusy&&!contextualOpen&&((screen==='home'&&!feedback)||feedback?.waitForReply)){
+      }else if(!state.displaySleeping&&newMessages.length&&!state.recording&&!voiceBusy&&!contextualOpen&&screen==='home'&&!feedback){
         await act(()=>openMessage(newMessages.at(-1)!.id,false));
       }else if(!state.displaySleeping&&['message','space','spaces','space-list','space-control'].includes(screen)&&!feedback){
         if(screen==='message'&&!visible().some(m=>m.id===state.selectedMessageId))state.selectedMessageId=visible()[0]?.id;
@@ -739,7 +739,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(!state.settings.returnToChatAfterSend||!active||disposed)return;
     displayInteraction();followingChatId=id;
     // A receive already in flight can deliver Muse's reply before the POST acknowledgement.
-    const reply=visible().find(m=>m.from!=='You'&&m.reply_to===id);
+    const reply=chatExchange(visible(),id,{legacy:state.settings.relay==='gist'})?.reply;
     // A display failure must never turn an accepted send into a retryable send error.
     await openMessage(reply?.id||id,false).catch(error);
   }
@@ -767,7 +767,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       void render().catch(()=>{});
       await send(req);
       status('sent',text('中継が受け付けました','Accepted by relay'));
-      if(serial===actionSerial)feedback={kind:'done',body:text('中継が受け付けました\n結果はスペースの更新で確認','Accepted by relay\nResults appear in the updated space'),back:spaceBack};
+      if(serial===actionSerial&&feedback?.kind==='busy'){await spaceBack().catch(error);return;}
     }catch(e){
       error(e);status('error',failureText(e));
       if(serial===actionSerial)feedback={kind:'error',body:failureText(e),retry:()=>dispatchSpaceAction(req),back:spaceBack};
@@ -792,7 +792,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   function voiceFailed(failure: unknown) {
     if (!state.recording || pendingStop === 'cancel') return;
     voiceFailure = failure;
-    fire(act(()=>stopRecording(false),undefined,undefined,false));
+    fire(act(()=>stopRecording(false),undefined,false));
   }
   function clearHeadEndpoint() {
     clearTimeout(headEndTimer);
@@ -803,7 +803,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if (!state.recording || pendingStop || headEndTimer !== undefined) return;
     const submit = () => {
       clearHeadEndpoint();
-      if (state.recording && !pendingStop) fire(act(() => stopRecording(false), undefined, undefined, false));
+      if (state.recording && !pendingStop) fire(act(() => stopRecording(false), undefined, false));
     };
     headEndTimer = setTimeout(() => {
       // Give resumed speech time to produce a caption. Ambient sound alone can
@@ -826,7 +826,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const audioFrame=selected?pcm:new Uint8Array(pcm.length);captureBytes+=audioFrame.length;
     if(!soniox)capture.push(selected?pcm.slice():audioFrame);
     else try{soniox.push(audioFrame);}catch(e){voiceFailed(e);}
-    if (captureBytes === limit) fire(act(() => stopRecording(false), undefined, undefined, false));
+    if (captureBytes === limit) fire(act(() => stopRecording(false), undefined, false));
   }
   async function startRecording(mode:'hold'|'toggle'|'head'='toggle',target?:ControlTarget){
     if(state.recording||voiceBusy||state.busy)return;
@@ -858,7 +858,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       }
       await opening;
       state.notice='';
-      recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,undefined,false)),120000);
+      recordingTimeout=setTimeout(()=>fire(act(()=>stopRecording(false),undefined,false)),120000);
     }catch(e){
       clearHeadEndpoint();
       state.recording=false;recordingSpace=undefined;if(target)state.spaceAction=undefined;
@@ -869,7 +869,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       voiceBusy=false;state.busy=false;const pending=pendingStop;pendingStop=undefined;emit();
       if(pending&&state.recording){
         // Cleanup must still close a microphone that finished opening after background/exit.
-        fire(active&&!disposed?act(()=>stopRecording(pending==='cancel'),undefined,undefined,false):stopRecording(true));
+        fire(active&&!disposed?act(()=>stopRecording(pending==='cancel'),undefined,false):stopRecording(true));
       }
     }
     if(state.recording)await render().catch(error);
@@ -893,7 +893,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     let sentChatId:string|undefined;
     const voiceRequest=(transcript:string)=>target?spaceRequest(target,undefined,transcript):request(transcript);
     const cancelled=()=>pendingStop==='cancel';
-    const cancelNotice=()=>{stream?.cancel();state.notice=text('録音を中止しました','Recording cancelled');feedback={kind:'done',body:state.notice};};
+    const cancelNotice=()=>{stream?.cancel();state.notice=text('録音を中止しました','Recording cancelled');};
     try{
       const closing=glasses.microphone(false,state.settings.mic==='phone');
       void render().catch(error);
@@ -923,12 +923,14 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       }
       voiceSending=true;voiceStatus=text('送信中…','Sending…');void render().catch(error);
       state.busy=false;await send(req);if(!target)sentChatId=req.id;
-      feedback={kind:'done',body:text('送信しました\nMuse の応答を待っています','Sent\nWaiting for Muse'),waitForReply:!target};
       if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'sent',message:text('中継が受け付けました','Accepted by relay')};
     }catch(e){if(target)state.spaceAction={spaceId:target.spaceId,itemId:target.itemId,status:'error',message:failureText(e)};throw e;
-    }finally{if(target){if(feedback)feedback.back=spaceBack;if(state.spaceAction?.status==='recording')state.spaceAction=undefined;}
+    }finally{const cancelledSpace=cancelled();
+      if(target){if(feedback)feedback.back=spaceBack;if(state.spaceAction?.status==='recording')state.spaceAction=undefined;}
       recordingSpace=undefined;stream?.cancel();soniox=undefined;capture=[];captureBytes=0;selectedAudioBytes=0;classifiedAudioBytes=0;voiceBusy=false;voiceSending=false;voiceFailure=undefined;state.busy=false;pendingStop=undefined;emit();
-      if(sentChatId&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChatId);else await render().catch(error);}
+      if(sentChatId&&state.settings.returnToChatAfterSend)await returnToSentChat(sentChatId);
+      else if(target&&!feedback&&(cancelledSpace||state.spaceAction?.status==='sent'))await spaceBack().catch(error);
+      else await render().catch(error);}
   }
   function handleEvent(e:EvenHubEvent){
     if(e.audioEvent){ingest(e.audioEvent);return;}
@@ -940,7 +942,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const s = state.settings;
       if (s.headWake && raise.sample(pitch - s.neutralPitch, s.headWakeAngle, Date.now())
         && state.displaySleeping && !state.busy && !voiceBusy && state.persistence !== 'loading') {
-        if (s.headWakeMic && s.configured) fire(act(() => startRecording('head'), undefined, undefined, false));
+        if (s.headWakeMic && s.configured) fire(act(() => startRecording('head'), undefined, false));
         else fire(restoreDisplay());
       }
       return;
@@ -950,8 +952,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const id=e.menuItemClickEvent.itemID;
       const actions:Record<number,()=>Promise<void>>={
         1:refreshFromGlasses,2:()=>act(async()=>{if(screen==='message'&&state.selectedMessageId)await api.hideMessage(state.selectedMessageId);}),
-        3:()=>act(showMenu),4:()=>act(()=>api.toggleRecording(),undefined,undefined,false),
-        5:()=>act(showSpaces),6:()=>act(showChat),7:()=>act(()=>stopRecording(true),undefined,undefined,false),
+        3:()=>act(showMenu),4:()=>act(()=>api.toggleRecording(),undefined,false),
+        5:()=>act(showSpaces),6:()=>act(showChat),7:()=>act(()=>stopRecording(true),undefined,false),
         8:()=>act(async()=>{if(state.recording||voiceBusy||state.busy)return;spaceLayouts.set(spaceId,spaceLayout()==='list'?'cards':'list');await spaceBack();}),
         9:()=>act(async()=>{if(!state.recording&&!voiceBusy&&!state.busy)await showSpaceItems();}),
         10:restoreDisplay,
@@ -972,22 +974,22 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(contextualOpen||!active)return;
     if([0,1,2,3,9,10].includes(type))syncDisplayTimers(true);
     if(state.displaySleeping){
-      if(type===9){displayInteraction();fire(act(()=>startRecording('hold'),undefined,undefined,false));}
+      if(type===9){displayInteraction();fire(act(()=>startRecording('hold'),undefined,false));}
       else if([0,1,2,3].includes(type))fire(restoreDisplay());
       return;
     }
-    if(type===9){if(!['space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,undefined,false));return;}
-    if(type===10){if(recordingMode==='hold')fire(act(()=>stopRecording(false),undefined,undefined,false));return;}
+    if(type===9){if(!['space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,false));return;}
+    if(type===10){if(recordingMode==='hold')fire(act(()=>stopRecording(false),undefined,false));return;}
     if(type===3){
-      if(state.recording||voiceBusy){fire(act(()=>stopRecording(true),undefined,undefined,false));return;}
+      if(state.recording||voiceBusy){fire(act(()=>stopRecording(true),undefined,false));return;}
       if(feedback){++actionSerial;const back=feedback.back;feedback=undefined;fire(act(back||render));return;}
       if(screen==='space-control')fire(act(spaceBack));
       else if(screen==='space')fire(act(spaceLayout()==='list'?showSpaceItems:showSpaces));
       else if(screen==='space-list')fire(act(showSpaces));
-      else if(screen==='home')fire(act(()=>glasses.exit(),undefined,undefined,false));else fire(act(showMenu));return;
+      else if(screen==='home')fire(act(()=>glasses.exit(),undefined,false));else fire(act(showMenu));return;
     }
     if(type===0){
-      if(state.recording){fire(act(()=>stopRecording(false),undefined,undefined,false));return;}if(voiceBusy)return;
+      if(state.recording){fire(act(()=>stopRecording(false),undefined,false));return;}if(voiceBusy)return;
       if(feedback){
         const pages=feedbackPages(),index=feedback.page||0;
         if(index<pages.length-1){feedback.page=index+1;fire(render());return;}
@@ -997,15 +999,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(e.listEvent){
         if(['home','spaces','space-list','space-control'].includes(screen)){
           const action=menuActions[e.listEvent.currentSelectItemIndex??0];
-          if(action)fire(act(action,undefined,undefined,!(screen==='home'&&(e.listEvent.currentSelectItemIndex??0)===2)));
+          if(action)fire(act(action,undefined,!(screen==='home'&&(e.listEvent.currentSelectItemIndex??0)===2)));
         }return;
       }
       if(screen==='space-control'&&spaceEditor){const {target,value}=spaceEditor;
         if((target.control.type==='button'||target.control.type==='slider')&&page<editorPages().length-1){page++;fire(act(render));return;}
-        fire(act(()=>dispatchSpaceAction(spaceRequest(target,value)),undefined,undefined,false));return;}
+        fire(act(()=>dispatchSpaceAction(spaceRequest(target,value)),undefined,false));return;}
       if(screen==='space'&&currentSpaceItem()?.control){
         if(page<controlPages(currentSpaceItem()!).length-1){page++;fire(act(render));return;}
-        fire(act(()=>activateSpaceItem(spaceId,spaceItemId),undefined,undefined,false));return;
+        fire(act(()=>activateSpaceItem(spaceId,spaceItemId),undefined,false));return;
       }
       if(screen==='message'||screen==='space'){page++;fire(act(render));}return;
     }
