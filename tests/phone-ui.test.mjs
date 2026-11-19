@@ -28,9 +28,12 @@ async function openPhone(t, snapshot = { messages: [], spaces: [] }) {
 
 async function drag(touch, start, end) {
   await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] });
-  for (let i = 1; i <= 5; i++) {
-    const x = start.x + (end.x - start.x) * i / 5;
-    const y = start.y + (end.y - start.y) * i / 5;
+  // End with small, slow moves so Chrome's touch velocity tracker sees the
+  // finger coming to rest before touchEnd on both Linux and macOS.
+  for (const fraction of [0.35, 0.65, 0.85, 0.96, 1]) {
+    const x = start.x + (end.x - start.x) * fraction;
+    const y = start.y + (end.y - start.y) * fraction;
+    await new Promise(resolve => setTimeout(resolve, 40));
     await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] });
   }
   // Pause with the finger down so lifting it ends the drag without a fling.
@@ -41,7 +44,7 @@ async function drag(touch, start, end) {
 // Locator.tap() scrolls offscreen elements into view. Require a reachable touch
 // point first so the browser cannot rescue a broken WebView layout.
 async function swipeToControl(touch, control) {
-  let lastPosition;
+  const positions = [];
   for (let i = 0; i < 30; i++) {
     const position = await control.evaluate(async el => {
       // Read hit targets after the compositor has finished the preceding swipe.
@@ -64,16 +67,16 @@ async function swipeToControl(touch, control) {
     if (!position) continue;
     const { x, y, upper, lower, reachable } = position;
     if (reachable) return { x, y };
-    lastPosition = position;
+    positions.push(position);
     // Start in the page gutter. An input or slider under the finger can capture
     // a swipe, especially when the keyboard leaves only a short pane.
-    const margin = (lower - upper) * 0.15;
-    const towardBottom = y > (upper + lower) / 2;
-    const startY = towardBottom ? lower - margin : upper + margin;
-    const endY = towardBottom ? upper + margin : lower - margin;
+    const center = (upper + lower) / 2;
+    const distance = Math.min((lower - upper) * 0.7, Math.max(40, Math.abs(center - y)));
+    const startY = y > center ? center + distance / 2 : center - distance / 2;
+    const endY = 2 * center - startY;
     await drag(touch, { x: 6, y: startY }, { x: 6, y: endY });
   }
-  assert.fail(`Vertical swipes could not reach ${control}: ${JSON.stringify(lastPosition)}`);
+  assert.fail(`Vertical swipes could not reach ${control}: ${JSON.stringify(positions.slice(-5))}`);
 }
 
 test('chat history scrolls to the oldest message and back to the composer', { timeout: 30_000 }, async t => {

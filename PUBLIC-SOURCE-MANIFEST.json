@@ -191,7 +191,7 @@
     "tests/glass-text.test.ts": "099020b79d7bb89575e3c09615f94e9f95aded578289c9e1dadbd5caaed0c8d3",
     "tests/images.test.ts": "ee41e4fecfdd0572c329e694471f7c9a6b73e96ae073aeb5c78218b6108abf7b",
     "tests/navigation.test.ts": "5332b3d45cab4727ce8e75c98cf87e53fc8e21130f2efa5fa1df50d716ed5f20",
-    "tests/phone-ui.test.mjs": "caa2cdf308362129e2c3be042fd049ad17511fafb07e847c51008a1185875092",
+    "tests/phone-ui.test.mjs": "49a6d9ca8bef10c4c5ab297802240ad9b9c5d0c3af1f37ae545906c23b913401",
     "tests/release.test.mjs": "7627ef3b4e3e014dca9f9878c8cf3d066a04695b58c83ecca26d9b240cfa1ceb",
     "tests/server.test.mjs": "c58e7de0d42930d9d4168d38080ec11b89c3000ca4fbdaa28be63feb40fefb77",
     "tsconfig.json": "4938e95937f1302d16b66e84b18eaf285b301a3c4e0e72e5f097337dfa77eced"
