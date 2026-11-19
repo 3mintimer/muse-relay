@@ -52,18 +52,26 @@ async function swipeToControl(touch, control) {
       } while (el.getBoundingClientRect().top !== top);
       const r = el.getBoundingClientRect();
       const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      const height = visualViewport.height;
-      const reachable = r.top >= 0 && r.bottom <= height &&
-        [r.top + 1, y, r.bottom - 1].every(at => el.contains(document.elementFromPoint(x, at)));
-      return { x, y, height, reachable, scrollTop: el.closest('.app-scroll')?.scrollTop };
+      const pane = el.closest('.app-scroll');
+      if (!pane) return null; // A refresh replaced the control between frames.
+      const area = pane.getBoundingClientRect();
+      const upper = Math.max(0, area.top), lower = Math.min(visualViewport.height, area.bottom);
+      const hit = document.elementFromPoint(x, y);
+      const reachable = r.top >= upper && r.bottom <= lower && el.contains(hit);
+      return { x, y, upper, lower, reachable, controlHeight: r.height, scrollTop: pane.scrollTop,
+        hit: hit && [hit.tagName, hit.className] };
     });
-    const { x, y, height, reachable } = position;
+    if (!position) continue;
+    const { x, y, upper, lower, reachable } = position;
     if (reachable) return { x, y };
     lastPosition = position;
-    const upper = height * 0.15, lower = height * 0.64;
-    const distance = Math.max(upper - lower, Math.min(lower - upper, height * 0.4 - y));
-    const start = { x: 26, y: distance < 0 ? lower : upper };
-    await drag(touch, start, { x: start.x, y: start.y + distance });
+    // Start in the page gutter. An input or slider under the finger can capture
+    // a swipe, especially when the keyboard leaves only a short pane.
+    const margin = (lower - upper) * 0.15;
+    const towardBottom = y > (upper + lower) / 2;
+    const startY = towardBottom ? lower - margin : upper + margin;
+    const endY = towardBottom ? upper + margin : lower - margin;
+    await drag(touch, { x: 6, y: startY }, { x: 6, y: endY });
   }
   assert.fail(`Vertical swipes could not reach ${control}: ${JSON.stringify(lastPosition)}`);
 }
