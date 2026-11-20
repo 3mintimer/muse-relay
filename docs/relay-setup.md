@@ -228,7 +228,7 @@ Use your saved relay and selected features. For voice tests, first save the mode
 | Soniox · Gist / Gadget, if selected | Check Soniox in **Voice & images**, save → **Chat → Voice → Stop and send** | Captions/final input text, then Muse reply. A silent connection check is not this test |
 | Space · Gist / Gadget, if requested | **Spaces → Add → Add an exported space** → refresh/add → open an item | Exported content; declared actions produce updated content/value after acceptance |
 | Image · Gist / Gadget, if enabled | Ask Muse for an image → received reply → **Show on glasses** | Image on G2; separate from image input into a Gadget |
-| Avatar · either route, optional | **Settings → G2 display → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
+| Avatar · either route, optional | **Settings → Avatar & animation → Manage artwork → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
 | Mobile data · Gist / Gadget | Keep required devices/handlers running; away from home, turn phone Wi-Fi off and use mobile data → **Chat → Send** or **Voice → Stop and send** | New matching reply on phone and G2 over mobile data |
 
 **Connected / Device online** is not a Muse round trip. Reading fails → relay operator; no reply after a successful read → Muse/handler implementer; phone reply works but G2 does not → Even/G2 connection and **Show on glasses**.

@@ -1626,3 +1626,52 @@ test('only a live head-wake utterance endpoint stops capture and sends its finis
   app.emit({sysEvent:{eventType:10}}); await settle(); held.tokens([],true); await settle();
   assert.deepEqual(app.sent.map(request=>request.text),['最初の文。 次の文。続けます。','長押し']);
 });
+
+test('only an outstanding turn animates, and its reply removes the image even with a native transfer in flight',async t=>{
+  const snapshot=fixture(),app=await appFixture(t,snapshot,true);
+  app.controller.state.motions.working={status:'ready',local:true,frames:Array.from({length:16},(_,i)=>Uint8Array.of(i))};
+  const ack=deferred<void>();
+  let transfers=0;
+  t.mock.method(app.bridge,'updateImageRawData',async()=>{
+    transfers++;await ack.promise;return ImageRawDataUpdateResult.success;
+  });
+  await app.controller.sendText('待機を確認');
+  assert.equal(transfers,1);assert.match(app.text(),/返信待ち/);
+  const id=app.sent.at(-1)!.id;
+  snapshot.messages.push({id:'unrelated',from:'Muse',type:'text',text:'別件',reply_to:'older',ts:11});
+  await app.controller.refresh();
+  assert.equal(app.controller.state.selectedMessageId,id);assert.equal(transfers,1);
+  snapshot.messages.push({id:'matching',from:'Muse',type:'text',text:'確認できました',reply_to:id,ts:12});
+  const refresh=app.controller.refresh();
+  await settle();ack.resolve();await refresh;await settle();
+  assert.equal(app.controller.state.selectedMessageId,'matching');
+  assert.match(app.text(),/Muse: 確認できました/);assert.doesNotMatch(app.text(),/返信待ち|待機を確認/);
+  assert.doesNotMatch(app.controller.state.notice,/応答を待っています/);
+  t.mock.timers.tick(5000);await settle();assert.equal(transfers,1);
+  await app.controller.showMessage(id);await settle();assert.equal(transfers,1,'a historical input does not start the working motion');
+});
+
+test('switching off an available animation stops its transfers and preserves the artwork for reuse', async t => {
+  const app = await appFixture(t, fixture(), true, { homeAvatar: 'off', waitingAvatar: 'off' });
+  const frames = Array.from({ length: 16 }, (_,i) => Uint8Array.of(i));
+  const state = app.controller.state;
+  state.motions.idle = { status: 'ready', local: true, frames };
+  state.motions.working = { status: 'ready', local: true, frames };
+  const transfers = () => app.operations.filter(op => op === 'image').length;
+  await app.controller.showGlassesMenu(); await settle();
+  assert.equal(transfers(), 0);
+  await app.controller.sendText('test message'); await settle();
+  assert.match(app.text(), /test message/);
+  assert.equal(transfers(), 0);
+  await app.controller.saveSettings({ ...state.settings, waitingAvatar: 'animation' }); await settle();
+  assert.ok(transfers() > 0);
+  assert.match(app.text(), /返信待ち/);
+  assert.doesNotMatch(app.text(), /test message/);
+  await app.controller.saveSettings({ ...state.settings, waitingAvatar: 'off' }); await settle();
+  assert.match(app.text(), /test message/);
+  const stopped = transfers();
+  t.mock.timers.tick(2000); await settle();
+  assert.equal(transfers(), stopped);
+  assert.equal(state.motions.working.frames, frames);
+  assert.equal(state.settings.images, true);
+});

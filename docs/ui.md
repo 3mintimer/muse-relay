@@ -21,11 +21,12 @@ flowchart LR
 | Settings | Light / dark / system, display language (nine languages), audio processing, images, refresh interval |
 | Practice controls | Try swipe, tap, hold, and double tap on screen without network requests |
 | Practice Space controls | Try tap, swipe, and double tap without network requests |
-| Settings → G2 display | Auto-hide duration, return to chat after sending, Muse avatar, wake-control practice |
+| Settings → G2 display | Auto-hide duration, return to chat after sending, wake-control practice |
+| Settings → Avatar & animation | Home and reply-wait displays, artwork status and import |
 
 ## Settings and help
 
-Settings are grouped into connection, audio/images, G2 display, appearance, and usage. Open only the group you need. Headings show current selections; unsaved changes are marked. Supplemental help opens from the “?” next to a setting. Close it or press Escape to return without losing settings or input.
+Settings are grouped into connection, audio/images, G2 display, avatar and animation, appearance, and usage. Open only the group you need. Headings show current selections; unsaved changes are marked. Supplemental help opens from the “?” next to a setting. Close it or press Escape to return without losing settings or input.
 
 ```mermaid
 flowchart LR
@@ -102,9 +103,11 @@ At startup, G2 stays on Home while loading unread history. Select Chat to open t
 | --- | --- |
 | Top | Date, weekday, clock |
 | Menu | Chat, Spaces, record; placed on the left when an avatar is present |
-| Right | The avatar used in Muse, only when received and images are enabled |
+| Right | The selected idle animation or still avatar |
 
-Use Settings → G2 display → Ask Muse for avatar. Copy the instructions into Muse, or add them to a chat draft before sending. This asks Muse to export the existing avatar, not generate a new image. If images are off, enable them and save settings. Refresh after Muse exports to update home.
+In Settings → Avatar & animation, choose an idle animation, still avatar or hidden avatar for Home. Choose a working animation or text only for the reply-wait screen. Each tap saves immediately. The applied label shows the effective display. Hiding the avatar keeps the artwork for later. The working animation appears on the right in the same position as Home, with the waiting status on the left.
+
+If images are off, tap Enable images. Open Manage artwork to check received assets, request an export from Muse or import numbered frames.
 
 The menu remains usable without an avatar when none has arrived or loading fails. Personal avatars come from the user's relay and are not included in the shared build or public documentation.
 

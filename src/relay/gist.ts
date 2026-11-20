@@ -1,6 +1,6 @@
 import type { Attachment, Relay, RelayRequest, Settings, Snapshot } from '../core/types';
 import { gistId } from '../core/config';
-import { combinedSignal, jsonResponse, parseSnapshot, record } from './protocol';
+import { combinedSignal, jsonResponse, parseMotionRecord, parseSnapshot, record } from './protocol';
 
 type GistFile = { content?: string; truncated?: boolean; raw_url?: string };
 export class GistRelay implements Relay {
@@ -40,6 +40,10 @@ export class GistRelay implements Relay {
       catch{delete root.profile;}
     }
     const snapshot = parseSnapshot(root);
+    if (this.files['muse-relay-motions.json']) {
+      try { snapshot.motions=parseMotionRecord(JSON.parse(await this.file('muse-relay-motions.json',signal))); }
+      catch { /* Optional character art must not interrupt messages. */ }
+    }
     snapshot.capabilities = {audio:true,images:true,spaces:true};
     this.etag = res.headers.get('ETag') || '';
     this.cached = snapshot;

@@ -1,4 +1,5 @@
 import type { Message, Snapshot, Space, Attachment } from '../core/types';
+import { MOTION_SPACE_ID, motionKinds } from '../core/types';
 import { parseSpaceControl } from '../../protocol/space-controls.mjs';
 
 export function record(v: unknown): Record<string, unknown> {
@@ -13,6 +14,23 @@ export function parseAttachment(value: unknown): Attachment {
     || !/^[A-Za-z0-9+/]*={0,2}$/.test(a.data_base64)) throw new Error('Invalid attachment');
   return { mime: String(a.mime), data_base64: a.data_base64, name: string(a.name,128) };
 }
+export function parseMotionRecord(value:unknown):Snapshot['motions'] {
+  const s=record(value);
+  if (s.id!==MOTION_SPACE_ID || !Array.isArray(s.items)) return;
+  const motions:NonNullable<Snapshot['motions']>={};
+  for (const kind of motionKinds) {
+    const item=s.items.find(i=>i && i.id===kind);
+    if (!item) continue;
+    try {
+      const image=item.image ? parseAttachment(item.image) : undefined;
+      if (image && (image.mime!=='image/png' || image.data_base64.length>333336)) continue;
+      const file=string(item.image_file,256)||undefined;
+      if (image || file) motions[kind]={image,file,revision:Number(s.updated_at)||0};
+    } catch { /* A malformed optional loop cannot break chat or its sibling. */ }
+  }
+  return motions;
+}
+
 export function parseSnapshot(value: unknown): Snapshot {
   const v = record(value);
   if (!Array.isArray(v.messages)) throw new Error('Relay messages missing');
@@ -31,9 +49,14 @@ export function parseSnapshot(value: unknown): Snapshot {
     });
   }
   const spaces: Space[] = [];
+  let motions: Snapshot['motions'];
   for (const raw of (Array.isArray(v.spaces) ? v.spaces : []).slice(0,24)) {
     const s = record(raw);
     if (typeof s.id !== 'string' || !Array.isArray(s.items)) continue;
+    if (s.id === MOTION_SPACE_ID) {
+      motions = parseMotionRecord(s);
+      continue;
+    }
     spaces.push({id:string(s.id,128),title:string(s.title,100),layout:s.layout==='cards'?'cards':'list',updated_at:Number(s.updated_at)||undefined,
       items:s.items.slice(0,50).map(raw => {
         const i = record(raw);
@@ -46,6 +69,7 @@ export function parseSnapshot(value: unknown): Snapshot {
   }
   messages.sort((a,b)=>a.ts-b.ts);
   const snapshot: Snapshot = {messages,spaces};
+  if (motions) snapshot.motions = motions;
   // A missing or malformed optional profile must not interrupt chat and space access.
   if(v.profile&&typeof v.profile==='object'&&!Array.isArray(v.profile)){
     const p=record(v.profile);

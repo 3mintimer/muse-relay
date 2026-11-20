@@ -128,3 +128,48 @@ export function imageBytes(asset:Attachment):Uint8Array{
     return bytes;
   }catch{throw new Error('Image conversion');}
 }
+
+export const MOTION_SIZE = 144;
+export const MOTION_COUNT = 16;
+export const MOTION_FRAME_MS = 250;
+const SHEET_SIZE = MOTION_SIZE * 4;
+
+function motionCanvas(size:number) {
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=size;
+  const ctx=canvas.getContext('2d', {willReadFrequently:true});
+  if (!ctx) throw new Error('Image conversion');
+  ctx.fillStyle='black';ctx.fillRect(0,0,size,size);
+  return ctx;
+}
+
+export async function motionFrames(sheet:Attachment,local=false):Promise<Uint8Array[]> {
+  if (sheet.mime!=='image/png' || sheet.data_base64.length>(local?2_000_000:333336)) throw new Error('Invalid motion sheet');
+  const bytes=imageBytes(sheet);
+  const header=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  if (bytes.length<24 || (!local && bytes.length>250000) || header.getUint32(0)!==0x89504e47 || header.getUint32(4)!==0x0d0a1a0a
+    || header.getUint32(12)!==0x49484452 || header.getUint32(16)!==SHEET_SIZE || header.getUint32(20)!==SHEET_SIZE) throw new Error('Invalid motion sheet');
+  const img=await decodeImage(sheet);
+  if (img.width!==SHEET_SIZE || img.height!==SHEET_SIZE) throw new Error('Invalid motion sheet');
+  const ctx=motionCanvas(MOTION_SIZE);
+  return Array.from({length:MOTION_COUNT},(_,index)=>{
+    ctx.fillRect(0,0,MOTION_SIZE,MOTION_SIZE);
+    ctx.drawImage(img,(index%4)*MOTION_SIZE,Math.floor(index/4)*MOTION_SIZE,MOTION_SIZE,MOTION_SIZE,0,0,MOTION_SIZE,MOTION_SIZE);
+    grayscale(ctx,MOTION_SIZE,MOTION_SIZE);
+    return imageBytes({mime:'image/png',name:'frame.png',data_base64:ctx.canvas.toDataURL().split(',')[1]!});
+  });
+}
+
+export async function importMotionSheet(files:File[]):Promise<Attachment> {
+  if (files.length!==MOTION_COUNT || new Set(files.map(f=>f.name)).size!==MOTION_COUNT) throw new Error('16 frames required');
+  const ctx=motionCanvas(SHEET_SIZE);
+  const ordered=[...files].sort((a,b)=>a.name.localeCompare(b.name,'en',{numeric:true}));
+  for (const [index,file] of ordered.entries()) {
+    if (file.size>8_000_000) throw new Error('Image too large');
+    const img=await decodeImage({mime:file.type,name:file.name,data_base64:base64(new Uint8Array(await file.arrayBuffer()))});
+    if(img.width!==img.height) throw new Error('Square frames required');
+    ctx.drawImage(img,index%4*MOTION_SIZE,Math.floor(index/4)*MOTION_SIZE,MOTION_SIZE,MOTION_SIZE);
+  }
+  grayscale(ctx,SHEET_SIZE,SHEET_SIZE);
+  return {mime:'image/png',name:'motion.png',data_base64:ctx.canvas.toDataURL().split(',')[1]!};
+}

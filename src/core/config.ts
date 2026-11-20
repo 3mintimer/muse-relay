@@ -7,6 +7,7 @@ export const defaults: Settings = {
   theme: 'system', language: 'system',
   headWake: false, headWakeMic: false, headWakeAngle: 30, neutralPitch: 0,
   pollSeconds: 15, autoHideSeconds: 0, returnToChatAfterSend: true, chatLayout: 'exchange', images: false, configured: false,
+  homeAvatar: 'animation', waitingAvatar: 'animation',
 };
 
 export function gistId(value: string): string {
@@ -66,6 +67,8 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
   if (!Number.isFinite(result.neutralPitch) || Math.abs(result.neutralPitch) > 90) result.neutralPitch = 0;
   if (typeof result.returnToChatAfterSend !== 'boolean') result.returnToChatAfterSend = defaults.returnToChatAfterSend;
   if (!['exchange','single'].includes(result.chatLayout)) result.chatLayout = defaults.chatLayout;
+  if (!['animation','still','off'].includes(result.homeAvatar)) result.homeAvatar = defaults.homeAvatar;
+  if (!['animation','off'].includes(result.waitingAvatar)) result.waitingAvatar = defaults.waitingAvatar;
   for (const key of ['gatewayToken','sonioxGatewayToken'] as const) {
     if (typeof result[key] !== 'string' || /[\r\n]/.test(result[key])) throw new Error('Settings');
     result[key] = result[key].trim();

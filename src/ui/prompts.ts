@@ -1,4 +1,5 @@
 import type { Settings } from '../core/types';
+import { MOTION_SPACE_ID } from '../core/types';
 import { sonioxAuthMode } from '../core/config';
 import { languageName } from '../core/i18n';
 
@@ -66,6 +67,26 @@ export function avatarPrompt(settings: Settings): string {
       : 'Using the existing HTTPS relay configuration, PUT <relay>/v1/profile with Authorization: Bearer MUSE_TOKEN and body {name,avatar:{mime,data_base64,name}}. Use the separate Muse writer token, not the phone token. If the host requires a gateway key, send it only to that relay origin.',
     `Image display is ${settings.images ? 'enabled' : 'disabled'} in the app. Do not change app settings or create a replacement avatar.`,
     'Obtain credentials only through the existing secure configuration. Keep tokens and personal URLs out of replies and exported profile content. Confirm only a successful export; Muse Relay displays the avatar on its G2 home screen when images are enabled.',
+  ].join('\n\n');
+}
+
+export function animationPrompt(settings:Settings):string {
+  const exportShape={id:MOTION_SPACE_ID,title:'Muse avatar animations',updated_at:'UNIX_SECONDS',items:['idle','working'].map(id=>({
+    id,title:id,text:'',image:{mime:'image/png',name:id+'.png',data_base64:'BASE64_PNG_BYTES'},
+  }))};
+  return [
+    `Use your image-generation tool to animate your current Muse character for my Even G2 glasses. Reply in ${languageName(settings.language)}. Retrieve your existing avatar as the identity reference; if unavailable, ask me for the reference before generating. Make two distinct seamless four-second loops, 16 ordered frames each at 4 fps.`,
+    'Idle (home): choose one slow body movement for the entire four-second loop. Show a character comfortably passing the time. Start at rest with both feet planted. Let one elbow ease outward as the forearm bends and the hand settles on the hip. Linger there around frame 9, then lower the arm slowly through frame 16. Keep the other hand relaxed. If the character has no arms, use a single unhurried sideways glance and return instead.',
+    'Draw the resting and middle poses first, then draw the poses between them. Follow the shoulder, elbow and wrist through the gesture; redraw the sleeve and the outline of the torso it uncovers. Keep limb lengths, face and torso proportions, footing and camera scale consistent. Do not stretch, squash, shear, zoom or slide the source bitmap to simulate movement. At 144×144, compare frames 1 and 9: the hand should move relative to the hip and the elbow bend should read clearly (for a glance, check the direction of the gaze). If the main difference is a taller, wider or shifted character, redraw the middle pose before export. Watch two loops at 4 fps to check that the gesture settles and returns smoothly.',
+    'Working (only while waiting for a reply): the same character operates a computer, typing on a visible keyboard and looking at the screen. Use your existing working-at-a-computer motion as a reference if available.',
+    'Generate the visual frames with the same reference, model/style, framing, camera, lighting, fixed background, character proportions, face, outfit and scale across all 32 images. Lock the computer and desk in place throughout the working loop. Plan a cyclic motion, advancing one small step per frame. Check frame 16 into frame 1, with no duplicated endpoint, jumps, drift or cuts.',
+    'Keep the silhouette clear on black in 16 grayscale levels. Fit the whole pose and computer inside the square with a small margin. No letters, labels, grid lines or gutters. Inspect each loop in playback and fix flicker before export.',
+    'For each loop assemble the 16 images into one 576×576 PNG sheet: exactly 4 columns × 4 rows of 144×144 pixels, in playback order across each row then down. Encode as a grayscale or indexed PNG, at most 250000 bytes per sheet. Packaging or resizing the generated images with code is fine. Preserve the existing still avatar.',
+    `Export both sheets together using this reserved asset record. Replace UNIX_SECONDS with a current Unix timestamp newer than the previous export and each BASE64_PNG_BYTES with the actual sheet's base64: ${JSON.stringify(exportShape)}.`,
+    settings.relay==='gist'
+      ? 'With the existing configured Gist writer, write this single JSON object to muse-relay-motions.json. Preserve all other Gist files. Keep these images separate from the text-only watcher spaces result.'
+      : `Using the existing HTTPS relay, PUT the single record to /v1/spaces/${MOTION_SPACE_ID} using the separate Muse writer token (Authorization: Bearer MUSE_TOKEN). If a hosting gateway key is required send it only to that relay origin. Leave other exports intact.`,
+    'Keep tokens and personal URLs out of the output. After a successful write, tell me to enable images and refresh Muse Relay. If export is unavailable, provide the two sets of 16 square image files numbered 01–16 for manual import in Settings.',
   ].join('\n\n');
 }
 

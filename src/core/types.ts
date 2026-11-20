@@ -29,6 +29,8 @@ export interface Settings {
   returnToChatAfterSend: boolean;
   chatLayout: 'exchange' | 'single';
   images: boolean;
+  homeAvatar: 'animation' | 'still' | 'off';
+  waitingAvatar: 'animation' | 'off';
   configured: boolean;
 }
 export interface Attachment {
@@ -57,11 +59,17 @@ export type SpaceControl =
 export interface SpaceAction {item_id:string;type:'button'|'slider'|'choice'|'microphone';value?:number|string}
 export interface SpaceItem { id: string; title: string; text: string; ts?: number; image_file?: string; image?: Attachment; control?:SpaceControl; }
 export interface Space { id: string; title: string; layout?:'list'|'cards'; updated_at?: number; items: SpaceItem[]; }
+export const MOTION_SPACE_ID = 'muse_relay_avatar_motion_v1';
+export const motionKinds = ['idle', 'working'] as const;
+export type MotionKind = typeof motionKinds[number];
+export interface MotionSource { file?:string; image?:Attachment; revision?:number }
+export interface MotionState { frames?:Uint8Array[]; sheet?:Attachment; status:'none'|'loading'|'ready'|'error'; local:boolean }
 export interface MuseProfile { name?:string; avatar?:Attachment; avatar_file?:string; mime_type?:string; updated_at?:number; }
 export interface Snapshot {
   messages: Message[];
   spaces: Space[];
   profile?: MuseProfile;
+  motions?: Partial<Record<MotionKind, MotionSource>>;
   device?: { connected: boolean; last_seen?: number };
   capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean; live_transcription?: boolean };
 }
@@ -97,6 +105,7 @@ export interface AppState {
   readIds: string[];
   hiddenIds: string[];
   selectedSpaceIds: string[];
+  motions: Record<MotionKind, MotionState>;
   avatarStatus?: 'none'|'loading'|'ready'|'error';
   selectedMessageId?: string;
   spaceAction?: {spaceId:string;itemId:string;status:'sending'|'sent'|'error'|'recording';message:string};
@@ -105,6 +114,8 @@ export interface AppController {
   state: AppState;
   subscribe(listener: () => void): () => void;
   saveSettings(settings: Settings): Promise<void>;
+  importMotion(kind:MotionKind, files:File[]):Promise<void>;
+  useRelayMotion(kind:MotionKind):void;
   reloadSettings(): Promise<void>;
   checkConnection(settings?: Settings): Promise<Snapshot>;
   refresh(): Promise<void>;

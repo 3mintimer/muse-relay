@@ -132,3 +132,49 @@ test('invalid-size and conversion failures keep their exact result and do not re
     assert.equal(app.wire.length, 1, `${result} is not a transient transfer failure`);
   }
 });
+
+test('a delayed animation transfer skips elapsed frames and never queues a stale one behind the answer',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:10000});
+  t.mock.method(performance,'now',()=>Date.now());
+  const app=fixture(), sent:number[]=[];
+  const ack=Promise.withResolvers<void>();
+  const render=app.glasses.bridge!;
+  t.mock.method(render,'updateImageRawData',async payload=>{
+    sent.push(ImageRawDataUpdate.toJson(payload).imageData[0]);
+    if(sent.length===1) await ack.promise;
+    return ImageRawDataUpdateResult.success;
+  });
+  const frames=Array.from({length:16},(_,i)=>Uint8Array.of(i));
+  const settle=()=>new Promise<void>(r=>setImmediate(r));
+  await app.glasses.waiting(state,'Waiting','Double-tap: home',[],'q',{frames,failed:assert.fail});
+  const layout = app.page();
+  assert.deepEqual(layout.imageObject.map((c:any)=>[c.xPosition,c.yPosition,c.width,c.height]),[[432,72,144,144]]);
+  const status = layout.textObject.find((c:any)=>c.containerName==='body');
+  assert.equal(status.content,'Waiting'); assert.equal(status.width,432); assert.equal(status.isEventCapture,1);
+  await settle();
+  t.mock.timers.tick(1100);await settle();
+  assert.deepEqual(sent,[0]);
+  ack.resolve();await settle();t.mock.timers.tick(0);await settle();
+  assert.deepEqual(sent,[0,4]);
+  t.mock.timers.tick(150);await settle();assert.deepEqual(sent,[0,4,5]);
+  await app.glasses.show(state,'Answer');
+  t.mock.timers.tick(4000);await settle();
+  assert.equal(app.wire.length,0);assert.deepEqual(sent,[0,4,5]);assert.equal(app.body(),'Answer');
+  assert.equal(app.page().imageObject.length,0);
+});
+
+test('updating the Home clock between two motion frames preserves the four-second timeline and list selection',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:5000});
+  t.mock.method(performance,'now',()=>Date.now());
+  const app=fixture(),motion={frames:Array.from({length:16},(_,i)=>Uint8Array.of(i)),failed:assert.fail};
+  const settle=()=>new Promise<void>(r=>setImmediate(r));
+  const home=(time:string)=>app.glasses.list(state,['Chat','Spaces'],'Open',[],time,undefined,motion);
+  await home('11:59');await settle();
+  for(let i=1;i<=7;i++){t.mock.timers.tick(250);await settle();}
+  t.mock.timers.tick(100);await home('12:00');await settle();
+  t.mock.timers.tick(150);await settle();
+  for(let i=9;i<=16;i++){t.mock.timers.tick(250);await settle();}
+  assert.deepEqual(app.wire.map(frame=>frame.imageData[0]),[...Array.from({length:16},(_,i)=>i),0]);
+  assert.equal(app.rebuilds.length,1);
+  app.glasses.disconnect();
+});

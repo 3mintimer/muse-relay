@@ -2,6 +2,8 @@ import type { EvenAppBridge, EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import { ImuReportPace, AudioInputSource, AudioSpeakerRole } from '@evenrealities/even_hub_sdk';
 import { getTextWidth } from '@evenrealities/pretext';
 import type { AppController, AppState, Attachment, Message, Relay, RelayRequest, Settings, SpaceItem, SpaceControl, MuseProfile } from './types';
+import { motionKinds, type MotionKind } from './types';
+import { AvatarMotions, avatarDisplay } from './motions';
 import { defaults, validateSettings } from './config';
 import { GistRelay } from '../relay/gist';
 import { GadgetRelay } from '../relay/gadget';
@@ -26,6 +28,7 @@ interface ChatPage {
   photo?: Message;
   style?: GlassTextStyle;
   readReplyId?: string;
+  working?:boolean;
 }
 
 const trackAt=(position:number,slots:number)=>`[${'-'.repeat(position)}O${'-'.repeat(slots-position-1)}]`;
@@ -71,7 +74,8 @@ function bodyPages(body:string,footer:(index:number,total:number)=>string,input?
 }
 
 export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBridge>}={}): AppController {
-  const state:AppState={persistence:'loading',settingsLoadFailed:false,settings:{...defaults},snapshot:{messages:[],spaces:[]},connected:false,glasses:false,displaySleeping:false,busy:false,
+  const motions=new AvatarMotions();
+  const state:AppState={motions:motions.state,persistence:'loading',settingsLoadFailed:false,settings:{...defaults},snapshot:{messages:[],spaces:[]},connected:false,glasses:false,displaySleeping:false,busy:false,
     recording:false,transcript:'',error:'',notice:'',readIds:[],hiddenIds:[],selectedSpaceIds:[]};
   const listeners=new Set<()=>void>();
   let relay:Relay|undefined,poll:ReturnType<typeof setTimeout>,saveTimer:ReturnType<typeof setTimeout>;
@@ -102,6 +106,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
   }
   const replyPoll=new ReplyPoll();
+  let deliveryNotice:{sent:SentChat;message:string}|undefined;
   // Session-only: restored history can never arm an automatic reply wake.
   const awaitingReplies=new Map<string,Set<string>>();
   let autoHiddenReplies=new Set<string>();
@@ -109,7 +114,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let lastChatPage: {frame: number; key: string; inlineImage?: string; ready: Promise<void>} | undefined;
   let menuActions:Array<()=>Promise<void>>=[];
   let displayTimer:ReturnType<typeof setTimeout>|undefined,displayDeadline=0;
-  let followingChat:(SentChat & {targetId:string})|undefined;
+  let followingChat:(SentChat & {targetId:string; animated?:boolean})|undefined;
   let homeClockTimer:ReturnType<typeof setTimeout>|undefined;
   let avatarJob:Promise<void>|undefined,avatarFailedKey='',avatarRetryKey='',avatarRetryAfter=0;
   const glasses=new Glasses(handleEvent,options.bridgeFactory);
@@ -348,6 +353,22 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       }finally{avatarJob=undefined;syncProfileAvatar();emit();}
     })();
   }
+  function motionChanged(kind:MotionKind) {
+    if ((kind==='idle' && homeClockVisible()) || (kind==='working' && screen==='message' && followingChat)) {
+      lastChatPage=undefined;
+      fire(render());
+    }
+    emit();
+  }
+  function syncMotions(retry=false) {
+    for(const kind of motionKinds) fire(motions.sync(kind,state.snapshot.motions?.[kind],state.settings.images && active && !disposed,
+      file=>imageAttachment(file,'image/png'),()=>motionChanged(kind),retry));
+  }
+  function glassMotion(kind:MotionKind) {
+    const frames=avatarDisplay(state,kind)==='animation' && state.motions[kind].frames;
+    if(!frames) return;
+    return {frames,failed:()=>{motions.playbackFailed(kind,frames);motionChanged(kind);}};
+  }
   function failureText(e:unknown):string{
     const code=e instanceof Error?e.message:'';
     const imageMessage=imageFailure(code);if(imageMessage)return imageMessage;
@@ -417,7 +438,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
     persistenceReady=result.writable;state.persistence=result.mode;state.settingsLoadFailed=result.failed;
     raise.reset();fire(syncImu());
-    document.documentElement.dataset.evenTheme=state.settings.theme;syncProfileAvatar();emit();armPoll(0);
+    document.documentElement.dataset.evenTheme=state.settings.theme;syncProfileAvatar();syncMotions();emit();armPoll(0);
   }
   const savedNotice=(mode:AppState['persistence'])=>mode==='native'
     ?text('Evenアプリに設定を保存しました。','Settings saved in the Even app.')
@@ -438,7 +459,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(!checked.returnToChatAfterSend&&screen!=='message')followingChat=undefined;
       displayDeadline=0;
       if(clear){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.capabilities;avatarFailedKey='';}
+      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.motions;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
@@ -450,7 +471,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       emit();if(connectionChanged)armPoll(0);else armPoll();
     }catch(e){if(state.persistence==='loading')state.persistence='unavailable';throw e;}
     finally{
-      savingSettings=false;state.busy=false;syncProfileAvatar();emit();
+      savingSettings=false;state.busy=false;syncProfileAvatar();syncMotions();emit();
       if(saveAfterSettings){saveAfterSettings=false;await save(true);}else saveSoon();
     }
     fire(render());
@@ -470,6 +491,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   function makeRelay(settings:Settings):Relay{return settings.relay==='gist'?new GistRelay(settings):new GadgetRelay(settings);}
   function configureRelay(settings:Settings){
+    const address=settings.relay==='gist'?settings.gistId:settings.relayUrl;
+    motions.restore(JSON.stringify([settings.relay,address]));
     relay=settings.configured?makeRelay(settings):undefined;
     hasLiveSnapshot=false;state.connected=false;
   }
@@ -482,13 +505,14 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const messageText=(m:Message)=>chatText(m)||(m.type==='image'?text('画像','Image'):text('音声メッセージ','Voice message'));
     const stamp=(m:Message)=>new Date(m.ts*1000).toLocaleString(resolveLocale(state.settings.language),{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
     let input:string|undefined;
-    if(exchange?.reply){
+    if(exchange?.reply && !(followingChat?.animated && selected.id===followingChat.targetId)){
       const original=messages.find(m=>m.id===exchange.input.reply_to&&m.from==='You')??exchange.input;
       input=excerpt(translate(state.settings.language,'あなた: {text}','You: {text}',{text:`${stamp(original)} · ${messageText(exchange.input)}`}),2);
     }
     const body=exchange?.reply?`${message.from}: ${messageText(message)}`:`${message.from} · ${stamp(message)}\n${messageText(message)}`;
     const hasImage=state.settings.images&&Boolean(message.image||message.image_file);
     const waiting=message.from==='You'&&selected.id===followingChat?.targetId?text('Muse の返信待ち','Waiting for Muse')+'\n':'';
+    if(waiting && glassMotion('working')) return {body:waiting.trim(),footer:text('2回タップ: ホーム','Double-tap: home'),messageId:message.id,working:true};
     const pages=bodyPages(body,(index,total)=>`${waiting}${index+1}/${total} · ${index<total-1
       ?text('タップ: 次のページ · 2回: ホーム','Tap: next page · Double-tap: home'):text('2回タップ: ホーム','Double-tap: home')}`,input,hasImage);
     if(page>=pages.length)page=0;
@@ -545,6 +569,14 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
 
   async function drawChatPage(frame:number,view:ChatPage){
+    if(view.working) {
+      const motion=glassMotion('working');
+      if(motion && followingChat) {
+        followingChat.animated=true;
+        await glasses.waiting(state,view.body,view.footer,contextualMenu(),view.messageId!,motion);
+        return;
+      }
+    }
     const photo=view.photo;
     let image=photo?.image;
     if(photo?.image_file&&!image&&relay){
@@ -589,8 +621,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       });
       const items=[text('チャット','Chat'),text('スペース','Spaces'),text('録音を開始','Record voice')];
       const footer=text('タップ: 開く · 2回: 終了','Tap: open · Double-tap: exit');
-      const avatar=state.settings.images&&state.avatarStatus!=='error'?state.snapshot.profile?.avatar:undefined;
-      try{await glasses.list(state,items,footer,contextualMenu(),dateTime,avatar);}
+      const avatar=avatarDisplay(state,'idle')==='still'?state.snapshot.profile?.avatar:undefined;
+      try{await glasses.list(state,items,footer,contextualMenu(),dateTime,avatar,glassMotion('idle'));}
       catch(e){
         if(!avatar)throw e;
         if(frame!==renderSerial)return;
@@ -671,7 +703,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   async function refresh(explicit=false){
     if(!active)return;
-    if(explicit){avatarFailedKey='';avatarRetryAfter=0;}
+    if(explicit){avatarFailedKey='';avatarRetryAfter=0;syncMotions(true);}
     if(!relay){if(explicit)throw new Error('Relay token');return;}
     // A manual refresh joins the existing read instead of silently doing nothing.
     if(!readJob)readJob=readSnapshot().finally(()=>{readJob=undefined;});
@@ -707,6 +739,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       snap.messages.sort((a,b)=>a.ts-b.ts);state.snapshot=snap;hasLiveSnapshot=true;syncProfileAvatar();state.connected=true;state.lastSync=Date.now();if(feedback?.kind!=='error')state.error='';
       const selectedSpace=snap.spaces.find(s=>s.id===spaceId);
       if(spaceItemId&&selectedSpace){const index=selectedSpace.items.findIndex(i=>i.id===spaceItemId);spaceItem=Math.max(0,index);}
+      clearAnsweredNotice(snap.messages);
       const arrivedReplies=takeReplies(snap.messages,previousMessages);
       const wakeReplies=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
         &&!state.busy&&!contextualOpen&&!feedback
@@ -727,9 +760,17 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         // Relay success remains a relay success even if local image/G2 rendering fails.
         await act(render);
       }
+      syncMotions();
       if(homeClockVisible()&&previousAvatarKey!==avatarKey())fire(render());
       emit();saveSoon();armPoll();
     }catch(e){if(!signal.aborted){replyPoll.clear();state.connected=false;error(e);armPoll(Math.max(30000,state.settings.pollSeconds*2000));throw e;}}
+  }
+  function clearAnsweredNotice(messages:Message[]) {
+    if (!deliveryNotice) return;
+    const {sent,message}=deliveryNotice;
+    if(state.notice!==message){deliveryNotice=undefined;return;}
+    const turn=chatExchange(messages,sent.id,{...chatOptions(),following:sent});
+    if(turn?.reply){state.notice='';deliveryNotice=undefined;}
   }
   async function send(request:RelayRequest){
     if(!relay)throw new Error('Relay token');
@@ -750,9 +791,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         takeReplies(state.snapshot.messages); // A response can arrive before the send acknowledgement.
       }
       if(state.settings.relay==='gadget'&&active&&!disposed){replyPoll.sent(request.id);replyPoll.observe(state.snapshot.messages);}
-      state.notice=text('中継へ送信しました。Muse の応答を待っています。','Sent to relay. Waiting for Muse.');emit();saveSoon();
+      const turn={id:request.id,previousIds:beforeIds,needsReplyId};
+      state.notice=text('中継へ送信しました。Muse の応答を待っています。','Sent to relay. Waiting for Muse.');
+      deliveryNotice=request.kind==='chat'?{sent:turn,message:state.notice}:undefined;
+      clearAnsweredNotice(state.snapshot.messages);emit();saveSoon();
       if(state.settings.relay==='gadget')armPoll();else armPoll(2000);
-      return {id:request.id,previousIds:beforeIds,needsReplyId};
+      return turn;
     }finally{state.busy=false;emit();}
   }
   const request=(textValue:string):RelayRequest=>({id:`r_${crypto.randomUUID()}`,kind:'chat',text:textValue,created_at:Math.floor(Date.now()/1000)});
@@ -1065,6 +1109,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(textValue.length>10000)throw new Error('Message too long');const req=request(textValue);if(image)req.image=image;await returnToSentChat(await send(req));});},
     toggleRecording:()=>guarded(()=>state.recording?stopRecording(false):startRecording()),
     cancelRecording:()=>guarded(()=>stopRecording(true)),
+    async importMotion(kind,files){
+      await motions.import(kind,files);motionChanged(kind);
+    },
+    useRelayMotion(kind){motions.useRelay(kind);syncMotions();motionChanged(kind);},
     async pickImage(source){return guarded(async()=>{if(!state.settings.images)return null;
       if(glasses.bridge){const image=await glasses.run(b=>source==='camera'?b.captureImageFromCamera():b.pickImageFromAlbum());
         if(!image)return null;return resizeImage({mime:image.mimeType,name:image.name,data_base64:image.base64.replace(/^data:[^,]+,/, '')});}

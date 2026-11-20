@@ -1,15 +1,16 @@
 import type { AppController, Attachment, Settings, Snapshot, Space, SpaceItem, Message } from '../core/types';
+import { avatarDisplay } from '../core/motions';
 import { headAngleDial } from './head-angle';
 import { defaults, endpoint, resolveSonioxConnection, sonioxAuthMode } from '../core/config';
 import { button, el, externalLink, icon, type IconName } from './dom';
-import { avatarPrompt, museSetupPrompt, spacePrompt, type SpacePromptControl, type SpacePromptOptions } from './prompts';
+import { animationPrompt, avatarPrompt, museSetupPrompt, spacePrompt, type SpacePromptControl, type SpacePromptOptions } from './prompts';
 import { locales, resolveLocale, translate } from '../core/i18n';
-import type { Language } from '../core/types';
+import { motionKinds, type MotionKind, type Language } from '../core/types';
 import { checkSonioxConnection } from '../core/soniox';
 import { sliderValue } from '../../protocol/space-controls.mjs';
 
 type View = 'chat' | 'spaces' | 'settings';
-type FeedbackLocation = 'page' | 'connection' | 'save' | 'voice';
+type FeedbackLocation = 'page' | 'connection' | 'save' | 'voice' | 'avatar';
 type SpaceAddPage = 'choose' | 'create' | 'prompt' | 'receive' | 'register';
 type SpaceExample = 'schedule' | 'focus' | 'notes';
 
@@ -51,7 +52,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   let help: { title: string; content: () => Node; focus: string } | null = null;
   const settingsGroups = new Set<string>();
   let voiceTest: { signature: string; ok: boolean; message: string } | null = null;
-  let avatarRequestOpen = false;
+  let avatarRequestOpen:'avatar'|'motion'|undefined;
   let calibrationStatus = '';
   let measuringZero = false;
   let importOpen = false;
@@ -137,7 +138,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const group = el('details', 'settings-group'); group.dataset.group = key;
     group.open = settingsGroups.has(key);
     group.append(el('summary', '', el('span', '', title), el('span', 'muted', value)), el('div', 'settings-group-body', ...nodes));
-    group.addEventListener('toggle', () => { if (group.open) settingsGroups.add(key); else settingsGroups.delete(key); }); return group;
+    group.addEventListener('toggle', () => { if (!group.isConnected) return; if (group.open) settingsGroups.add(key); else settingsGroups.delete(key); }); return group;
   }
   function openVoiceSettings() { view = 'settings'; settingsGroups.add('voice'); render(); root.querySelector('[data-group="voice"]')?.scrollIntoView({ block: 'start' }); }
   function capabilityHelp() {
@@ -671,7 +672,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         button(t('チャットの下書きへ', 'Add to chat draft'), () => {
           if (!addToChatDraft(request)) return;
           spaceAddPage = 'receive'; render();
-        }, { secondary: true, icon: 'chat' })));
+        }, { highlighted: true, icon: 'chat' })));
       content.append(el('div', 'wizard-actions', button(t('編集', 'Edit'), () => { spaceAddPage = 'create'; render(); }, { secondary: true, icon: 'back' }),
         button(t('受信を確認', 'Check for received spaces'), () => { spaceAddPage = 'receive'; render(); }, { icon: 'arrow' })));
     } else {
@@ -789,22 +790,113 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         }); }, { disabled: !editable() })));
     dialog.addEventListener('cancel', event => { event.preventDefault(); spaceToRemove = null; render(); }); return dialog;
   }
+  // Keep the picker attached to the stable shell while relay polling refreshes settings.
+  const motionPicker=el('input','');
+  motionPicker.type='file';motionPicker.multiple=true;motionPicker.accept='image/png,image/jpeg,image/webp';motionPicker.hidden=true;
+  shell.append(motionPicker);
+  function chooseMotionFiles(kind:MotionKind,label:string) {
+    motionPicker.value='';motionPicker.setAttribute('aria-label',label);
+    motionPicker.onchange=()=>{
+      const files=Array.from(motionPicker.files||[]);
+      if(files.length) void run(async()=>{
+        try {await controller.importMotion(kind,files);}
+        catch {throw new Error(t('保存できませんでした。異なる名前の正方形画像16枚と端末の空き容量を確認してください。','Could not save. Check that you selected 16 square images with unique filenames and have free storage.'));}
+      }, 'avatar');
+    };
+    motionPicker.click();
+  }
+  function artworkStatus(status: typeof controller.state.avatarStatus, local = false) {
+    if (status === 'ready') return local ? t('端末に保存済み', 'Saved on device') : t('受信済み', 'Received');
+    if (status === 'loading') return t('画像を読み込み中…', 'Loading image…');
+    return status === 'error' ? t('取得できません', 'Could not load') : t('未受信', 'Not received');
+  }
+
+  function avatarCard(kind: MotionKind) {
+    const state = controller.state;
+    const home = kind === 'idle';
+    const title = home ? t('ホーム', 'Home') : t('返信待ち', 'Waiting for reply');
+    const selected = home ? state.settings.homeAvatar : state.settings.waitingAvatar;
+    const display = avatarDisplay(state, kind);
+    const still = t('静止画', 'Still avatar');
+    const motion = home ? t('待機アニメーション', 'Idle animation') : t('作業アニメーション', 'Working animation');
+    const off = home ? t('表示なし', 'Hidden') : t('テキストのみ', 'Text only');
+    const name = (mode: Settings['homeAvatar']) => mode === 'animation' ? motion : mode === 'still' ? still : off;
+    const heading = el('div', 'avatar-heading', el('div', '', el('h3', '', title),
+      el('p', 'avatar-current', t('適用中 · {mode}', 'Applied · {mode}', { mode: name(display) }))));
+    const art = display === 'animation' ? state.motions[kind].sheet : display === 'still' ? state.snapshot.profile?.avatar : undefined;
+    if (art) {
+      const preview = el('div', 'avatar-thumbnail');
+      const img = el('img', display === 'animation' ? 'motion-sheet' : '');
+      img.alt = ''; img.src = `data:${art.mime};base64,${art.data_base64}`;
+      // Polling can rebuild the panel between frames. Keep the preview on one continuous timeline.
+      if (display === 'animation') img.style.animationDelay = -(performance.now() % 4000) + 'ms';
+      preview.append(img); heading.append(preview);
+    }
+    const choices = el('div', 'avatar-choices');
+    choices.setAttribute('role', 'group'); choices.setAttribute('aria-label', title);
+    const modes: Settings['homeAvatar'][] = home ? ['animation', 'still', 'off'] : ['animation', 'off'];
+    for (const mode of modes) {
+      const choice = button(name(mode), () => {
+        if (mode === selected) return;
+        const settings = { ...controller.state.settings };
+        if (home) settings.homeAvatar = mode;
+        else if (mode !== 'still') settings.waitingAvatar = mode;
+        void run(() => controller.saveSettings(settings), 'avatar');
+      }, { secondary: true, disabled: !editable() || !state.settings.images });
+      choice.setAttribute('aria-pressed', String(mode === selected));
+      focusKey(choice, `avatar-${kind}-${mode}`); choices.append(choice);
+    }
+    const card = el('section', 'even-card avatar-card', heading, choices);
+    if (state.settings.images && selected !== display) {
+      const status = selected === 'animation' ? artworkStatus(state.motions[kind].status) : artworkStatus(state.avatarStatus);
+      card.append(small(t('{mode}の素材 · {status}', '{mode} artwork · {status}', { mode: name(selected), status })));
+    }
+    return card;
+  }
+
   function avatarSettings() {
     const s = controller.state;
-    const status = !draft.images ? t('オフ', 'Off') : s.avatarStatus === 'loading' ? t('画像を読み込み中…', 'Loading image…') : s.avatarStatus === 'ready' ? t('受信済み', 'Received') : s.avatarStatus === 'error' ? t('取得できません', 'Could not load') : t('未受信', 'Not received');
-    const block = el('div', 'avatar-settings', el('div', 'even-row', el('span', 'even-row-label', t('Museのアバター', 'Muse avatar')), el('span', 'muted', status)));
-    if (draft.images && s.snapshot.profile?.avatar) block.append(imagePreview(s.snapshot.profile.avatar, 'avatar-preview'));
-    if (!draft.images) block.append(button(t('画像を有効にする', 'Enable images'), () => { changed('images', true); render(); }, { secondary: true, icon: 'image', className: 'full-width' }));
-    block.append(button(t('Museにアバターを依頼', 'Ask Muse for avatar'), () => { avatarRequestOpen = !avatarRequestOpen; render(); }, { secondary: true, icon: 'copy', className: 'full-width' }));
+    const assets = el('div', 'even-card avatar-assets');
+    if (s.settings.images) {
+      const still = el('div', 'avatar-asset-heading', el('span', '', t('静止画', 'Still avatar')), el('span', 'muted', artworkStatus(s.avatarStatus)));
+      if (s.snapshot.profile?.avatar) still.prepend(imagePreview(s.snapshot.profile.avatar, 'avatar-preview'));
+      assets.append(still);
+      for (const kind of motionKinds) {
+        const motion = s.motions[kind];
+        const name = kind === 'idle' ? t('ホームの待機モーション', 'Home idle animation') : t('返信待ちの作業モーション', 'Waiting animation');
+        const row = el('div', 'avatar-asset', el('div', 'avatar-asset-heading', el('span', '', name), el('span', 'muted', artworkStatus(motion.status, motion.local))),
+          button(t('連番画像16枚を選ぶ', 'Choose 16 frames'), () => chooseMotionFiles(kind, name), { secondary: true, icon: 'image', disabled: !editable() }));
+        if (motion.local) row.append(button(t('Museからの画像に戻す', 'Use images from Muse'), () => {
+          void run(async () => controller.useRelayMotion(kind), 'avatar');
+        }, { secondary: true, disabled: !editable() }));
+        assets.append(row);
+      }
+      assets.append(small(t('各4秒・16コマ。Museから自動受信するか、01〜16の正方形画像をファイル名順に取り込めます。','Each loop plays 16 frames in 4 seconds. Receive it from Muse or import square images numbered 01–16.')));
+    }
+    assets.append(button(t('Museにアバターを依頼', 'Ask Muse for avatar'), () => { avatarRequestOpen = avatarRequestOpen==='avatar'?undefined:'avatar'; render(); }, { secondary: true, icon: 'copy', className: 'full-width' }));
+    assets.append(button(t('Museにアニメーションを依頼', 'Ask Muse for animations'), () => {
+      avatarRequestOpen=avatarRequestOpen==='motion'?undefined:'motion';render();
+    }, {secondary:true,icon:'copy',className:'full-width'}));
     if (avatarRequestOpen) {
-      const request = avatarPrompt(draft);
+      const request = avatarRequestOpen==='avatar'?avatarPrompt(draft):animationPrompt(draft);
       const text = el('textarea', 'even-input prompt-text'); text.readOnly = true; text.value = request; text.rows = 6; text.setAttribute('aria-label', t('Museへの依頼文', 'Request for Muse')); focusKey(text, 'avatar-prompt');
-      block.append(text, el('div', 'space-prompt-actions', button(t('コピー', 'Copy'), () => { void run(async () => {
+      assets.append(text, el('div', 'space-prompt-actions', button(t('コピー', 'Copy'), () => { void run(async () => {
         try { await navigator.clipboard.writeText(request); uiNotice = t('コピーしました。Muse に貼り付けてください。', 'Copied. Paste it into Muse.'); }
         catch { const current = root.querySelector<HTMLTextAreaElement>('[data-focus="avatar-prompt"]'); current?.focus(); current?.select(); uiNotice = t('選択した内容をコピーしてください。', 'Copy the selected text.'); }
-      }); }, { icon: 'copy', disabled: !editable() }), button(t('チャットの下書きへ', 'Add to chat draft'), () => { if (addToChatDraft(request)) { render(); } }, { secondary: true, icon: 'chat' })));
+      }); }, { icon: 'copy', disabled: !editable() }), button(t('チャットの下書きへ', 'Add to chat draft'), () => { if (addToChatDraft(request)) { render(); } }, { highlighted: true, icon: 'chat' })));
     }
-    return block;
+    const applied = motionKinds.filter(kind => avatarDisplay(s, kind) !== 'off').length;
+    const panel = el('div', 'avatar-settings');
+    if (!s.settings.images) panel.append(el('div', 'even-card avatar-card',
+      small(t('アバターを表示するには画像を有効にしてください。', 'Enable images to show your avatar.')),
+      button(t('画像を有効にする', 'Enable images'), () => {
+        void run(() => controller.saveSettings({ ...controller.state.settings, images: true }), 'avatar');
+      }, { secondary: true, icon: 'image', disabled: !editable() })));
+    else panel.append(small(t('画面ごとに表示を選ぶと、すぐに適用されます。', 'Select a display for each screen to apply it immediately.')));
+    panel.append(avatarCard('idle'), avatarCard('working'), notifications('avatar'),
+      settingsGroup('avatar-assets', t('素材の確認・取り込み', 'Manage artwork'), '', assets));
+    return settingsGroup('avatar', t('アバターとアニメーション', 'Avatar & animation'),
+      applied ? t('{count}画面に適用中', 'Applied to {count}/2 screens', { count: applied }) : t('表示なし', 'Hidden'), panel);
   }
   function headWakeSettings() {
     const title = t('頭上げ表示', 'Head-up display');
@@ -847,9 +939,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       chatLayout,
       select('autoHideSeconds', t('自動で非表示', 'Auto-hide display'), [0, 5, 10, 15, 20, 25, 30].map(seconds => [seconds, seconds ? t('{seconds} 秒', '{seconds} seconds', { seconds }) : t('オフ', 'Off')]), () => { if (!draft.autoHideSeconds) changed('headWake', false); }),
       toggle(t('送信後にチャットへ戻る', 'Return to chat after sending'), draft.returnToChatAfterSend, value => { changed('returnToChatAfterSend', value); render(); }, t('チャット送信のみ', 'Chat messages only')),
-      avatarSettings(),
       button(t('復帰操作を試す', 'Try restoring the display'), () => { tutorial = true; tutorialMode = 'chat'; tutorialStep = 4; tutorialDemo = false; render(); }, { secondary: true, icon: 'help', className: 'full-width' }))));
-    content.append(headWakeSettings());
+    content.append(avatarSettings(), headWakeSettings());
     content.append(settingsGroup('display', t('表示', 'Display'), draft.language === 'system' ? t('端末に合わせる', 'Follow phone') : languageOptions().find(([id]) => id === draft.language)![1], el('div', 'even-card',
       select('theme', t('テーマ', 'Theme'), [['system', t('システム', 'System')], ['light', t('ライト', 'Light')], ['dark', t('ダーク', 'Dark')]], theme),
       select('language', t('表示言語', 'Language'), languageOptions()),

@@ -4,20 +4,20 @@ import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
 
-async function openPhone(t, snapshot = { messages: [], spaces: [] }) {
+async function openPhone(t, snapshot = { messages: [], spaces: [] }, settings = {}) {
   const server = await preview({ preview: { host: '127.0.0.1', port: 0, open: false } });
   t.after(() => server.close());
   const browser = await chromium.launch({ channel: 'chrome' });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 375, height: 660 }, isMobile: true, hasTouch: true });
   page.setDefaultTimeout(8000);
-  await page.addInitScript(() => {
+  await page.addInitScript(initial => {
     if (!localStorage.getItem('muse-relay-state-v1')) {
       localStorage.setItem('muse-relay-state-v1', JSON.stringify({ settings: {
-        configured: true, language: 'en', relay: 'gadget', relayUrl: location.origin, relayToken: 'test'
+        configured: true, language: 'en', relay: 'gadget', relayUrl: location.origin, relayToken: 'test', ...initial
       } }));
     }
-  });
+  }, settings);
   await page.route('**/v1/snapshot', async route => {
     await route.fulfill({ json: await snapshot });
   });
@@ -161,4 +161,101 @@ test('swiping the head-angle chart scrolls the page and dragging the marker adju
   const center = { x: marker.x + marker.width / 2, y: marker.y + marker.height / 2 };
   await drag(touch, center, { x: center.x - 20, y: center.y - 35 });
   assert.ok(Number(await chart.getAttribute('aria-valuenow')) > Number(angle));
+});
+
+test('importing 16 numbered frames preserves playback order after reload and a failed replacement', async t => {
+  const {page}=await openPhone(t,undefined,{images:true});
+  const settings=async()=>{
+    await page.getByRole('button',{name:'Settings',exact:true}).tap();
+    await page.locator('[data-group="avatar"] > summary').tap();
+  };
+  const assets=page.locator('[data-group="avatar-assets"] > summary');
+  await settings();
+  await assets.tap();
+  await page.getByRole('button',{name:'Ask Muse for animations'}).tap();
+  const request = await page.getByRole('textbox',{name:'Request for Muse'}).inputValue();
+  assert.match(request, /4 fps/);
+  assert.match(request, /one slow body movement for the entire four-second loop/);
+  assert.match(request, /At 144×144, compare frames 1 and 9/);
+  assert.match(request, /hand should move relative to the hip/);
+  assert.match(request, /Do not stretch, squash, shear, zoom or slide the source bitmap/);
+  const data=await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
+    const ctx=canvas.getContext('2d');
+    return Array.from({length:16},(_,i)=>{
+      ctx.fillStyle='rgb('+[i*17,i*17,i*17].join(',')+')';ctx.fillRect(0,0,16,16);
+      return canvas.toDataURL().split(',')[1];
+    });
+  });
+  const files=data.map((base64,i)=>({name:(i+1)+'.png',mimeType:'image/png',buffer:Buffer.from(base64,'base64')})).reverse();
+  const choose=async files=>{
+    const chooser=page.waitForEvent('filechooser');
+    await page.getByRole('button',{name:'Choose 16 frames'}).first().tap();
+    await (await chooser).setFiles(files);
+  };
+  await choose(files);
+  await page.getByText('Saved on device',{exact:true}).waitFor();
+  const stored=await page.evaluate(async()=>{
+    const key=Object.keys(localStorage).find(k=>k.startsWith('muse-relay-motion-v1:') && k.endsWith(':idle'));
+    const img=new Image();img.src='data:image/png;base64,'+localStorage.getItem(key);await img.decode();
+    const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+    const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+    return {size:[img.width,img.height],levels:Array.from({length:16},(_,i)=>ctx.getImageData(i%4*144,Math.floor(i/4)*144,1,1).data[0])};
+  });
+  assert.deepEqual(stored,{size:[576,576],levels:Array.from({length:16},(_,i)=>i*17)});
+  await choose(files.slice(1));
+  await page.getByText(/Could not save. Check that you selected 16/).waitFor();
+  await page.getByText('Applied · Idle animation', {exact:true}).waitFor();
+  await page.getByRole('button',{name:'Hidden',exact:true}).tap();
+  await page.getByText('Applied · Hidden', {exact:true}).waitFor();
+  await page.reload();await settings();
+  assert.equal(await page.getByRole('button',{name:'Hidden',exact:true}).getAttribute('aria-pressed'),'true');
+  await assets.tap();
+  await page.getByText('Saved on device',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Use images from Muse'}).tap();
+  await page.getByRole('button',{name:'Use images from Muse'}).waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('muse-relay-motion-v1:')).length),0);
+});
+
+test('avatar selections apply independently, preserve other drafts and survive reopening', { timeout: 30_000 }, async t => {
+  const relay = Promise.withResolvers();
+  const { page } = await openPhone(t, relay.promise);
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 576;
+    return canvas.toDataURL().split(',')[1];
+  });
+  const art = { mime: 'image/png', name: 'test.png', data_base64: png };
+  relay.resolve({ messages: [], profile: { avatar: art }, spaces: [{
+    id: 'muse_relay_avatar_motion_v1', title: 'Muse', items: ['idle','working'].map(id => ({ id, image: art }))
+  }] });
+  const settings = async () => {
+    await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+    await page.locator('[data-group="avatar"] > summary').tap();
+  };
+  const applied = mode => page.getByText('Applied · ' + mode, { exact: true });
+  const choose = name => page.getByRole('button', { name, exact: true }).tap();
+  await settings();
+  await applied('Text only').waitFor();
+  await choose('Enable images');
+  await applied('Idle animation').waitFor();
+  await applied('Working animation').waitFor();
+  assert.equal(await page.locator('.avatar-thumbnail img.motion-sheet').count(), 2);
+  assert.equal(await page.getByRole('button', { name: 'Choose 16 frames' }).count(), 0);
+  await page.locator('[data-group="display"] > summary').tap();
+  await page.getByLabel('Theme', { exact: true }).selectOption('dark');
+  await choose('Still avatar');
+  await applied('Still avatar').waitFor();
+  await applied('Working animation').waitFor();
+  await choose('Text only');
+  await applied('Text only').waitFor();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('muse-relay-state-v1')).settings);
+  assert.deepEqual([saved.homeAvatar,saved.waitingAvatar,saved.theme,saved.images], ['still','off','system',true]);
+  assert.equal(await page.getByLabel('Theme', { exact: true }).inputValue(), 'dark');
+  await page.reload(); await settings();
+  await applied('Still avatar').waitFor();
+  await applied('Text only').waitFor();
+  await choose('Hidden'); await applied('Hidden').waitFor();
+  await choose('Working animation'); await applied('Working animation').waitFor();
+  await choose('Idle animation'); await applied('Idle animation').waitFor();
 });

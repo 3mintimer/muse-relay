@@ -388,11 +388,14 @@ test('Soniox preserves new audio order when startup flushing hits socket backpre
 });
 
 test('Muse requests follow the selected voice route, keep credentials private and separate optional work',async()=>{
-  const {museSetupPrompt,spacePrompt,avatarPrompt}=await import('../src/ui/prompts.ts');
+  const {museSetupPrompt,spacePrompt,avatarPrompt,animationPrompt}=await import('../src/ui/prompts.ts');
   for(const relay of ['gist','gadget'] as const)for(const voice of ['muse','soniox'] as const)for(const sonioxAuth of ['api-key','token-server'] as const){
     const settings={...defaults,relay,voice,sonioxAuth,sonioxApiKey:'DO-NOT-COPY-PERSONAL-KEY',relayUrl:'https://private.example.test',relayToken:'DO-NOT-COPY-RELAY',githubToken:'DO-NOT-COPY-GITHUB',sonioxTokenUrl:'https://private-speech.example.test',speakerFilter:'self' as const};
     const setup=museSetupPrompt(settings),space=spacePrompt(settings,{name:'Notes',purpose:'Take notes',layout:'list',controls:['microphone']}),avatar=avatarPrompt(settings);
-    for(const prompt of [setup,space,avatar])assert.doesNotMatch(prompt,/DO-NOT-COPY|private.example|private-speech.example/);
+    const motion=animationPrompt(settings);
+    assert.match(motion,/16 ordered frames each at 4 fps/);assert.match(motion,/working-at-a-computer/);
+    assert.match(motion,relay==='gist'?/muse-relay-motions.json/:/PUT the single record to \/v1\/spaces\/muse_relay_avatar_motion_v1/);
+    for(const prompt of [setup,space,avatar,motion])assert.doesNotMatch(prompt,/DO-NOT-COPY|private.example|private-speech.example/);
     assert.match(setup,/Spaces are optional/);assert.doesNotMatch(setup,/Finish with one text reply and one selected space/);
     assert.match(space,/reply_to/);assert.match(space,/only the wearer/);assert.match(avatar,/do not create, generate or choose a replacement/);
     if(voice==='soniox'){
@@ -413,4 +416,21 @@ test('Muse requests follow the selected voice route, keep credentials private an
       }
     }
   }
+});
+
+test('HTTPS and Gist receive the same optional motion record independently of ordinary Spaces and the still avatar',async t=>{
+  const motion={id:'muse_relay_avatar_motion_v1',title:'Animations',updated_at:5,
+    items:[{id:'idle',image_file:'idle.png'},{id:'working',image:{mime:'audio/wav',data_base64:'YQ=='}}]};
+  const space={id:'notes',title:'Notes',items:[]}, profile={name:'Muse',avatar_file:'portrait.png'};
+  const https=parseSnapshot({spaces:[motion,space],messages:[],profile});
+  assert.equal(https.spaces.length,1);assert.equal(https.spaces[0]?.id,'notes');
+  assert.equal(https.profile?.avatar_file,'portrait.png');assert.equal(https.motions?.idle?.file,'idle.png');
+  assert.equal(https.motions?.working,undefined);
+  t.mock.method(globalThis,'fetch',async()=>Response.json({files:{
+    'g2muse-relay.json':{content:JSON.stringify({messages:[]})},
+    'muse-relay-spaces.json':{content:JSON.stringify({spaces:[space]})},
+    'muse-relay-motions.json':{content:JSON.stringify(motion)},
+  }}));
+  const gist=await new GistRelay({...defaults,gistId:'a'.repeat(32),githubToken:'dummy'}).read();
+  assert.deepEqual(gist.motions,https.motions);assert.deepEqual(gist.spaces,https.spaces);
 });

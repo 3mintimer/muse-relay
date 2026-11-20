@@ -1,6 +1,6 @@
 import { waitForEvenAppBridge, CreateStartUpPageContainer, RebuildPageContainer, TextContainerUpgrade, ImageRawDataUpdate, ImageRawDataUpdateResult, AudioInputSource, type EvenAppBridge, type EvenHubEvent, ListContainerProperty } from '@evenrealities/even_hub_sdk';
 import type { AppState, Attachment } from './types';
-import { glassImageTiles, imageBytes, resizeImage, type GlassImageTile } from './media';
+import { glassImageTiles, imageBytes, MOTION_FRAME_MS, MOTION_SIZE, resizeImage, type GlassImageTile } from './media';
 import { excerpt, G2_LINE_HEIGHT, lineBudget, wrapLines } from './glass-text';
 
 export interface GlassMenuItem { itemID:number; itemName:string; }
@@ -8,7 +8,12 @@ export interface GlassTextStyle { bodyColor?:1|4; input?:string; }
 
 const WIDTH = 576;
 const HEIGHT = 288;
-const AVATAR_SIZE = 144;
+const AVATAR_SIZE = MOTION_SIZE;
+const avatarBounds = { x: WIDTH - AVATAR_SIZE, y: (HEIGHT - AVATAR_SIZE) / 2, width: AVATAR_SIZE, height: AVATAR_SIZE };
+export interface GlassMotion { frames:Uint8Array[]; failed:()=>void }
+function motionBitmap(motion:GlassMotion):GlassBitmap {
+  return {...avatarBounds,containerID:2,containerName:'motion',bytes:motion.frames[0]!};
+}
 const settleImage = () => new Promise<void>(resolve => setTimeout(resolve, 500));
 
 function textBand(content: string | undefined, maxRows: number) {
@@ -46,6 +51,8 @@ export class Glasses {
   private connecting?: Promise<void>;
   private layout='';
   private serial=0;
+  private motionTimer?:ReturnType<typeof setTimeout>;
+  private playback?:{layout:string; frames:Uint8Array[]; start:number; nextFrame:number};
   private off?:()=>void;
   private onEvent:(e:EvenHubEvent)=>void;
   private bridgeFactory: typeof waitForEvenAppBridge;
@@ -108,7 +115,7 @@ export class Glasses {
     if(!await this.run(b=>b.audioControl(open,phone?AudioInputSource.Phone:AudioInputSource.Glasses)))throw new Error('Microphone unavailable');
   }
   async exit():Promise<void>{await this.run(b=>b.shutDownPageContainer(1));}
-  invalidateRender():void{++this.serial;}
+  invalidateRender():void{clearTimeout(this.motionTimer);this.playback=undefined;++this.serial;}
   invalidateImage(): void { this.displayedImages.clear(); }
   disconnect(): void {
     this.invalidateRender();
@@ -155,24 +162,69 @@ export class Glasses {
     await this.paint(renderId, state, menuItems, text, [], bitmaps, messageId);
   }
 
-  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment): Promise<void> {
+  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment, motion?:GlassMotion): Promise<void> {
     if (!this.ready) return;
     const renderId = ++this.serial;
     const { first, last, bodyHeight } = bands(footer, header);
     const text: ReturnType<typeof label>[] = [];
     if (first.height) text.push(label(13, 'header', 0, first.height, first.content));
     if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content));
-    const width = WIDTH - (avatar ? AVATAR_SIZE : 0);
+    const width = avatar || motion ? avatarBounds.x : WIDTH;
     const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
       itemContainer: { itemCount: items.length, itemWidth: 0, isItemSelectBorderEn: 1,
         itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24)) } });
-    const bitmaps: GlassBitmap[] = avatar ? [{ x: width, y: first.height + Math.floor((bodyHeight - AVATAR_SIZE) / 2),
-      width: AVATAR_SIZE, height: AVATAR_SIZE, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
-    await this.paint(renderId, state, menuItems, text, [list], bitmaps);
+    const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
+      ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
+    await this.paint(renderId, state, menuItems, text, [list], bitmaps, undefined, motion);
+  }
+
+  async waiting(state:AppState, status:string, footer:string, menuItems:GlassMenuItem[], messageId:string, motion:GlassMotion) {
+    if (!this.ready) return;
+    const last=textBand(footer,3);
+    const content = excerpt(status, 2, avatarBounds.x);
+    const height = G2_LINE_HEIGHT * wrapLines(content, avatarBounds.x).length;
+    const body = { ...label(1, 'body', Math.floor((HEIGHT - height) / 2), height, content, true), width: avatarBounds.x };
+    await this.paint(++this.serial,state,menuItems,[body,label(11,'footer',HEIGHT-last.height,last.height,last.content)],[],[motionBitmap(motion)],messageId,motion);
+  }
+
+  private playMotion(renderId:number, motion:GlassMotion, layout:string) {
+    clearTimeout(this.motionTimer);
+    // A clock/text refresh on the same native page keeps its original loop phase.
+    const previous=this.playback;
+    const continuing=previous?.layout===layout && previous.frames===motion.frames;
+    const playback=continuing?previous:{layout,frames:motion.frames,start:performance.now(),nextFrame:0};
+    this.playback=playback;
+    const delay=()=>Math.max(0,Math.ceil(playback.start+playback.nextFrame*MOTION_FRAME_MS-performance.now()));
+    const tick=async()=>{
+      if (renderId!==this.serial) return;
+      try {
+        await this.run(async bridge=>{
+          if (renderId!==this.serial) return;
+          const frame=Math.max(playback.nextFrame,Math.floor((performance.now()-playback.start)/MOTION_FRAME_MS));
+          const index=frame%motion.frames.length;
+          playback.nextFrame=frame+1;
+          const payload=ImageRawDataUpdate.fromJson({containerID:2,containerName:'motion',imageData:motion.frames[index]!});
+          let result=await bridge.updateImageRawData(payload);
+          if (ImageRawDataUpdateResult.isSendFailed(result)) {
+            await settleImage();
+            if (renderId!==this.serial) return;
+            result=await bridge.updateImageRawData(payload);
+          }
+          if (!ImageRawDataUpdateResult.isSuccess(result)) throw new Error('G2 motion');
+        });
+      } catch {
+        if(renderId===this.serial) motion.failed();
+        return;
+      }
+      // Use the four-second timeline even when BLE misses a deadline. Queue at most one frame.
+      if(renderId===this.serial) this.motionTimer=setTimeout(tick,delay());
+    };
+    if(continuing) this.motionTimer=setTimeout(tick,delay());
+    else void tick();
   }
 
   private async paint(renderId: number, state: AppState, menuItems: GlassMenuItem[], textObject: ReturnType<typeof label>[],
-    listObject: ListContainerProperty[], bitmaps: GlassBitmap[], messageId?: string): Promise<void> {
+    listObject: ListContainerProperty[], bitmaps: GlassBitmap[], messageId?: string, motion?:GlassMotion): Promise<void> {
     if (renderId !== this.serial) return;
     const imageObject = bitmaps.map(({ x, y, width, height, containerID, containerName }) =>
       ({ xPosition: x, yPosition: y, width, height, containerID, containerName }));
@@ -195,6 +247,7 @@ export class Glasses {
           if (!await bridge.textContainerUpgrade(upgrade)) throw new Error('G2 display');
         }
       }
+      if (motion) return;
       const pending = bitmaps.filter(tile => this.displayedImages.get(tile.containerID) !== tile.bytes);
       if (!pending.length || renderId !== this.serial) return;
       // The page acknowledgement can precede BLE readiness. Send each tile in order.
@@ -212,5 +265,9 @@ export class Glasses {
         if (renderId === this.serial) this.displayedImages.set(containerID, bytes);
       }
     }, 10000 * Math.max(1, bitmaps.length));
+    if (renderId===this.serial) {
+      if (motion) this.playMotion(renderId,motion,layout);
+      else {clearTimeout(this.motionTimer);this.playback=undefined;}
+    }
   }
 }

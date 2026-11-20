@@ -164,6 +164,17 @@ Gist `muse-relay-profile.json` has the shape below; inline `avatar` is also read
 
 One profile is retained independently of chat history limits. When replaced/cleared, Node removes unreferenced attachment state; Worker uses its existing bounded GC and 24-hour grace. The Gist watcher removes its own unreferenced `muse-relay-avatar-*.base64` files. Older Gist revisions are separate.
 
+### Home and reply-wait animations
+
+In **Settings → Avatar & animation**, enable images and open **Manage artwork → Ask Muse for animations**. The prompt asks Muse to generate two looping sequences from its current character reference. Each loop has 16 square frames at 4 fps. With individual PNG, JPEG or WebP frames, choose **Choose 16 frames** for the desired loop. Number filenames 01–16. The app sorts them in numeric filename order and saves the import in this WebView for the selected connection. **Use images from Muse** restores the relay version.
+
+The transport record has ID `muse_relay_avatar_motion_v1`, a title, an increasing Unix-second `updated_at`, and two items. Each item has `id` (`idle` or `working`), `title`, empty `text`, and `image:{mime:"image/png",name,data_base64}`. Each PNG is 576 × 576 px, at most 250,000 bytes. Pack the 144 × 144 px frames in a 4 × 4 grid, reading across each row. The working motion depicts Muse using a computer. The final pose transitions into the first.
+
+- HTTPS writers send the record with the Muse credential using `PUT /v1/spaces/muse_relay_avatar_motion_v1`. This uses one space and two image slots. The app recognizes the reserved ID, omits it from the Spaces menu and reads inline images or the relay's `image_file` references. Publish a new revision when replacing artwork.
+- Gist writers put the same record in `muse-relay-motions.json`. It is independent of the profile, chat history and space exports.
+
+With images enabled and the default animation choices, Home uses the idle loop when available and falls back to the existing still avatar. An outstanding chat on the reply-wait screen uses the working loop. A matching reply replaces it. The app updates one image container on a four-second timeline and skips elapsed frames when the glasses transfer takes longer than 250 ms.
+
 ## Gist method
 
 ### Files and writers
