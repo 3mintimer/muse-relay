@@ -1,10 +1,10 @@
-# ATOM S3 relay
+# AtomS3 and AtomS3 Lite relay
 
 [English](atoms3.md) · [日本語](atoms3.ja.md)
 
 Muse Relay is a shared EvenHub app. Every user runs the same build and configures their own relay, either built themselves or set up by their Muse. The distributed app contains no user's server, network, or credentials.
 
-This guide describes ATOM S3 as an optional Muse Gadget SDK reference relay. Gist does not require it; other relays implementing the same protocol can use the shared app.
+This guide covers the AtomS3 (C123) and AtomS3 Lite (C124) reference firmware for the Muse Gadget SDK. Both are optional. Any relay implementing the same protocol can use the shared app.
 
 In this reference configuration, an ATOM S3 paired as a Muse Gadget stays on home Wi-Fi and fetches requests from your HTTPS relay. You do not need to carry it with your phone.
 
@@ -18,11 +18,11 @@ Even G2 ⇄ Muse Relay inside the Even app
                  Muse
 ```
 
-The standard ATOM S3 has 8 MB flash and no PSRAM. This implementation uses SDK Wi-Fi, BLE pairing, and the Noise connection. Audio processing, image display, and controls remain on the phone/G2. Atomic Voice Base is unnecessary. The ATOM S3 screen and microphone are unused. The SDK's general-purpose home-network tunnel is disabled.
+Both models have 8 MB of flash and no PSRAM. This implementation uses SDK Wi-Fi, BLE pairing, and the Noise connection. The phone or G2 handles audio, images, and controls. The Lite build uses its built-in RGB LED for status. [AtomS3 specifications](https://docs.m5stack.com/en/core/AtomS3) · [AtomS3 Lite specifications](https://docs.m5stack.com/en/core/AtomS3-Lite)
 
 ## Requirements
 
-- ATOM S3, a USB data cable, and stable USB power.
+- AtomS3 or AtomS3 Lite, a USB data cable, and stable USB power.
 - 2.4 GHz Wi-Fi, configured during pairing in the Muse app.
 - A [Muse Gadget SDK token](https://gadgets.muse.ai/settings/sdk-tokens). Review the site's [SDK Terms](https://gadgets.muse.ai/sdk-terms) before use.
 - ESP-IDF **6.0.3**, Python 3.10 or later, CMake, and Ninja, as supported by the [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk).
@@ -30,22 +30,26 @@ The standard ATOM S3 has 8 MB flash and no PSRAM. This implementation uses SDK W
 
 ## Build
 
-Run from the project root:
+Activate ESP-IDF from the project root.
 
 ```sh
 . /path/to/esp-idf-v6.0.3/export.sh
-firmware/tools/build.sh
 ```
 
-The SDK checkout defaults to `.local/hardware/muse-gadget-sdk`; set `MUSE_SDK_CHECKOUT` to use another location. The pinned SDK commit is `c3d58c66a02bfea44847e0345714507166656bed`. Build output goes to `firmware/build-atoms3/`.
+Choose the build and package commands for your board.
 
-Run `python3 firmware/tools/package.py` to make a flash package. `firmware/build-atoms3/muse-relay-atoms3-0.1.0.zip` contains binaries, `flash_args` with the correct offsets, and SHA-256 checksums. Packaging rejects builds with an embedded SDK token.
+| Board | Build | Package | ZIP |
+| --- | --- | --- | --- |
+| AtomS3 (C123) | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.4.zip` |
+| AtomS3 Lite (C124) | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.4.zip` |
+
+The SDK checkout defaults to `.local/hardware/muse-gadget-sdk`. Set `MUSE_SDK_CHECKOUT` to use another location. The pinned SDK commit is `c3d58c66a02bfea44847e0345714507166656bed`. Each ZIP includes the binaries, `flash_args` for initial installation, `flash_app_args` for an app-only update, notices, and SHA-256 checksums.
 
 Do not put personal tokens into build-time SDK settings. Save tokens and the URL to the device later over USB. `firmware/sdkconfig.local` is an optional, Git-ignored development override and is normally unnecessary. Keep HTTPS certificate validation enabled. HTTP is available only with the explicit local-test setting `CONFIG_MUSE_RELAY_ALLOW_HTTP=y`.
 
-## Identify and flash the device
+## First installation
 
-The existing firmware's partition layout may differ. Use the generated `flash_args` instead of flashing just the app at an old offset. If you need to restore existing firmware, save a full flash backup locally first. Backups may contain credentials and must stay out of public artifacts.
+Use this procedure for a first installation or a migration from a different firmware layout. Save a full flash backup locally before writing the package's layout. Backups may contain credentials and must stay out of public artifacts.
 
 1. Hold the ATOM S3 side reset button for about two seconds or longer to enter download mode. Look for `/dev/cu.usbmodem*` on macOS or `/dev/ttyACM*` on Linux.
 2. Identify the connected device:
@@ -55,13 +59,69 @@ The existing firmware's partition layout may differ. Use the generated `flash_ar
    python -m esptool --port /dev/cu.usbmodemXXXX flash-id
    ```
 
-3. After any required backup, flash it:
+3. After the backup, run the following from the extracted ZIP directory for your board.
 
    ```sh
-   firmware/tools/flash.sh /dev/cu.usbmodemXXXX
+   python -m esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX --baud 460800 \
+       --before no-reset --after hard-reset write-flash @flash_args
    ```
 
 This does not erase all flash. Secure Boot, flash encryption, and eFuse writes are not enabled. The build uses the SDK's published development signing key. If it remains at `waiting for download`, reconnect USB power without holding a button. A long press that lights the green LED enters download mode.
+
+## Update and retain settings
+
+Use the app-only update for an existing `muse-relay` installation with the same partition layout. Start the device normally and check its 115200-baud boot log for `Project name: muse-relay` and `Loaded app from partition at offset 0x20000`. Close the serial monitor before updating. The Wi-Fi, pairing, SDK token, and relay settings are held in NVS at `0x11000`.
+
+Run the following from the extracted ZIP for your board, replacing `port` with its USB port. The backup goes into a private directory alongside the extracted ZIP. The commands stop if the backup size, partition table, or app-only flash arguments differ. If USB cannot enter download mode automatically, use the side button to enter it and set `enter_download=no-reset` before rerunning. [ESP32-S3 download mode](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/advanced-topics/boot-mode-selection.html)
+
+```sh
+(
+    set -eu
+    port=/dev/cu.usbmodemXXXX
+    enter_download=usb-reset
+    flash() {
+        reset_before=$1
+        reset_after=$2
+        shift 2
+        python -m esptool --chip esp32s3 --port "$port" --baud 460800 \
+            --before "$reset_before" --after "$reset_after" "$@"
+    }
+    umask 077
+    backup=$(mktemp -d "$PWD/../muse-relay-before.XXXXXX")
+    printf 'Backup saved in %s\n' "$backup"
+    flash "$enter_download" no-reset-stub read-flash 0x0 0x800000 "$backup/flash.bin"
+    test "$(wc -c < "$backup/flash.bin")" -eq 8388608
+    dd if="$backup/flash.bin" bs=1024 skip=64 count=3 2>/dev/null | cmp - partition-table.bin
+    test "$(cat flash_app_args)" = "$(printf '%s\n' \
+        '--flash-mode dio --flash-freq 80m --flash-size keep' '0x20000 muse-relay.bin')"
+    dd if="$backup/flash.bin" of="$backup/nvs.bin" bs=4096 skip=17 count=6
+    flash no-reset no-reset-stub write-flash @flash_app_args
+    flash no-reset no-reset-stub verify-flash 0x11000 "$backup/nvs.bin"
+    flash no-reset hard-reset flash-id
+)
+```
+
+After reboot, check the new version and run `>relay_status`. Confirm the device connects to Muse and send a short request to verify delivery and reply. Keep the backup private.
+
+## Firmware updates from your relay
+
+Install 0.1.4 over USB once using the instructions above. A compatible HTTPS relay can then offer a newer application while the device is idle. A relay that only implements the original job API continues to work.
+
+The device sends `X-Muse-Target` and `X-Muse-Version` with its authenticated job poll. The board targets are `muse-relay/atoms3/8m-ab-v1` and `muse-relay/atoms3-lite/8m-ab-v1`. An operator can include a `firmware` object alongside `"job": null` containing `target`, numeric three-part `version` (string), `size` in bytes, lowercase `sha256`, and a positive integer `generation`. Restrict release selection to the relay administrator. Serve the ZIP's signed `muse-relay.bin` at `GET /device/firmware/{sha256}` with device authentication and an exact Content-Length.
+
+The device downloads to the inactive slot and checks the binary hash, signature, board marker, project and version. On first boot it must reach Muse and successfully poll the relay within five minutes to confirm the image. The previous slot remains available for rollback. A confirmed version or a failed attempt is reported to `POST /device/firmware/status` with `attempt` (hash.generation), running `version`, `slot` and `status` (`verifying`, `confirmed`, or `previous_running`). After diagnosing a failed transfer, increment the generation to authorize another attempt. For USB recovery, inspect the active slot and partition table before selecting the write address. The ZIP's fixed app-only address applies to a device running from ota_0.
+
+## AtomS3 Lite status LED
+
+| LED | State |
+| --- | --- |
+| Steady red | Wi-Fi disconnected or internet unreachable |
+| Blinking amber | Internet reachable, Muse disconnected or reconnecting |
+| Steady green | Connected to Muse and idle |
+| Blinking blue | Forwarding a request or waiting for Muse to reply |
+| Steady purple | Relaying Muse's reply |
+
+The blue blink starts when the ATOM takes the request from the relay. When Wi-Fi has an IP address and either Muse is disconnected or the HTTPS transport fails, the device uses the SDK's TCP reachability check. A successful HTTPS exchange also confirms reachability.
 
 ## Tokens and connection settings
 
@@ -90,7 +150,7 @@ For automated setup, pass a non-public JSON file with `--settings-file`. Keys ar
 
 In Muse, open Settings → Devices, enable Developer mode, and use Add Device to select `MuseGadget-XXXXXX`. Choose your home Wi-Fi and briefly press the ATOM S3 front button when asked to confirm. Changing the SDK token requires pairing again. Holding the front button for five seconds resets pairing and Wi-Fi.
 
-The USB console command `>relay_status` returns only the booleans `sdk_connected`, `configured`, and `gateway_configured`. It does not return SDK tokens, Wi-Fi passwords, or relay tokens.
+The USB console command `>relay_status` returns `sdk_connected`, `configured`, `gateway_configured`, and `led_state`. On the standard AtomS3 build, `led_state` reports `off`.
 
 ## Communication contract
 

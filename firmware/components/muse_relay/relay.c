@@ -20,6 +20,14 @@
 #include "noise_control.h"
 #include "sdkconfig.h"
 #include "chat_filter.h"
+#include "relay_ota.h"
+#include "esp_app_desc.h"
+#include "esp_ota_ops.h"
+#include "status_led.h"
+#if CONFIG_MUSE_RELAY_ATOMS3_LITE_LED
+#include "link_probe.h"
+#include "wifi_mgr.h"
+#endif
 
 #define CHUNK 1024
 #define ACK_CAP 4096
@@ -28,6 +36,7 @@
 #define MAX_REQUEST_BYTES (2 * 1024 * 1024)
 #define TURN_MS 120000
 #define HEARTBEAT_MS 20000
+#define INTERNET_PROBE_INTERVAL_MS 10000
 
 static const char *TAG = "muse_relay";
 typedef struct {
@@ -48,6 +57,7 @@ static char s_url[256], s_token[128];
 static char s_gateway_token[GATEWAY_TOKEN_MAX + 1];
 static esp_http_client_handle_t s_http;
 static http_reply_t s_http_reply;
+static bool s_http_transport_failed;
 static uint32_t s_boot_id, s_event_seq;
 static bool s_terminal;
 static bool s_subscription_fresh;
@@ -103,10 +113,11 @@ bool muse_relay_console_command(const char *line)
             puts("@relay error invalid_gateway_token"); return true;
         }
     } else if (!strcmp(line, "relay_status")) {
-        printf("@relay {\"sdk_connected\":%s,\"configured\":%s,\"gateway_configured\":%s}\n",
+        printf("@relay {\"sdk_connected\":%s,\"configured\":%s,\"gateway_configured\":%s,\"led_state\":\"%s\"}\n",
             noise_ctrl_is_connected() ? "true" : "false",
             s_url[0] && s_token[0] ? "true" : "false",
-            s_gateway_token[0] ? "true" : "false");
+            s_gateway_token[0] ? "true" : "false",
+            relay_led_state_name());
         return true;
     } else return false;
     nvs_handle_t nvs;
@@ -167,12 +178,25 @@ static bool set_http(const char *path, esp_http_client_method_t method, const ch
         && esp_http_client_set_post_field(s_http, body, body ? strlen(body) : 0) == ESP_OK;
 }
 
+static bool prepare_ota_get(const char *path)
+{
+    return set_http(path, HTTP_METHOD_GET, NULL);
+}
+
 static int request(const char *path, esp_http_client_method_t method, const char *body)
 {
     if (!set_http(path, method, body)) return -1;
     esp_err_t err = esp_http_client_perform(s_http);
-    if (err != ESP_OK || s_http_reply.overflow) return -1;
+    s_http_transport_failed = err != ESP_OK;
+    if (s_http_transport_failed) return -1;
+    relay_led_set_internet_reachable(true);
+    if (s_http_reply.overflow) return -1;
     return esp_http_client_get_status_code(s_http);
+}
+
+static int post_ota_status(const char *json)
+{
+    return request("/device/firmware/status", HTTP_METHOD_POST, json);
 }
 
 static bool post_event(const char *job_id, const char *type, const char *field, const char *value)
@@ -329,6 +353,7 @@ static bool post_chat_row(const char *job_id, const relay_chat_event_t *row, boo
 
 static void run_job(const char *job_id, size_t expected, const char *session)
 {
+    relay_led_set_state(RELAY_LED_BUSY);
     s_terminal = false;
     s_subscription_fresh = false;
     strcpy(s_active_session, session);
@@ -428,6 +453,7 @@ download_done:
         }
         if (sub_status < 0 || sub_status >= 400) { failure = "muse_subscription_failed"; break; }
         if (have) {
+            if (strcmp(s_out_event.event, "message.user")) relay_led_set_state(RELAY_LED_RESPONDING);
             if (!post_chat_row(job_id, &s_out_event, false)
                 || (!s_terminal && s_out_event.final && strcmp(s_out_event.event, "delta.message_done")
                     && !post_chat_row(job_id, &s_out_event, true))) {
@@ -444,6 +470,7 @@ download_done:
     }
     if (!s_terminal && !failure) failure = "muse_response_timeout";
 finish:
+    relay_led_set_state(RELAY_LED_READY);
     // The SDK clears connected before delivering terminal callbacks. Allow
     // that short cross-core teardown to finish before invalidating this turn.
     if (failure && !noise_ctrl_is_connected()) vTaskDelay(pdMS_TO_TICKS(20));
@@ -457,6 +484,28 @@ finish:
     } else ESP_LOGI(TAG, "request complete");
 }
 
+static void probe_internet_if_due(void)
+{
+#if CONFIG_MUSE_RELAY_ATOMS3_LITE_LED
+    static int64_t next_probe;
+    if (!wifi_mgr_is_connected()) {
+        next_probe = 0;
+        return;
+    }
+    if (now_ms() < next_probe) return;
+    relay_led_set_internet_reachable(link_probe_internet_reachable());
+    next_probe = now_ms() + INTERNET_PROBE_INTERVAL_MS;
+#endif
+}
+
+static void wait_for_muse(void)
+{
+    while (!noise_ctrl_is_connected()) {
+        probe_internet_if_due();
+        if (!noise_ctrl_is_connected()) vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
 static void relay_task(void *unused)
 {
     (void)unused;
@@ -466,7 +515,7 @@ static void relay_task(void *unused)
         vTaskDelete(NULL); return;
     }
     // Give BLE pairing and the initial Muse handshake the RAM first.
-    while (!noise_ctrl_is_connected()) vTaskDelay(pdMS_TO_TICKS(2000));
+    wait_for_muse();
     esp_http_client_config_t config = {
         .url = s_url, .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 8000, .buffer_size = 2048, .buffer_size_tx = 2048,
@@ -476,11 +525,14 @@ static void relay_task(void *unused)
     s_http = esp_http_client_init(&config);
     if (!s_http) { ESP_LOGE(TAG, "HTTP client unavailable"); vTaskDelete(NULL); return; }
     for (;;) {
-        if (!noise_ctrl_is_connected()) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+        wait_for_muse();
+        esp_http_client_set_header(s_http, "X-Muse-Target", relay_ota_target());
+        esp_http_client_set_header(s_http, "X-Muse-Version", esp_app_get_description()->version);
         int code = request("/device/jobs", HTTP_METHOD_GET, NULL);
         if (code == 200) {
             cJSON *root = cJSON_Parse(s_http_reply.data);
             cJSON *job = cJSON_GetObjectItemCaseSensitive(root, "job");
+            if (cJSON_IsNull(job) || cJSON_IsObject(job)) relay_ota_connected();
             const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(job, "id"));
             const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(job, "session_id"));
             cJSON *bytes = cJSON_GetObjectItemCaseSensitive(job, "request_bytes");
@@ -491,8 +543,17 @@ static void relay_task(void *unused)
                 size_t length = (size_t)bytes->valuedouble;
                 cJSON_Delete(root);
                 run_job(own_id, length, own_session);
-            } else cJSON_Delete(root);
+            } else {
+                if (cJSON_IsNull(job)) {
+                    relay_ota_offer(cJSON_GetObjectItemCaseSensitive(root, "firmware"), s_http,
+                                    !strncmp(s_url, "https://", 8), prepare_ota_get);
+                }
+                cJSON_Delete(root);
+            }
+
         } else if (code == 401 || code == 403) ESP_LOGW(TAG, "relay credential rejected");
+        if (s_http_transport_failed) probe_internet_if_due();
+        if (code == 200) relay_ota_report(post_ota_status);
         vTaskDelay(pdMS_TO_TICKS(code == 200 ? 2000 : 10000));
     }
 }
@@ -503,6 +564,7 @@ void __wrap_app_run(void)
     // Native AtomS3 LCD backlight off; no unused UI/audio allocation.
     gpio_set_direction(GPIO_NUM_16, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_NUM_16, 0);
+    relay_led_start();
     s_boot_id = esp_random();
     s_lock = xSemaphoreCreateMutex();
     if (s_lock) xTaskCreate(relay_task, "muse_relay", 10240, NULL, 4, NULL);

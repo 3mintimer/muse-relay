@@ -8,11 +8,10 @@ import re
 import zipfile
 
 
-def license_files(build):
+def license_files(build, description):
     """Read notices from this build's pinned sources, excluding unlinked tools."""
     firmware = Path(__file__).resolve().parents[1]
     project = firmware.parent
-    description = json.loads((build / "project_description.json").read_text())
     components = {name: Path(path) for name, path in zip(
         description["build_components"], description["build_component_paths"]) if name and path}
     sdk = components["main"].parent.parent
@@ -71,16 +70,24 @@ def main():
                         default=Path(__file__).resolve().parents[1] / "build-atoms3")
     args = parser.parse_args()
     build = args.build_dir.resolve()
-    config = (build / "sdkconfig").read_text()
-    for line in config.splitlines():
+    config = (build / "sdkconfig").read_text().splitlines()
+    for line in config:
         if line.startswith("CONFIG_GADGET_SDK_TOKEN=") and line != 'CONFIG_GADGET_SDK_TOKEN=""':
             raise SystemExit("Refusing to package a build with an embedded SDK token")
         if line in {"CONFIG_SECURE_BOOT=y", "CONFIG_SECURE_FLASH_ENC_ENABLED=y",
                     "CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH=y"}:
             raise SystemExit("Refusing to package a hardware-locking build")
     flash = json.loads((build / "flasher_args.json").read_text())
-    notices = {name: path.read_bytes() for name, path in license_files(build).items()}
-    out = build / "muse-relay-atoms3-0.1.0.zip"
+    app = flash["app"]
+    if flash["flash_files"].get(app["offset"]) != app["file"]:
+        raise SystemExit("Application offset does not match the full flash layout")
+    description = json.loads((build / "project_description.json").read_text())
+    version = description["project_version"]
+    lite = "CONFIG_MUSE_RELAY_ATOMS3_LITE_LED=y" in config
+    board = "atoms3-lite" if lite else "atoms3"
+    model = "AtomS3 Lite (C124)" if lite else "AtomS3 (C123)"
+    notices = {name: path.read_bytes() for name, path in license_files(build, description).items()}
+    out = build / f"muse-relay-{board}-{version}.zip"
     lines = []
     hashes = []
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -97,7 +104,12 @@ def main():
             "--flash-freq " + settings["flash_freq"],
             "--flash-size " + settings["flash_size"],
         ]
-        archive.writestr("flash_args", "\n".join(switches + lines) + "\n")
+        app_line = app["offset"] + " " + Path(app["file"]).name
+        for name, args in (("flash_args", switches + lines),
+                           ("flash_app_args", [" ".join(switches), app_line])):
+            data = ("\n".join(args) + "\n").encode()
+            archive.writestr(name, data)
+            hashes.append(hashlib.sha256(data).hexdigest() + "  " + name)
         for name, data in notices.items():
             archive.writestr(name, data)
             hashes.append(hashlib.sha256(data).hexdigest() + "  " + name)
@@ -106,7 +118,8 @@ def main():
             "Original Muse Relay code is MIT licensed; see muse-relay.txt.\n"
             "Muse Gadget SDK c3d58c66a02bfea44847e0345714507166656bed is Apache-2.0.\n"
             "Muse Relay adds a serial hook in sdk_token_console.c, a compact headless buffer profile\n"
-            "in noise_control.cpp, and a relay worker.\n"
+            "in noise_control.cpp, and a relay worker. link_probe.c exposes the SDK's existing\n"
+            "internet reachability check to the relay status LED.\n"
             "validate_config.cmake allows the same bounded TCP windows on the headless profile.\n"
             "chat_filter.c/h adapt the SDK's incremental chat parser under Apache-2.0;\n"
             "see muse-relay-NOTICE.md for attribution and changes.\n"
@@ -117,15 +130,16 @@ def main():
             "Mbed TLS and TF-PSA-Crypto are used under their Apache-2.0 option.\n"
             "GCC runtime files carry the GCC Runtime Library Exception in COPYING.RUNTIME.\n")
         archive.writestr("README.txt",
-            "Muse Relay 0.1.0 / ATOM S3 (ESP32-S3, 8 MB flash, no PSRAM)\n"
+            f"Muse Relay {version} / {model} (ESP32-S3, 8 MB flash, no PSRAM)\n"
             "Built with Muse Gadget SDK c3d58c66a02bfea44847e0345714507166656bed and ESP-IDF 6.0.3.\n"
-            "No user credentials are embedded. Configure SDK/relay tokens over USB after flashing.\n"
+            "No user credentials are embedded. Configure SDK/relay tokens over USB on initial setup.\n"
             "This build uses the SDK's public development signing key. Secure Boot is disabled.\n"
-            "Inspect the attached chip and back up existing flash before replacing its partition table.\n"
-            "With esptool 5.x, from this extracted directory:\n"
+            "For a first installation, back up the device before writing the full layout.\n"
+            "First installation with esptool 5.x from this extracted directory:\n"
             "python -m esptool --chip esp32s3 --port PORT --baud 460800 "
             "--before no-reset --after hard-reset write-flash @flash_args\n"
-            "Guide: docs/atoms3.md in the Muse Relay source project.\n"
+            "To retain an existing Muse Relay configuration, use the app-only flash_app_args\n"
+            "after checking the boot slot and partition table. See docs/atoms3.md in the source project.\n"
             "Third-party license texts and notices are included in LICENSES/.\n"
             "Compilation does not confirm physical hardware or Muse account connectivity.\n")
     print(out)

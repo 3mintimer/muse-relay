@@ -1,4 +1,12 @@
 menu "Muse Relay"
+    config MUSE_RELAY_ATOMS3_LITE_LED
+        bool "Drive the built-in RGB LED on the AtomS3 Lite"
+        depends on IDF_TARGET_ESP32S3 && HOMEHUB_LED_BACKEND_NONE && !SPIRAM && !ESPTOOLPY_OCT_FLASH
+        default n
+        help
+            Enable the Muse Relay network and request indicator on GPIO35.
+            Select this for the AtomS3 Lite (C124) with the WS2812C-2020 pixel.
+
     config MUSE_RELAY_COMPACT_NOISE
         bool "Use bounded Noise buffers for a headless relay"
         depends on !MUSE_ENABLED && !SPIRAM && !HOMEHUB_TUNNEL
