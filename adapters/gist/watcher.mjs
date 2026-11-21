@@ -1,3 +1,4 @@
+import { chatLocation } from '../../protocol/chat-location.mjs';
 import {parseSpaceControl,parseSpaceAction,matchesSpaceAction} from '../../protocol/space-controls.mjs';
 import { validateProfile } from '../../server/core.mjs';
 import { spawn } from 'node:child_process';
@@ -193,6 +194,8 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
   };
   async function hydrate(raw, inputs) {
     const request = { id: raw.id, kind: raw.kind, text: raw.text, created_at: raw.created_at, ...(raw.space_id ? { space_id: raw.space_id } : {}) };
+    const location = chatLocation(raw);
+    if (location) request.location = location;
     if (raw.space_action) {
       const spaces = store.files[SPACES] ? safeJson(await store.file(SPACES)).spaces : [];
       const control = spaces?.find(space=>space.id===raw.space_id)?.items?.find(item=>item.id===raw.space_action.item_id)?.control;

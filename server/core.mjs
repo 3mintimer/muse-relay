@@ -1,4 +1,5 @@
 // Shared protocol and state transitions. No Node, network, or filesystem dependencies.
+import { chatLocation } from '../protocol/chat-location.mjs';
 import {parseSpaceControl,parseSpaceAction,matchesSpaceAction} from '../protocol/space-controls.mjs';
 export const byteLength = text => new TextEncoder().encode(text).byteLength;
 export const decodeBase64 = value => Uint8Array.from(atob(value), ch => ch.charCodeAt(0));
@@ -94,6 +95,8 @@ export function validateRequest(value, imagesEnabled) {
     if (value.kind !== 'space') fail(400, 'invalid_space_action');
     try { request.space_action = parseSpaceAction(value.space_action); } catch { fail(400, 'invalid_space_action'); }
   }
+  const location = chatLocation(value);
+  if (location) request.location = location;
   if (value.audio) request.audio = attachment(value.audio, 'audio');
   if (value.image) request.image = attachment(value.image, 'image');
   if (!request.text && !request.audio && !request.image && request.kind !== 'space') fail(400, 'empty_request');
@@ -117,8 +120,12 @@ export function buildMuseRequest(request) {
       : `Muse Relay: refresh the read-only export for the configured space id ${JSON.stringify(request.space_id)}. Use the space mapping the owner configured. ${refreshPublish} ${request.text}`;
   }
   const files = [request.audio, request.image].filter(Boolean);
+  if (request.location) {
+    const data = new TextEncoder().encode(JSON.stringify(request.location));
+    files.push({ mime: 'application/json', name: 'phone-location.json', data_base64: encodeBase64(data) });
+  }
   if (files.length) {
-    body.device = 'mcu-wearable';
+    if (request.audio || request.image) body.device = 'mcu-wearable';
     // Muse reads items, rather than the top-level message, when attachments exist.
     const textItems = body.message.trim() ? [{ type: 'text', text: body.message }] : [];
     body.items = [...textItems, ...files.map(file => ({ type: 'file', mime_type: file.mime, filename: file.name, data_base64: file.data_base64 }))];
@@ -224,6 +231,7 @@ export function createMachine(state, {now = Date.now} = {}) {
     job.status = status;
     job.completedAt = now();
     job.error = error || undefined;
+    delete job.request.location;
     delete job.request.audio;
     delete job.request.image;
     job.request.text = '';

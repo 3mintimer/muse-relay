@@ -31,6 +31,7 @@ export interface Settings {
   neutralPitch: number;
   returnToChatAfterSend: boolean;
   chatLayout: 'exchange' | 'single';
+  shareLocation: boolean;
   images: boolean;
   homeAvatar: 'animation' | 'still' | 'off';
   waitingAvatar: 'animation' | 'off';
@@ -76,7 +77,9 @@ export interface Snapshot {
   device?: { connected: boolean; last_seen?: number };
   capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean; live_transcription?: boolean };
 }
+export interface ChatLocation { latitude: number; longitude: number; captured_at: number; accuracy?: number }
 export interface RelayRequest {
+  location?: ChatLocation;
   id: string;
   kind: 'chat' | 'space';
   text: string;
@@ -114,6 +117,7 @@ export interface AppState {
   spaceAction?: {spaceId:string;itemId:string;status:'sending'|'sent'|'error'|'recording';message:string};
 }
 export interface AppController {
+  readonly hasChatLocation: boolean;
   state: AppState;
   subscribe(listener: () => void): () => void;
   saveSettings(settings: Settings): Promise<void>;

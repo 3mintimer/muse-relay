@@ -329,3 +329,25 @@ test('avatar selections apply independently, preserve other drafts and survive r
   await choose('Working animation'); await applied('Working animation').waitFor();
   await choose('Idle animation'); await applied('Idle animation').waitFor();
 });
+
+test('chat and settings share one persisted location switch and preserve a typed draft', async t => {
+  const { page } = await openPhone(t, { messages: [], spaces: [], capabilities:{images:true} }, {language:'en',images:true});
+  const location = page.getByRole('button', {name:'Location',exact:true});
+  await location.waitFor();
+  assert.equal(await location.getAttribute('aria-pressed'), 'false');
+  await page.getByRole('textbox', {name:'Message',exact:true}).fill('Draft to keep');
+  await location.tap();
+  await page.locator('.composer [aria-pressed="true"]').waitFor();
+  assert.equal(await page.getByRole('textbox', {name:'Message',exact:true}).inputValue(), 'Draft to keep');
+  await page.reload();
+  await page.locator('.composer [aria-pressed="true"]').waitFor();
+  await page.getByRole('button', {name:'Settings',exact:true}).tap();
+  await page.locator('[data-group="location"] > summary').tap();
+  const setting = page.getByRole('switch', {name:/Share location with relay/});
+  assert.equal(await setting.isChecked(), true);
+  await setting.uncheck();
+  await page.getByRole('button', {name:'Save settings',exact:true}).tap();
+  await page.reload();
+  await page.locator('.composer').waitFor();
+  assert.equal(await location.getAttribute('aria-pressed'), 'false');
+});

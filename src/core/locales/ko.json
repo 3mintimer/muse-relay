@@ -1,4 +1,9 @@
 {
+  "On": "켜짐",
+  "Location": "현재 위치",
+  "Share location with relay": "중계 서버와 위치 공유",
+  "Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.": "최근 5분 이내에 휴대폰에서 확인한 위치가 있으면 채팅에 첨부합니다. 위치와 관계없이 메시지는 즉시 전송됩니다.",
+  "No recent location yet. You can still send.": "최근 위치를 아직 확인하지 못했습니다. 메시지는 보낼 수 있습니다.",
   "Custom relay server": "사용자 지정 중계 서버",
   "Choose how your server connects to Muse": "서버를 Muse에 연결하는 방식을 직접 설정",
   "Base URL": "기본 URL",

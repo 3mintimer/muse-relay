@@ -1,6 +1,6 @@
 # Privacy notice
 
-Updated: 2026-11-18
+Updated: 2026-11-22
 
 Muse Relay is an EvenHub app that connects your phone and Even G2 to a relay you configure. The source includes optional relay and ATOM S3 implementations. The project does not supply a shared relay for all users. You provide the relevant accounts, servers, credentials, and Muse-side processing.
 
@@ -10,6 +10,7 @@ Muse Relay is an EvenHub app that connects your phone and Even G2 to a relay you
 | --- | --- |
 | Message text, request identifiers and timestamps | Send requests and display replies through your GitHub Gist or HTTPS relay and Muse |
 | Microphone audio | Start by touch or by raising your head if you enable Record on wake. Head angle is processed locally. With Muse transcription, send the recording through your relay. With Soniox, stream audio directly to Soniox and send the resulting text through your relay |
+| Optional phone location | When you enable sharing in Chat or Settings, the app holds a recent fix in memory and sends its coordinates, time and available accuracy with chat requests to your configured Gist or HTTPS relay for Muse. The app clears its cached fix when you turn sharing off. Copies already sent follow the retention rules below. |
 | Selected photos | Resize and send the image you select or capture, when images are enabled |
 | Replies, exported Spaces, optional display name and avatar | Read from your configured relay and display in the app; show images when enabled |
 | Space controls | Send the selected action and value; a microphone control uses the chosen voice path |
@@ -35,7 +36,7 @@ The reference relay retains up to 100 messages and attachments that remain refer
 
 The setup guide opens in a browser. Its links carry only the selected help section. If you choose to send feedback, the guide stores your message, category, sharing choice, receipt number and submission time in its own database. The form accepts submissions without an account. Sharing an anonymized summary in a public issue is opt-in. The guide removes submissions older than 90 days when it next processes feedback or the maintainer runs cleanup. Keep your receipt for removal requests. [Feedback handling](docs/feedback.md)
 
-The app requests network access, the selected G2 or phone microphone, and photo/camera access for explicit image operations. It does not request location, contacts or an advertising identifier. The exact permissions are in [app.json](app.json).
+The app requests network access, the selected G2 or phone microphone, and photo/camera access for explicit image operations. The location permission supports optional sharing with chat. The exact permissions are in [app.json](app.json).
 
 The app contains no advertising or analytics reporting code and no automatic report upload to the app developer. Operational logs from your relay, SDK, device console or hosting provider are separate. Even and the other services you use may process data under their own terms. Do not include credentials, private messages or raw device logs in public reports.
 

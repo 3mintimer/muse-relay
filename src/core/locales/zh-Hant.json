@@ -1,4 +1,9 @@
 {
+  "On": "開啟",
+  "Location": "目前位置",
+  "Share location with relay": "與中繼伺服器分享位置",
+  "Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.": "若手機在最近五分鐘內取得位置，傳送聊天訊息時就會附上。訊息一律會立即送出。",
+  "No recent location yet. You can still send.": "尚未取得最近的位置。你仍可傳送訊息。",
   "Custom relay server": "自訂中繼伺服器",
   "Choose how your server connects to Muse": "自行設定伺服器與 Muse 的連線方式",
   "Base URL": "基底 URL",

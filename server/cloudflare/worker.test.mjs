@@ -5,7 +5,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createWorker } from './worker.mjs';
 import { D1StateStore } from './storage.mjs';
 import { linkLiveVoice, LIVE_VOICE_PROTOCOL } from './live-voice.mjs';
-import { createMachine, fingerprint, validateRequest } from '../core.mjs';
+import { buildMuseRequest, createMachine, emptyState, fingerprint, validateRequest } from '../core.mjs';
 
 // Execute the adapter's actual SQL. Each batch is a SQLite transaction, like D1.
 class TestD1 {
@@ -369,4 +369,22 @@ test('Worker diagnostics and recovery commands use R2 without taking jobs', asyn
   const call = (path,token,body,headers={}) => worker.fetch(new Request('https://relay.example'+path,{method:body?'POST':'GET',
     headers:{...(token?{authorization:'Bearer '+token}:{}),...headers},body:body && JSON.stringify(body)}),env);
   await checkMaintenance(call,config,ms=>{clock+=ms});
+});
+
+test('chat location reaches the Muse file item without changing the message or leaking to the snapshot', async () => {
+  const location = { latitude: 12.125, longitude: -34.5, captured_at: 100, accuracy: 20 };
+  const input = { id: 'loc1', kind: 'chat', created_at: 101, text: 'Where am I?' };
+  const plain = validateRequest(input, false);
+  const request = validateRequest({ ...input, location: { ...location, private_note: 'drop' } }, false);
+  const packet = buildMuseRequest(request);
+  assert.equal(packet.message, input.text);
+  assert.deepEqual(packet.items[0], { type: 'text', text: input.text });
+  assert.equal(packet.items[1].filename, 'phone-location.json');
+  assert.deepEqual(JSON.parse(atob(packet.items[1].data_base64)), location);
+  assert.deepEqual(buildMuseRequest(plain), { message: input.text, output_modality: 'text' });
+  assert.deepEqual(validateRequest({ ...input, location: { ...location, latitude: 91 } }, false), plain);
+  assert.equal(validateRequest({ ...input, kind: 'space', space_id: 'test', location }, false).location, undefined);
+  const machine = createMachine(emptyState(), { now: () => 101000 });
+  machine.addRequest(request, await fingerprint(request));
+  assert.doesNotMatch(JSON.stringify(machine.snapshot(false)), /latitude|12\.125/);
 });

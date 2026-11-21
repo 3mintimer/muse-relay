@@ -99,6 +99,7 @@ export function museSetupPrompt(settings: Settings, relayLiveVoice = false): str
   const gist = settings.relay === 'gist';
   const soniox = settings.voice === 'soniox';
   const live = !gist && !soniox && relayLiveVoice;
+  const location = 'Chat requests may include location {latitude,longitude,captured_at,accuracy?} when sharing is enabled. Use it as optional context, keep coordinates out of displayed chat text, and always accept requests without it.';
   const language = languageName(settings.language);
   const microphone = settings.mic === 'phone' ? 'phone microphone' : 'G2 glasses microphone';
   if (settings.relay === 'custom') {
@@ -109,6 +110,7 @@ export function museSetupPrompt(settings: Settings, relayLiveVoice = false): str
       `Set up a custom relay server for my Muse Relay app. Use ${language} for replies. Choose the server-to-Muse integration appropriate to my environment.`,
       'Implement the app-facing contract at https://github.com/3mintimer/muse-relay/blob/beta/docs/protocol.md#custom-relay. Accept POST /v1/requests {id,kind,text,created_at}, deduplicate by id and return HTTP 202 with JSON. GET /v1/snapshot starts with {"messages":[]}. After processing, return a message {id,from:"Muse",type:"text",text,ts,reply_to} with Unix seconds and the original request id.',
       'Allow the origin shown in my app. The phone bearer token and the hosting access key are independently optional. Obtain configured credentials securely and keep personal URLs and keys out of replies.',
+      location,
       `${voice} ${speakerInstruction(settings)}`,
       settings.images ? 'For images, return inline image attachments or serve GET /v1/files/:name. Advertise capabilities.images only if image input is supported.' : 'Images are disabled in my app.',
       'Spaces and profile are optional fields in the snapshot. Only create them on request. Verify one new text request and matching reply first.',
@@ -141,6 +143,7 @@ ${sonioxInstruction(settings)} ${speakerInstruction(settings)}`
   return [
     `Set up or update the Muse side of my Muse Relay Even G2 app. Use ${language} for responses. Keep the selected settings: ${gist ? 'GitHub Gist' : 'Muse Gadget SDK'}; ${soniox ? 'Soniox (direct from app)' : 'transcription via relay'}; ${microphone}; images ${settings.images ? 'enabled' : 'disabled'}.`,
     transport,
+    location,
     voice,
     'Handle each request id once using durable claims and completion records. Mark it complete only after the reply is saved; do not blindly replay a request whose outcome is unknown. Use lightweight polling, not a recurring AI task. No new request means no AI run.',
     spaces,

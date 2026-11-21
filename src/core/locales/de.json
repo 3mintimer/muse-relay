@@ -1,4 +1,9 @@
 {
+  "On": "Ein",
+  "Location": "Standort",
+  "Share location with relay": "Standort mit dem Relay teilen",
+  "Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.": "Wenn verfügbar, wird der Standort deines Smartphones aus den letzten fünf Minuten mitgesendet. Nachrichten werden sofort gesendet.",
+  "No recent location yet. You can still send.": "Kein aktueller Standort verfügbar. Du kannst trotzdem senden.",
   "Custom relay server": "Eigener Relay-Server",
   "Choose how your server connects to Muse": "Lege fest, wie sich dein Server mit Muse verbindet",
   "Base URL": "Basis-URL",

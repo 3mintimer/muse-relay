@@ -13,6 +13,7 @@ import { base64, hasAudiblePcm, resizeImage, wav } from './media';
 import { RelayVoiceSession, SonioxStream } from './soniox';
 import { LOCAL_STATE_KEY, StateStorage, type SavedState } from './persistence';
 import { resolveLocale, translate } from './i18n';
+import { ChatLocationCache } from './location';
 import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
@@ -118,6 +119,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let homeClockTimer:ReturnType<typeof setTimeout>|undefined;
   let avatarJob:Promise<void>|undefined,avatarFailedKey='',avatarRetryKey='',avatarRetryAfter=0;
   const glasses=new Glasses(handleEvent,options.bridgeFactory);
+  const locationCache = new ChatLocationCache(() => emit());
+  function syncLocation(restart = false) {
+    const enabled = !disposed && state.settings.configured && state.settings.shareLocation;
+    locationCache.configure(enabled ? glasses.bridge : undefined, restart && enabled);
+  }
   const raise = new HeadRaise();
   let imuRequested = false;
   let calibration: {sample: (pitch: number) => void; cancel: () => void} | undefined;
@@ -426,6 +432,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   function saveSoon(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>fire(save()),500);}
   async function loadSettings(){
+    locationCache.configure();
     const generation=++settingsGeneration;
     replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();
     state.persistence='loading';state.settingsLoadFailed=false;clearTimeout(poll);clearTimeout(saveTimer);emit();
@@ -436,6 +443,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;
       configureRelay(state.settings);
     }
+    syncLocation();
     persistenceReady=result.writable;state.persistence=result.mode;state.settingsLoadFailed=result.failed;
     raise.reset();fire(syncImu());
     document.documentElement.dataset.evenTheme=state.settings.theme;syncProfileAvatar();syncMotions();emit();armPoll(0);
@@ -454,7 +462,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const saved=resetHistory?{settings:checked,snapshot:{messages:[],spaces:[]},readIds:[],hiddenIds:[],selectedSpaceIds:[]}: {...serializable(),settings:checked};
     try{
       const mode=await storage.save(saved,true);
+      if (resetHistory) locationCache.configure();
       state.settings=checked;
+      syncLocation();
       if(!checked.autoHideSeconds){state.displaySleeping=false;autoHiddenReplies.clear();}
       if(!checked.returnToChatAfterSend&&screen!=='message')followingChat=undefined;
       displayDeadline=0;
@@ -790,7 +800,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const priorTurn=state.settings.relay==='gist'?visible().filter(m=>m.from!=='Relay'&&!m.id.startsWith('status_')).at(-1):undefined;
     const needsReplyId=priorTurn?.from==='You';
     state.busy=true;state.error='';emit();
-    try{await relay.send(request,foregroundAbort.signal);
+    const location = request.kind === 'chat' && state.settings.shareLocation ? locationCache.current() : undefined;
+    try{await relay.send(location ? {...request, location} : request,foregroundAbort.signal);
       const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,...(request.image?{image:request.image}:{})};
       mergeSentInput(state.snapshot.messages,sent);
       localSent.push(sent);if(localSent.length>50)localSent.shift();
@@ -1054,7 +1065,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     // 4 -> menu selection -> 5 is the OS contextual overlay, not app teardown.
     if(type===4){raise.reset();calibration?.cancel();contextualOpen=true;++renderSerial;glasses.invalidateRender();syncDisplayTimers();return;}
     if(type===5){contextualOpen=false;const action=pendingMenuAction;pendingMenuAction=undefined;syncDisplayTimers(true);if(active)fire(action?action():state.displaySleeping?restoreDisplay():render());return;}
-    if(type===6||type===7){active=false;disposed=true;calibration?.cancel();fire(syncImu());replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
+    if(type===6||type===7){active=false;disposed=true;locationCache.configure();calibration?.cancel();fire(syncImu());replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
     if(contextualOpen||!active)return;
     if([0,1,2,3,9,10].includes(type))syncDisplayTimers(true);
     if(state.displaySleeping){
@@ -1109,7 +1120,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(messages[next])fire(act(()=>api.showMessage(messages[next]!.id)));
     }
   }
-  const api:AppController={state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
+  const api:AppController={state, get hasChatLocation(){return !!locationCache.current();},subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
     saveSettings:settings=>guarded(()=>persistSettings(settings)),
     reloadSettings:()=>guarded(loadSettings),
     async checkConnection(settings=state.settings){return guarded(async()=>makeRelay(validateSettings({...settings,voice:'muse'})).read());},
@@ -1189,7 +1200,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   };
   async function startGlasses(){
     if(disposed)return;
-    try{await glasses.start();state.glasses=true;fire(syncImu());emit();await render();}
+    try{await glasses.start();state.glasses=true;syncLocation();fire(syncImu());emit();await render();}
     catch{if(!state.notice)state.notice=text('グラス表示を開始できません。設定はスマートフォンで確認できます。','Unable to start the glasses display. Your settings are available on the phone.');emit();}
   }
   let initialRestoreDone=false;
@@ -1211,10 +1222,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(disposed)return;
     // The Even host keeps this WebView alive for the glasses while the phone is hidden.
     // Phone visibility is not the glasses page lifecycle (nor the contextual overlay).
-    if(nativeHost){fire(save());if(!document.hidden)fire(render());return;}
+    if(nativeHost){fire(save());if(!document.hidden){syncLocation(true);fire(render());}return;}
     if(document.hidden){active=false;contextualOpen=false;pendingMenuAction=undefined;++actionSerial;++renderSerial;glasses.invalidateRender();clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());}
     else{active=true;contextualOpen=false;foregroundAbort=new AbortController();if(feedback?.kind==='busy')feedback=undefined;fire(render());armPoll(0);}
   });
-  window.addEventListener('pagehide',()=>{active=false;disposed=true;calibration?.cancel();fire(syncImu());++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
+  window.addEventListener('pagehide',()=>{active=false;disposed=true;locationCache.configure();calibration?.cancel();fire(syncImu());++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
   return api;
 }

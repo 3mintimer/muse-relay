@@ -182,3 +182,17 @@ test('Gist watcher preserves handler result across ambiguous publish, without le
     assert.equal(calls, priorCalls);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('Gist handler receives optional chat location separately from its visible input', async t => {
+  const location = { latitude: 0, longitude: -1, captured_at: 10 };
+  const raw = { protocol: 'muse-relay/1', id: 'loc', kind: 'chat', created_at: 11, text: 'Where?', location };
+  const files = { 'muse-relay-request-loc.json': { content: JSON.stringify(raw) } };
+  const { watcher } = await memoryWatcher(t, files, async request => {
+    assert.deepEqual(request.location, location);
+    return { text: 'Test reply' };
+  });
+  await watcher.tick();
+  const root = JSON.parse(files['g2muse-relay.json'].content);
+  assert.equal(root.messages.find(m => m.from === 'You').text, raw.text);
+  assert.doesNotMatch(JSON.stringify(root), /latitude/);
+});

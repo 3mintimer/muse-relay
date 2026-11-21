@@ -17,6 +17,7 @@ const paths = {
   refresh: 'M20 10a8 8 0 0 0-14-5L3 8 M3 3v5h5 M4 14a8 8 0 0 0 14 5l3-3 M21 21v-5h-5',
   glasses: 'M2 9h8v7H2z M14 9h8v7h-8z M10 11h4 M2 9l2-4 M22 9l-2-4',
   image: 'M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01',
+  location: 'M19 10c0 5-7 12-7 12S5 15 5 10a7 7 0 1 1 14 0z M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
   camera: 'M3 7h4l2-3h6l2 3h4v14H3z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   check: 'M4 12l5 5L20 6', close: 'M6 6l12 12 M6 18 18 6',
   arrow: 'M5 12h14 M14 7l5 5-5 5', back: 'M19 12H5 M10 7l-5 5 5 5',

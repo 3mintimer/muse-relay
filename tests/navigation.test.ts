@@ -1692,3 +1692,48 @@ test('a pending read from the previous relay cannot replace or stall custom chat
   assert.deepEqual(app.controller.state.snapshot.messages.map(m => m.id), ['new-reply']);
   assert.deepEqual(app.controller.state.selectedSpaceIds, []);
 });
+
+test('hidden phone lets G2 send without a fix and attaches only fresh chat location while opted in', async t => {
+  const app = await appFixture(t, fixture(), 1_800_000_000_000);
+  const pending = deferred<null>();
+  let update!: (fix: {latitude:number; longitude:number; timestamp:number}) => void;
+  let starts = 0, stops = 0;
+  Object.assign(app.bridge, {
+    onAppLocationChanged(callback: typeof update) { update = callback; return () => {}; },
+    async startAppLocationUpdates() { starts++; return true; },
+    async stopAppLocationUpdates() { stops++; return true; },
+    getAppLocation: () => pending.promise,
+  });
+  await app.controller.saveSettings({...app.controller.state.settings, shareLocation:true});
+  await settle();
+  assert.equal(starts, 1);
+  app.document.hidden = true;
+  app.document.dispatchEvent(new Event('visibilitychange'));
+  async function sendFromGlasses() {
+    app.emit({sysEvent:{eventType:9}});
+    await settle();
+    assert.equal(app.controller.state.recording,true);
+    app.emit({audioEvent:{audioPcm:new Uint8Array(24000)}});
+    app.emit({sysEvent:{eventType:10}});
+    await settle();
+    return app.sent.at(-1)!;
+  }
+  assert.equal(Object.hasOwn(await sendFromGlasses(), 'location'), false);
+  const timestamp = Date.now();
+  update({latitude:12.125,longitude:-34.5,timestamp});
+  assert.deepEqual((await sendFromGlasses()).location, {latitude:12.125,longitude:-34.5,captured_at:timestamp/1000});
+  assert.equal(stops,0,'hiding the phone must keep native updates running');
+  assert.doesNotMatch(JSON.stringify(app.controller.state.snapshot.messages), /latitude|12\.125/);
+  await app.controller.requestSpace('test-space');
+  assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
+  t.mock.timers.setTime(timestamp + 300_000);
+  await app.controller.sendText('stale');
+  assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
+  await app.controller.saveSettings({...app.controller.state.settings,shareLocation:false});
+  update({latitude:12.125,longitude:-34.5,timestamp:Date.now()});
+  pending.resolve(null);
+  await settle();
+  assert.equal(stops,1);
+  await app.controller.sendText('off');
+  assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
+});

@@ -1,4 +1,9 @@
 {
+  "On": "Attivo",
+  "Location": "Posizione",
+  "Share location with relay": "Condividi la posizione con il relay",
+  "Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.": "Se disponibile, viene inclusa la posizione del telefono rilevata negli ultimi cinque minuti. I messaggi vengono inviati subito.",
+  "No recent location yet. You can still send.": "Nessuna posizione recente. Puoi comunque inviare il messaggio.",
   "Custom relay server": "Server relay personalizzato",
   "Choose how your server connects to Muse": "Scegli come collegare il server a Muse",
   "Base URL": "URL di base",

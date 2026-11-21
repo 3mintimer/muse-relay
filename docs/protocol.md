@@ -54,8 +54,11 @@ Timestamps use Unix seconds. For IDs shared across the relay methods, use at mos
 | `kind` | `chat` / `space` |
 | `text` | Input text; empty for audio/image-only input |
 | `created_at` | Creation time |
+| `location` | Optional for chats. Degrees in `latitude` and `longitude`, Unix seconds in `captured_at`, optional horizontal `accuracy` in metres. Omitted while sharing is off or no fix under five minutes old is available. |
 | `space_id` | Configured Space ID for `kind:space` |
 | `audio` / `image` | Gadget attachments; Gist uses separate file references below |
+
+The composer’s Location button and Settings change the same saved preference (initially off). The app reads the phone’s latest fix from memory and sends immediately. Gist handlers and custom relays can use `location` as context. Keep it separate from displayed messages and transcripts. The reference Gadget relay sends a `phone-location.json` file item alongside the original text or media. Muse may show the attachment name.
 
 Gadget attachment format:
 

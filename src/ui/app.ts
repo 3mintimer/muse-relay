@@ -574,8 +574,16 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       const imageDisabled = !s.settings.configured || !editable() || s.recording;
       for (const source of ['album', 'camera'] as const) controls.append(button(source === 'album' ? t('写真', 'Photo') : t('カメラ', 'Camera'), () => { void run(async () => { const picked = await controller.pickImage(source); if (picked) attachment = picked; }); }, { secondary: true, icon: source === 'album' ? 'image' : 'camera', className: 'small-button', disabled: imageDisabled }));
     }
+    const location = button(t('現在地', 'Location'), () => {
+      void run(() => controller.saveSettings({ ...controller.state.settings, shareLocation: !controller.state.settings.shareLocation }));
+    }, { icon: 'location', secondary: !s.settings.shareLocation, highlighted: s.settings.shareLocation, disabled: !editable() || !s.settings.configured || s.recording });
+    location.setAttribute('aria-pressed', String(s.settings.shareLocation));
+    location.title = t('現在地を中継先と共有', 'Share location with relay');
+    controls.append(location);
     const send = button(t('送信', 'Send'), () => {}, { icon: 'send', disabled: !s.settings.configured || !editable() || s.recording || (!composer.trim() && !attachment), className: 'send-button' });
     send.type = 'submit'; send.dataset.send = ''; controls.append(send); form.append(controls);
+    if (s.settings.shareLocation && !controller.hasChatLocation)
+      form.append(small(t('現在地を取得できていません。このまま送信できます。', 'No recent location yet. You can still send.')));
     if (s.settings.configured && voice?.blocked) form.append(small(voice.label), button(t('音声設定を開く', 'Open voice settings'), openVoiceSettings, { secondary: true, icon: 'settings', className: 'small-button' }));
     if (s.settings.images && !canSendImages) form.append(withHint(el('p', 'composer-capability', icon('image'), t('画像は Muse からの受信のみ', 'Images from Muse only')), t('画像を送信', 'Send images'), capabilityHelp));
     form.addEventListener('submit', event => {
@@ -952,6 +960,9 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const storage = controller.state.persistence;
     content.append(small(storage === 'native' ? t('保存先: Evenアプリ', 'Storage: Even app') : storage === 'local' ? t('保存先: この端末のバックアップ', 'Storage: device backup') : t('設定の保存先を確認できません', 'Settings storage is unavailable')));
     content.append(settingsGroup('connection', t('接続', 'Connection'), relayName(draft.relay), relayChoice(), credentials(), checkButton(), checkSummary(), promptPanel()));
+    content.append(settingsGroup('location', t('現在地', 'Location'), draft.shareLocation ? t('オン', 'On') : t('オフ', 'Off'),
+      toggle(t('現在地を中継先と共有', 'Share location with relay'), draft.shareLocation, value => { changed('shareLocation', value); render(); },
+        t('チャット送信時に、スマートフォンで5分以内に取得した位置を添えます。位置がなくてもメッセージはすぐに送ります。', 'Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.'))));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');

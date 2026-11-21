@@ -86,11 +86,12 @@ Avatars come from the user's relay. Personal images are not included in the shar
 | --- | --- |
 | `network` | Connects to the selected relay and, when used, Soniox and the temporary-key issuer |
 | `g2-microphone` / `phone-microphone` | Uses the selected microphone on touch or on head raise when Record on wake is enabled. Head motion stays on device |
+| `location` | Opt-in phone position for chat through the selected relay. The latest fix lives in memory, is usable for five minutes, and is cleared on opt-out. The destination and Gist revisions may retain previously sent locations. |
 | `album` / `camera` | Opens photo selection/capture at the user's request when images are enabled |
 | GitHub token | Reads/writes the Gist API; never attached to raw-file URLs. A classic PAT's `gist` scope is not limited to one Gist. [GitHub scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) |
 | Relay tokens | Reference relays separate phone, device, and Muse-writer credentials. Knowing the URL alone does not authorize writing |
 | Long-term Soniox key | API-key mode stores it in Even settings and the device backup and sends it only to Soniox. Server mode stores it on your server. The reference server requests a single-use temporary key that must start within 60 seconds and allows a session of at most 150 seconds |
 
-The app does not request location, contacts, or advertising IDs. See [app.json](../app.json) for requested permissions and [config.ts](../src/core/config.ts) and transport adapters for key destinations.
+See [app.json](../app.json) for requested permissions and [config.ts](../src/core/config.ts) and transport adapters for key destinations.
 
 The app sends no usage analytics. Reference servers log startup information and fixed failure classifications. The Gist watcher logs counts/errors without forwarding handler stderr verbatim. Review SDK, USB-console, reverse-proxy, and hosting logs separately. Do not paste raw logs or connection settings into public Issues.
