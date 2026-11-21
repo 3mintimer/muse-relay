@@ -51,8 +51,8 @@ Noise 接続を使い、音声・画像・操作はスマートフォンや G2 �
 
 | 機種 | ビルド | 梱包 | ZIP |
 | --- | --- | --- | --- |
-| AtomS3（C123） | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.4.zip` |
-| AtomS3 Lite（C124） | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.4.zip` |
+| AtomS3（C123） | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.7.zip` |
+| AtomS3 Lite（C124） | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.7.zip` |
 
 SDK の取得先は `.local/hardware/muse-gadget-sdk` です。別の場所を使う場合は
 `MUSE_SDK_CHECKOUT` を指定します。使用する SDK は
@@ -136,11 +136,42 @@ Wi-Fi、Muse のペアリングと SDK トークン、中継設定は `0x11000` 
 
 ## 中継サーバーからの FW 更新
 
-初回は上記の USB 手順で 0.1.4 を導入します。対応する HTTPS 中継は待機中の端末に次の版を配布できます。従来のジョブ API だけを持つ中継でも、これまでどおり会話できます。
+初回、または OTA 非対応版からの移行は上記の USB 手順で 0.1.7 を導入します。既に 0.1.4 以降の OTA 対応版なら、中継経由で更新できます。対応する HTTPS 中継は待機中の端末に次の版を配布できます。従来のジョブ API だけを持つ中継でも、これまでどおり会話できます。
 
 端末はジョブ取得時に `X-Muse-Target` と `X-Muse-Version` を送ります。対象機種は `muse-relay/atoms3/8m-ab-v1` または `muse-relay/atoms3-lite/8m-ab-v1` です。管理者が配布を指定した場合、中継は `"job": null` の応答に `firmware` を追加し、対象の `target`、3つの整数をドットで結んだ版の文字列 `version`、バイト数 `size`、小文字の `sha256`、1以上の整数 `generation` を返します。ZIP 内の署名付き `muse-relay.bin` を、同じ中継の `GET /device/firmware/{sha256}` から端末認証付きで配信し、正確な Content-Length を返してください。
 
 端末は非稼働スロットに書き込み、ハッシュ・署名・機種・プロジェクト・版を照合します。再起動後は5分以内に Muse 接続と中継ジョブ取得が成功すると新版が確定し、失敗時は旧版に戻ります。`POST /device/firmware/status` は試行識別子 `attempt`（ハッシュ.世代）、実行版 `version`、スロット `slot` と状態 `status`（検証中 `verifying`、確定 `confirmed`、旧版稼働 `previous_running`）を伝えます。転送失敗の原因を解消して同じ版を再配布するときは世代を増やします。USB 復旧では実際の起動スロットとパーティション表を必ず確認してください。ZIP のアプリ専用書き込み先は ota_0 起動時の値です。
+
+### 参考中継で 0.1.7 を配る
+
+Node.js 版と Cloudflare Workers 版は、運用者が選んだ1機種分のアプリを配信できます。各中継は1台の ATOM 用です。機種別 ZIP をリリースの `SHA256SUMS` と照合してから展開します。ZIP 内の `SHA256SUMS` の `muse-relay.bin` 行から SHA-256 を取得してください。
+
+1. `FIRMWARE_IMAGE` に展開した `muse-relay.bin` のパス、`FIRMWARE_SHA256` に上記のハッシュ、`FIRMWARE_GENERATION` に `1` を指定します。Node では起動環境、Worker では **ビルド環境** に設定します。Docker 利用時はバイナリを読み取り専用でマウントし、コンテナ内のパスと環境変数を渡します。
+2. `FIRMWARE_OFFER=false` で起動またはビルド・配備し、端末トークンで `GET /device/firmware/{sha256}` を取得してサイズとハッシュを照合します。
+3. 同じイメージで `FIRMWARE_OFFER=true` に変更して再起動または再ビルド・配備します。待機中で機種が一致する旧版端末に指示が届きます。`GET /device/firmware/status` で試行識別子、版、スロット、`confirmed` を確認します。
+
+## USB を使わない診断と復旧
+
+0.1.7 の端末は、Wi-Fi が使える間、会話のジョブ取得と独立して約60秒ごと、または状態変化時に診断を中継へ送ります。旧版の端末も通常の会話を続けられます。公開用の中継を自分で設置し、次の手順で管理画面を有効にしてください。
+
+1. この端末専用の管理者トークンを生成します。下のコマンドはローカルにトークンを保存し、設定用のハッシュを表示します。既存ファイルがある場合はハッシュの計算だけを行います。
+
+   ```sh
+   mkdir -p .local
+   (umask 077; set -C; openssl rand -hex 32 > .local/maintenance-token)
+   tr -d '[:space:]' < .local/maintenance-token | openssl dgst -sha256
+   ```
+
+2. ハッシュの64桁の16進数を Node の環境変数または Worker のランタイムシークレット `RECOVERY_ADMIN_SHA256` に設定します。管理者にはアプリ・端末・Muse と異なるトークンを使用します。
+3. 自分の HTTPS 中継の `/maintenance` を開き、ローカルに保存したトークンを入力します。管理画面では診断の受信時刻、最後の正常なジョブ取得の推定時刻、Wi-Fi・Muse の状態、直近12件の履歴を確認できます。端末は履歴を間引いて不揮発領域に保存し、再接続後に送ります。直前の未保存分は給電断で失われることがあります。
+
+| 管理画面での観測 | 対応 |
+| --- | --- |
+| 診断は届くが Muse が切断中 | 通常再接続を待つか「Muse に再接続」を選びます。Wi-Fi と診断通信が正常なら、120秒の猶予後に端末からも再接続を試みます。 |
+| ジョブ取得だけが止まる | 通信エラーと処理状態を確認します。正常取得の実績がある起動で処理が約180秒進まない場合、端末は理由を記録して再起動します。 |
+| 診断と取得時刻がともに古い | 中継の `/health`、現地の給電、Wi-Fi を確認します。端末が診断通信を再開すると、期限内の指示が届きます。 |
+
+「端末を再起動」と「Muse に再接続」の指示は5分間有効です。端末は会話・OTA 中の操作を延期し、指示 ID を保存して再送時の二重実行を防ぎます。復旧後は短い依頼を送り、対応する Muse の返信を確認してください。
 
 ## AtomS3 Lite の状態 LED
 

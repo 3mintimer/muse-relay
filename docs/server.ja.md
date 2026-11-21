@@ -194,3 +194,7 @@ PNG / JPEG / WebP、デコード後250,000バイト以下です。PUTは全体�
 `node --test tests/server.test.mjs` で、認証の分離、重複送信、ジョブの受渡し、別会話の除外、分割UTF-8、返信完了、期限切れ後の再実行防止、スペース永続化、Soniox要求形式を1つの通信テストで確認します。Muse / Sonioxへの実通信はこのテストに含めません。
 
 参照: [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk)、[Soniox temporary API keys](https://docs.soniox.com/authentication/temporary-api-keys)。
+
+## ATOM の診断と更新
+
+管理者トークンを設定すると、自分の中継の `/maintenance` で端末の状態確認・復旧指示ができます。機種別 FW の配信も設定できます。[設定と操作手順](atoms3.ja.md).

@@ -194,3 +194,7 @@ PNG / JPEG / WebP, at most 250,000 decoded bytes. PUT replaces the whole profile
 `node --test tests/server.test.mjs` checks role separation, duplicate requests, job delivery, unrelated-conversation rejection, split UTF-8, reply completion, prevention of replay after expiry, persisted Spaces, and Soniox request format in one transport integration test. It does not make live Muse or Soniox calls.
 
 References: [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk), [Soniox temporary API keys](https://docs.soniox.com/authentication/temporary-api-keys).
+
+## ATOM maintenance and updates
+
+Configure a dedicated administrator credential to view diagnostics and send recovery commands at `/maintenance` on your relay. You can also stage a board-specific firmware image. [Setup and recovery instructions](atoms3.md).

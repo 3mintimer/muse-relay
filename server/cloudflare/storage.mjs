@@ -113,3 +113,28 @@ export class R2Attachments {
     return { ok: true, deleted, scanned: result.results?.length || 0, grace_hours: 24 };
   }
 }
+
+// Keep diagnostic heartbeats independent of chat leases, blobs and deviceSeen.
+// Existing single-device deployments use these two R2 object names.
+const maintenanceKeys = {
+  report: 'diagnostics/latest.json',
+  command: 'diagnostics/command.json',
+  firmware: 'firmware/latest-status.json',
+};
+export class R2MaintenanceStore {
+  constructor(bucket) { this.bucket = bucket; }
+
+  async get(key) {
+    const object = await this.bucket.get(maintenanceKeys[key]);
+    return object
+      ? { value: JSON.parse(new TextDecoder().decode(await object.arrayBuffer())), etag: object.etag }
+      : { value: null };
+  }
+
+  async put(key, value, prior) {
+    const onlyIf = prior?.etag ? { etagMatches: prior.etag } : { etagDoesNotMatch: '*' };
+    const result = await this.bucket.put(maintenanceKeys[key], new TextEncoder().encode(JSON.stringify(value)),
+      prior ? { onlyIf } : undefined);
+    if (prior && !result) fail(409, 'command_changed');
+  }
+}

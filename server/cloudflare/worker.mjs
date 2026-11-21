@@ -3,21 +3,24 @@ import {
   validatePublishedMessage, validateProfile, spaceExportRoute, validateSpaceWrite, exportSpaces, prepareMuseRequest, buildMuseRequest, fingerprint,
   createMachine, byteLength,
 } from '../core.mjs';
-import { D1StateStore, R2Attachments } from './storage.mjs';
+import { authenticateAdmin, maintenanceHeaders, maintenancePage, maintenanceStatus, issueCommand, recordDiagnostics } from '../maintenance.mjs';
+import { offerFirmware, recordFirmwareStatus } from '../firmware.mjs';
+import { D1StateStore, R2Attachments, R2MaintenanceStore } from './storage.mjs';
 import { LIVE_VOICE_PROTOCOL, openLiveVoice } from './live-voice.mjs';
 
 const MAX_SPACE_IMAGES = 8;
 
 function configuration(env) {
   return validateConfig({
+    recoveryAdminSha256: env.RECOVERY_ADMIN_SHA256,
     relayToken: env.RELAY_TOKEN, deviceToken: env.DEVICE_TOKEN, museToken: env.MUSE_TOKEN,
     sonioxApiKey: env.SONIOX_API_KEY, publicUrl: env.PUBLIC_URL,
     allowedOrigins: (env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
     imagesEnabled: env.GADGET_IMAGES_ENABLED === 'true',
   });
 }
-async function readJson(request) {
-  if (Number(request.headers.get('content-length')) > MAX_BODY) fail(413, 'request_too_large');
+async function readJson(request, limit = MAX_BODY) {
+  if (Number(request.headers.get('content-length')) > limit) fail(413, 'request_too_large');
   if (!request.body) fail(400, 'invalid_json');
   const reader = request.body.getReader();
   const chunks = []; let length = 0;
@@ -26,7 +29,7 @@ async function readJson(request) {
       const { done, value } = await reader.read();
       if (done) break;
       length += value.length;
-      if (length > MAX_BODY) { await reader.cancel(); fail(413, 'request_too_large'); }
+      if (length > limit) { await reader.cancel(); fail(413, 'request_too_large'); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
@@ -59,7 +62,7 @@ function reportSonioxFailure(error, phase) {
 }
 
 /** Each request reconstructs state from D1; the factory only injects a clock/fetch for tests. */
-export function createWorker({ now = Date.now, fetchImpl = (...args) => globalThis.fetch(...args) } = {}) {
+export function createWorker({ now = Date.now, fetchImpl = (...args) => globalThis.fetch(...args), firmware = typeof __MUSE_FIRMWARE__ === 'undefined' ? null : __MUSE_FIRMWARE__ } = {}) {
   return {
     async fetch(request, env, context = {}) {
       const headers = {};
@@ -70,7 +73,7 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         try { config = configuration(env); } catch { fail(503, 'relay_not_configured'); }
         const origin = request.headers.get('origin');
         if (origin) {
-          if (!isOriginAllowed(origin, config.allowedOrigins)) fail(403, 'origin_not_allowed');
+          if (url.pathname === '/admin/device-maintenance' ? origin !== url.origin : !isOriginAllowed(origin, config.allowedOrigins)) fail(403, 'origin_not_allowed');
           headers['access-control-allow-origin'] = origin;
           headers.vary = 'Origin';
         }
@@ -89,12 +92,33 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
           await new D1StateStore(env.DB).reserveSonioxToken(now());
           return await openLiveVoice(fetchImpl, config.sonioxApiKey);
         }
+        if (path === '/maintenance' && request.method === 'GET') return new Response(maintenancePage(request.headers.get('accept-language')), { headers: maintenanceHeaders });
+        const maintenance = new R2MaintenanceStore(env.BUCKET);
+        if (path === '/admin/device-maintenance') {
+          await authenticateAdmin(request.headers.get('authorization'), config);
+          if (!env.BUCKET) fail(503, 'storage_not_configured');
+          if (request.method === 'GET') return response(200, await maintenanceStatus(maintenance), headers);
+          if (request.method !== 'POST') fail(405, 'method_not_allowed');
+          return response(202, await issueCommand(maintenance, await readJson(request, 1024), now()), headers);
+        }
         const device = path.startsWith('/device/');
         const spaces = spaceExportRoute(request.method, path);
         const muse = spaces || (path === '/v1/profile' && request.method === 'PUT') || (path === '/v1/messages' && request.method === 'POST') || (path === '/admin/gc' && request.method === 'POST');
         const token = device ? config.deviceToken : muse ? config.museToken : config.relayToken;
         if (!equal(request.headers.get('authorization'), `Bearer ${token}`)) fail(401, 'unauthorized');
         if (!env.DB || !env.BUCKET) fail(503, 'storage_not_configured');
+        if (path === '/device/diagnostics') {
+          if (request.method !== 'POST') fail(405, 'method_not_allowed');
+          return response(200, await recordDiagnostics(maintenance, await readJson(request, 4096), now()), headers);
+        }
+        if (firmware && request.method === 'GET' && path === '/device/firmware/' + firmware.manifest.sha256)
+          return new Response(Uint8Array.from(atob(firmware.base64), c => c.charCodeAt(0)), { headers: {
+            'content-type': 'application/octet-stream', 'content-length': String(firmware.manifest.size), 'cache-control': 'no-store' } });
+        if (path === '/device/firmware/status') {
+          if (request.method === 'GET') return response(200, (await maintenance.get('firmware')).value, headers);
+          if (request.method !== 'POST') fail(405, 'method_not_allowed');
+          return response(200, await recordFirmwareStatus(maintenance, await readJson(request, 1024), now()), headers);
+        }
         const store = new D1StateStore(env.DB);
         const blobs = new R2Attachments(env.DB, env.BUCKET, now);
         if (spaces?.kind === 'read') {
@@ -182,7 +206,8 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
           result = await mutate(machine => machine.setProfile(structuredClone(profile)));
         } else if (request.method === 'GET' && path === '/device/jobs') result = await mutate(machine => {
           const job = machine.leaseNext();
-          return { job: job ? { id: job.request.id, kind: job.request.kind, created_at: job.request.created_at, session_id: job.request.session_id, request_bytes: job.requestBytes, lease_seconds: LEASE_MS / 1000 } : null };
+          if (!job) return { job: null, ...offerFirmware(firmware, request.headers.get('x-muse-target'), request.headers.get('x-muse-version')) };
+          return { job: { id: job.request.id, kind: job.request.kind, created_at: job.request.created_at, session_id: job.request.session_id, request_bytes: job.requestBytes, lease_seconds: LEASE_MS / 1000 } };
         });
         else if (request.method === 'GET' && /^\/device\/jobs\/[A-Za-z0-9_-]+\/request$/.test(path)) {
           const value = await mutate(machine => machine.takeRequest(path.split('/')[3]));

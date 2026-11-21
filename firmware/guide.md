@@ -25,3 +25,5 @@ at a time; a timed-out request is reported and never replayed automatically.
 Firmware 0.1.4 also accepts an authenticated update offer from its configured
 HTTPS relay between requests. See the [device update contract](../docs/atoms3.md#firmware-updates-from-your-relay)
 for board targets, binary delivery, rollback and confirmation.
+
+Firmware 0.1.7 reports connection diagnostics independently of chat and can receive time-limited recovery commands. [Set up the maintenance dashboard](../docs/atoms3.md#diagnostics-and-recovery-without-usb).

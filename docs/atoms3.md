@@ -40,8 +40,8 @@ Choose the build and package commands for your board.
 
 | Board | Build | Package | ZIP |
 | --- | --- | --- | --- |
-| AtomS3 (C123) | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.4.zip` |
-| AtomS3 Lite (C124) | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.4.zip` |
+| AtomS3 (C123) | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.7.zip` |
+| AtomS3 Lite (C124) | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.7.zip` |
 
 The SDK checkout defaults to `.local/hardware/muse-gadget-sdk`. Set `MUSE_SDK_CHECKOUT` to use another location. The pinned SDK commit is `c3d58c66a02bfea44847e0345714507166656bed`. Each ZIP includes the binaries, `flash_args` for initial installation, `flash_app_args` for an app-only update, notices, and SHA-256 checksums.
 
@@ -105,11 +105,42 @@ After reboot, check the new version and run `>relay_status`. Confirm the device 
 
 ## Firmware updates from your relay
 
-Install 0.1.4 over USB once using the instructions above. A compatible HTTPS relay can then offer a newer application while the device is idle. A relay that only implements the original job API continues to work.
+For a first installation or a device without relay OTA, install 0.1.7 over USB as described above. An existing OTA-capable installation such as 0.1.4 can update over the relay. A compatible HTTPS relay can then offer a newer application while the device is idle. A relay that only implements the original job API continues to work.
 
 The device sends `X-Muse-Target` and `X-Muse-Version` with its authenticated job poll. The board targets are `muse-relay/atoms3/8m-ab-v1` and `muse-relay/atoms3-lite/8m-ab-v1`. An operator can include a `firmware` object alongside `"job": null` containing `target`, numeric three-part `version` (string), `size` in bytes, lowercase `sha256`, and a positive integer `generation`. Restrict release selection to the relay administrator. Serve the ZIP's signed `muse-relay.bin` at `GET /device/firmware/{sha256}` with device authentication and an exact Content-Length.
 
 The device downloads to the inactive slot and checks the binary hash, signature, board marker, project and version. On first boot it must reach Muse and successfully poll the relay within five minutes to confirm the image. The previous slot remains available for rollback. A confirmed version or a failed attempt is reported to `POST /device/firmware/status` with `attempt` (hash.generation), running `version`, `slot` and `status` (`verifying`, `confirmed`, or `previous_running`). After diagnosing a failed transfer, increment the generation to authorize another attempt. For USB recovery, inspect the active slot and partition table before selecting the write address. The ZIP's fixed app-only address applies to a device running from ota_0.
+
+### Offer a release from a reference relay
+
+Both Node and Cloudflare Workers can serve one operator-selected board image per relay. Each relay serves one paired device. Verify the board ZIP against the release checksums and extract it. Use the digest for `muse-relay.bin` from the ZIP's internal `SHA256SUMS`.
+
+1. Set `FIRMWARE_IMAGE` to the extracted application file, `FIRMWARE_SHA256` to that digest and `FIRMWARE_GENERATION` to `1`. Supply these at startup for Node or at **build time** for Workers. For Docker, mount the binary read-only and pass its container path and the environment variables.
+2. Start or build and deploy with `FIRMWARE_OFFER=false`. Fetch `GET /device/firmware/{sha256}` with the device token and verify the size and digest.
+3. Set `FIRMWARE_OFFER=true` for the same binary and restart or rebuild and deploy. An idle device with the matching board and an older version receives the offer. Check the attempt ID, version, slot and `confirmed` at `GET /device/firmware/status`.
+
+## Diagnostics and recovery without USB
+
+A device running 0.1.7 reports over Wi-Fi about every 60 seconds and on state changes, independently of job polling. Older firmware continues to handle chat. To enable the dashboard on your own reference relay:
+
+1. Generate a dedicated administrator token. These commands save it locally and print its configuration digest. If the file already exists, only compute the digest.
+
+   ```sh
+   mkdir -p .local
+   (umask 077; set -C; openssl rand -hex 32 > .local/maintenance-token)
+   tr -d '[:space:]' < .local/maintenance-token | openssl dgst -sha256
+   ```
+
+2. Configure the 64-character hex digest as `RECOVERY_ADMIN_SHA256` in the Node environment or the Worker's runtime secrets. Use a different token from the app, device and Muse tokens.
+3. Open `/maintenance` on your own HTTPS relay and enter the saved token. The dashboard shows the last diagnostic receipt, approximate last successful job poll, Wi-Fi and Muse state, and the last 12 events. The device periodically persists the event history and uploads it after reconnecting. A power loss can discard the most recent unsaved events.
+
+| Dashboard observation | Recovery |
+| --- | --- |
+| Diagnostics arrive while Muse is disconnected | Wait for normal reconnection or choose **Reconnect Muse**. With Wi-Fi and diagnostics healthy, the device attempts recovery after a 120-second grace period. |
+| Only the job poll stops advancing | Check transport errors and activity. After a successful poll in the current boot, a stalled polling loop can trigger a recorded restart after about 180 seconds. |
+| Both timestamps are stale | Check relay `/health`, local power and Wi-Fi. The device can receive pending commands when its diagnostic link returns. |
+
+**Restart device** and **Reconnect Muse** expire after five minutes. The device defers them during a conversation or a firmware update and remembers the command ID across restarts. After recovery, send a short request and check for its corresponding Muse reply.
 
 ## AtomS3 Lite status LED
 
