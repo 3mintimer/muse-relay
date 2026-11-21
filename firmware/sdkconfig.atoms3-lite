@@ -1,0 +1,5 @@
+# AtomS3 Lite (C124) adds a WS2812C-2020 status pixel on GPIO35.
+CONFIG_MUSE_RELAY_ATOMS3_LITE_LED=y
+# The status pixel can wait during flash writes. Reserve IRAM for the relay.
+CONFIG_RMT_ENCODER_FUNC_IN_IRAM=n
+CONFIG_RMT_TX_ISR_HANDLER_IN_IRAM=n

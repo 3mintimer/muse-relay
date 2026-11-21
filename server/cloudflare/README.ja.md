@@ -140,3 +140,7 @@ npm --prefix server/cloudflare run db:generate
 ```
 
 生成された SQL がスキーマ変更だけであることを確認し、SQL と `drizzle/meta/` を一緒に保存してください。
+
+## ATOM の診断と更新
+
+管理者トークンを設定すると、自分の中継の `/maintenance` で端末の状態確認・復旧指示ができます。機種別 FW の配信も設定できます。[設定と操作手順](../../docs/atoms3.ja.md).

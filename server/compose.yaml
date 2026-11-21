@@ -5,6 +5,7 @@ services:
       dockerfile: server/Dockerfile
     restart: unless-stopped
     environment:
+      RECOVERY_ADMIN_SHA256: ${RECOVERY_ADMIN_SHA256:-}
       HOST: 0.0.0.0
       PORT: 8787
       PUBLIC_URL: https://${RELAY_HOST:?Set RELAY_HOST to your server domain}

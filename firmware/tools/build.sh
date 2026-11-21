@@ -1,9 +1,18 @@
 #!/bin/sh
 set -eu
+if [ "$#" -gt 1 ]; then
+    echo "Usage: tools/build.sh [atoms3|atoms3-lite]" >&2
+    exit 2
+fi
+board=${1:-atoms3}
+case "$board" in
+    atoms3|atoms3-lite) ;;
+    *) echo "Usage: tools/build.sh [atoms3|atoms3-lite]" >&2; exit 2 ;;
+esac
 firmware_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 project_dir=$(dirname "$firmware_dir")
 sdk_dir=${MUSE_SDK_CHECKOUT:-"$project_dir/.local/hardware/muse-gadget-sdk"}
-build_dir=${MUSE_RELAY_BUILD_DIR:-"$firmware_dir/build-atoms3"}
+build_dir=${MUSE_RELAY_BUILD_DIR:-"$firmware_dir/build-$board"}
 python3 "$firmware_dir/tools/prepare_sdk.py" "$sdk_dir"
 if ! command -v idf.py >/dev/null 2>&1; then
     echo "Activate ESP-IDF 6.0.3 first (. /path/to/esp-idf/export.sh)." >&2
@@ -14,7 +23,9 @@ mkdir -p "$build_dir"
 # This is the SDK's committed, public development signing key. Secure Boot is
 # disabled; no per-user signing secret or eFuse operation is introduced.
 printf 'CONFIG_SECURE_BOOT_SIGNING_KEY="%s/esp32/dev_signing_key.pem"\n' "$sdk_dir" > "$build_dir/sdkconfig.paths"
-defaults="$sdk_dir/esp32/sdkconfig.defaults;$firmware_dir/sdkconfig.atoms3;$build_dir/sdkconfig.paths"
+defaults="$sdk_dir/esp32/sdkconfig.defaults;$firmware_dir/sdkconfig.atoms3"
+if [ "$board" = atoms3-lite ]; then defaults="$defaults;$firmware_dir/sdkconfig.atoms3-lite"; fi
+defaults="$defaults;$build_dir/sdkconfig.paths"
 if [ -f "$firmware_dir/sdkconfig.local" ]; then defaults="$defaults;$firmware_dir/sdkconfig.local"; fi
 # Generated sdkconfig caches old defaults. This script always regenerates it;
 # serial-provisioned settings survive on the board and are not in this file.

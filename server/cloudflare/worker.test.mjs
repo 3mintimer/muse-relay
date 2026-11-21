@@ -29,8 +29,15 @@ class TestD1 {
 }
 class TestR2 {
   objects = new Map();
-  async put(key, bytes) { this.objects.set(key, new Uint8Array(bytes)); }
-  async get(key) { const bytes = this.objects.get(key); return bytes ? { size: bytes.length, arrayBuffer: async () => bytes.slice().buffer } : null; }
+  revisions = new Map();
+  async put(key, bytes, {onlyIf} = {}) {
+    const etag = this.revisions.get(key);
+    if (onlyIf?.etagDoesNotMatch === '*' && etag || onlyIf?.etagMatches && onlyIf.etagMatches !== etag) return null;
+    this.objects.set(key, new Uint8Array(bytes));
+    this.revisions.set(key, crypto.randomUUID());
+    return {etag:this.revisions.get(key)};
+  }
+  async get(key) { const bytes = this.objects.get(key); return bytes ? { etag:this.revisions.get(key), size: bytes.length, arrayBuffer: async () => bytes.slice().buffer } : null; }
   async delete(key) { this.objects.delete(key); }
 }
 
@@ -348,4 +355,18 @@ test('Worker persists CAS leases, streams, attachments, and issues bounded Sonio
     assert.equal((await call('/admin/gc', env.MUSE_TOKEN, {})).body.deleted, 1);
     assert.equal(BUCKET.objects.size, 2);
   } finally { DB.sqlite.close(); }
+});
+
+test('Worker diagnostics and recovery commands use R2 without taking jobs', async t => {
+  const { checkMaintenance, testFirmware, adminDigest } = await import('../../tests/maintenance-contract.mjs');
+  const DB = new TestD1(), BUCKET = new TestR2();
+  t.after(() => DB.sqlite.close());
+  await applyMigrations(DB);
+  const config = { relayToken:'p'.repeat(40), deviceToken:'d'.repeat(40), museToken:'m'.repeat(40) };
+  const env = {DB,BUCKET,RELAY_TOKEN:config.relayToken,DEVICE_TOKEN:config.deviceToken,MUSE_TOKEN:config.museToken,RECOVERY_ADMIN_SHA256:adminDigest};
+  let clock = Date.now();
+  const worker = createWorker({firmware:testFirmware,now:()=>clock});
+  const call = (path,token,body,headers={}) => worker.fetch(new Request('https://relay.example'+path,{method:body?'POST':'GET',
+    headers:{...(token?{authorization:'Bearer '+token}:{}),...headers},body:body && JSON.stringify(body)}),env);
+  await checkMaintenance(call,config,ms=>{clock+=ms});
 });

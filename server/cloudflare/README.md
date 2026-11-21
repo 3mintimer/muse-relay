@@ -140,3 +140,7 @@ npm --prefix server/cloudflare run db:generate
 ```
 
 Check that generated SQL contains schema changes only, and save it together with `drizzle/meta/`.
+
+## ATOM maintenance and updates
+
+Configure a dedicated administrator credential to view diagnostics and send recovery commands at `/maintenance` on your relay. You can also stage a board-specific firmware image. [Setup and recovery instructions](../../docs/atoms3.md).

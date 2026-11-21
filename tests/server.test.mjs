@@ -167,3 +167,25 @@ test('authenticated relay keeps delivery distinct from correlated Muse completio
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Node diagnostics, recovery and firmware offers persist independently of chat', async t => {
+  const { checkMaintenance, testFirmware, adminToken, adminDigest } = await import('./maintenance-contract.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'muse-maint-'));
+  t.after(() => rm(dir, {recursive:true,force:true}));
+  let clock = Date.now(), base, server;
+  const start = async () => {
+    server = await createRelay({config:{...config,recoveryAdminSha256:adminDigest},
+      firmware:testFirmware, stateFile:join(dir,'state.json'), now:()=>clock});
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    base = 'http://127.0.0.1:' + server.address().port;
+  };
+  const stop = () => new Promise(resolve => server.close(resolve));
+  const call = (path,token,body,headers={}) => fetch(base+path,{method:body?'POST':'GET',
+    headers:{...(token?{authorization:'Bearer '+token}:{}),...headers},body:body && JSON.stringify(body)});
+  await start();
+  t.after(stop);
+  const last = await checkMaintenance(call,config,ms=>{clock+=ms});
+  await stop();
+  await start();
+  assert.equal((await (await call('/admin/device-maintenance',adminToken)).json()).command.id,last);
+});

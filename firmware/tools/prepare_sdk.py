@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the pinned SDK's serial hook and bounded headless Noise profile."""
+"""Prepare the pinned SDK for the headless relay and its status LED."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -80,6 +80,41 @@ def main():
     elif data.count(patched) != 1 or data.count(marker) != 1:
         raise SystemExit("SDK TCP profile patch differs; refusing to guess patch placement")
     validation.write_text(data)
+    # Expose the SDK's existing public reachability check to the relay task.
+    # The LED does not launch a second network task or open another TLS session.
+    probe = checkout / "esp32/main/link_probe.c"
+    data = probe.read_text()
+    anchor = "static void probe_task(void *arg) {\n"
+    helper = (
+        "bool link_probe_internet_reachable(void) {\n"
+        "    return reached(connect_public(PUBLIC_HOSTS[0]))\n"
+        "        || reached(connect_public(PUBLIC_HOSTS[1]));\n"
+        "}\n\n"
+    )
+    if helper not in data:
+        if data.count(anchor) != 1:
+            raise SystemExit("SDK connectivity probe changed; refusing to guess patch placement")
+        probe.write_text(data.replace(anchor, helper + anchor))
+    probe_header = checkout / "esp32/main/link_probe.h"
+    data = probe_header.read_text()
+    declaration = "bool link_probe_internet_reachable(void);\n"
+    anchor = "void link_probe_on_stall(void);\n"
+    if declaration not in data:
+        if data.count(anchor) != 1 or data.count("#pragma once\n") != 1:
+            raise SystemExit("SDK connectivity header changed; refusing to guess patch placement")
+        data = data.replace("#pragma once\n", "#pragma once\n\n#include <stdbool.h>\n")
+        probe_header.write_text(data.replace(anchor, anchor + "\n" + declaration))
+    # A relay update is healthy once both Muse and the authenticated relay respond.
+    app = checkout / "esp32/main/app.c"
+    data = app.read_text()
+    gate = "if (noise_ctrl_is_connected() && muse_relay_ota_healthy())"
+    start = data.index("static void ota_verify_task(void *arg) {")
+    first = data.index("if (noise_ctrl_is_connected()", start)
+    if not data.startswith(gate, first):
+        if not data.startswith("if (noise_ctrl_is_connected())", first):
+            raise SystemExit("SDK OTA health check changed")
+        data = data[:first] + data[first:].replace("if (noise_ctrl_is_connected())", gate, 1)
+        app.write_text(data[:start] + "extern bool muse_relay_ota_healthy(void);\n" + data[start:])
     print(f"Pinned Muse SDK prepared: {SDK_COMMIT}")
 
 

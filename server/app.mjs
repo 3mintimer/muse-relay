@@ -1,3 +1,6 @@
+import { authenticateAdmin, maintenanceHeaders, maintenancePage, maintenanceStatus, issueCommand, recordDiagnostics } from './maintenance.mjs';
+import { fileMaintenanceStore } from './maintenance-store.mjs';
+import { offerFirmware, recordFirmwareStatus } from './firmware.mjs';
 import { createServer } from 'node:http';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -25,6 +28,8 @@ export async function createRelay(options) {
   const config = validateConfig(options.config);
   const now = options.now || Date.now;
   const fetchImpl = options.fetchImpl || fetch;
+  const maintenance = fileMaintenanceStore(options.stateFile);
+  const firmware = options.firmware;
   let state = emptyState();
   if (options.stateFile) {
     try { state = validateState(JSON.parse(await readFile(options.stateFile, 'utf8'))); }
@@ -42,18 +47,46 @@ export async function createRelay(options) {
   }
   const server = createServer(async (req, res) => {
     try {
+      const path = new URL(req.url, 'http://relay.local').pathname;
       const origin = req.headers.origin;
       if (origin) {
-        if (!isOriginAllowed(origin, config.allowedOrigins)) fail(403, 'origin_not_allowed');
+        const adminOrigin = config.publicUrl ? new URL(config.publicUrl).origin : 'http://' + req.headers.host;
+        if (path === '/admin/device-maintenance' ? origin !== adminOrigin : !isOriginAllowed(origin, config.allowedOrigins)) fail(403, 'origin_not_allowed');
         res.setHeader('access-control-allow-origin', origin); res.setHeader('vary', 'Origin');
       }
       if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-methods': 'GET,POST,PUT,OPTIONS', 'access-control-allow-headers': 'Authorization,Content-Type,OAI-Sites-Authorization', 'access-control-max-age': '600' }); return res.end(); }
-      const path = new URL(req.url, 'http://relay.local').pathname;
       if (req.method === 'GET' && path === '/health') return send(res, 200, { ok: true, service: 'muse-relay', version: 1 });
+      if (path === '/maintenance' && req.method === 'GET') {
+        res.writeHead(200, maintenanceHeaders);
+        return res.end(maintenancePage(req.headers['accept-language']));
+      }
+      if (path === '/admin/device-maintenance') {
+        await authenticateAdmin(req.headers.authorization, config);
+        if (req.method === 'GET') return send(res, 200, await atomic(() => maintenanceStatus(maintenance)));
+        if (req.method !== 'POST') fail(405, 'method_not_allowed');
+        const intent = await readJson(req, 1024);
+        return send(res, 202, await atomic(() => issueCommand(maintenance, intent, now())));
+      }
       const spaces = spaceExportRoute(req.method, path);
       const muse = spaces || (path === '/v1/profile' && req.method === 'PUT') || (path === '/v1/messages' && req.method === 'POST');
       const token = path.startsWith('/device/') ? config.deviceToken : muse ? config.museToken : config.relayToken;
       if (!equal(req.headers.authorization, `Bearer ${token}`)) fail(401, 'unauthorized');
+      if (path === '/device/diagnostics') {
+        if (req.method !== 'POST') fail(405, 'method_not_allowed');
+        const data = await readJson(req, 4096);
+        return send(res, 200, await atomic(() => recordDiagnostics(maintenance, data, now())));
+      }
+      if (firmware && req.method === 'GET' && path === '/device/firmware/' + firmware.manifest.sha256) {
+        const data = Buffer.from(firmware.base64, 'base64');
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': data.length, 'cache-control': 'no-store' });
+        return res.end(data);
+      }
+      if (path === '/device/firmware/status') {
+        if (req.method === 'GET') return send(res, 200, (await maintenance.get('firmware')).value);
+        if (req.method !== 'POST') fail(405, 'method_not_allowed');
+        const data = await readJson(req, 1024);
+        return send(res, 200, await atomic(() => recordFirmwareStatus(maintenance, data, now())));
+      }
       if (spaces?.kind === 'read') return send(res, 200, await atomic(() => exportSpaces(state.spaces)));
       if (req.method === 'POST' && path === '/v1/soniox-token') {
         if (!config.sonioxApiKey) fail(503, 'soniox_not_configured');
@@ -91,7 +124,9 @@ export async function createRelay(options) {
         }
         else if (req.method === 'GET' && path === '/device/jobs') {
           const job = machine.leaseNext();
-          reply = [200, { job: job ? { id: job.request.id, kind: job.request.kind, created_at: job.request.created_at, session_id: job.request.session_id, request_bytes: job.requestBytes, lease_seconds: LEASE_MS / 1000 } : null }];
+          const result = job ? { job: { id: job.request.id, kind: job.request.kind, created_at: job.request.created_at, session_id: job.request.session_id, request_bytes: job.requestBytes, lease_seconds: LEASE_MS / 1000 } }
+            : { job: null, ...offerFirmware(firmware, req.headers['x-muse-target'], req.headers['x-muse-version']) };
+          reply = [200, result];
         } else if (req.method === 'GET' && /^\/device\/jobs\/[A-Za-z0-9_-]+\/request$/.test(path)) reply = [200, buildMuseRequest(machine.takeRequest(path.split('/')[3]))];
         else if (req.method === 'POST' && path === '/device/events') reply = [200, machine.handleDeviceEvent(body)];
         else fail(404, 'not_found');

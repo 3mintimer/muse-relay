@@ -9,6 +9,7 @@ export async function loadConfig() {
   catch (error) { if (error.code !== 'ENOENT') throw new Error('Cannot read relay configuration.'); }
   return {
     ...saved,
+    recoveryAdminSha256: process.env.RECOVERY_ADMIN_SHA256 || saved.recoveryAdminSha256,
     relayToken: process.env.RELAY_TOKEN || saved.relayToken,
     deviceToken: process.env.DEVICE_TOKEN || saved.deviceToken,
     museToken: process.env.MUSE_TOKEN || saved.museToken,

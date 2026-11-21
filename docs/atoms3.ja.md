@@ -1,4 +1,4 @@
-# ATOM S3 の中継
+# AtomS3 と AtomS3 Lite の中継
 
 [English](atoms3.md) · [日本語](atoms3.ja.md)
 
@@ -6,9 +6,8 @@ Muse Relay は、全ユーザーが同じビルドを使い、接続先を設定
 アプリです。各ユーザーが自分の中継環境を用意するか、Muse にその構築を依頼します。
 公開用のアプリに、特定の利用者のサーバー・ネットワーク・資格情報は含めません。
 
-この文書は、Muse Gadget SDK を使う中継の参考実装として ATOM S3 を選んだ場合の
-手順です。ATOM S3 は全ユーザーの必須機器ではありません。Gist 方式では不要で、
-同じ通信契約を実装した別の中継環境も共通アプリから利用できます。
+Muse Gadget SDK を使う参考ファームウェアの対象は、AtomS3（C123）と AtomS3 Lite（C124）です。
+同じ通信契約を実装した中継環境も、共通アプリから利用できます。
 
 この参考構成では、家庭の Wi-Fi につないだ ATOM S3 を Muse Gadget
 としてペアリングし、ユーザーが用意した HTTPS 中継サーバーから要求を取得します。
@@ -24,14 +23,14 @@ Even G2 ⇄ Even アプリ内の Muse Relay
                  Muse
 ```
 
-ATOM S3 の標準モデルは 8 MB フラッシュ・PSRAM なしです。この実装は SDK の
-Wi-Fi、BLE ペアリング、Noise 接続を使用し、音声処理・画像表示・操作画面は
-スマートフォン/G2 側に置きます。Atomic Voice Base は不要です。ATOM S3 の画面と
-マイクは使用しません。SDK の汎用家庭内ネットワークトンネルは無効です。
+両モデルは 8 MB フラッシュ・PSRAM なしです。この実装は SDK の Wi-Fi、BLE ペアリング、
+Noise 接続を使い、音声・画像・操作はスマートフォンや G2 側で扱います。Lite 用ビルドは
+内蔵 RGB LED で状態を表示します。
+[AtomS3 の仕様](https://docs.m5stack.com/ja/core/AtomS3) · [AtomS3 Lite の仕様](https://docs.m5stack.com/ja/core/AtomS3-Lite)
 
 ## 準備
 
-- ATOM S3、データ通信可能な USB ケーブル、安定した USB 電源。
+- AtomS3 または AtomS3 Lite、データ通信可能な USB ケーブル、安定した USB 電源。
 - 2.4 GHz Wi-Fi。Muse アプリでペアリング時に設定します。
 - [Muse Gadget SDK トークン](https://gadgets.muse.ai/settings/sdk-tokens)。
   利用前に同サイトの [SDK Terms](https://gadgets.muse.ai/sdk-terms) を確認します。
@@ -42,34 +41,34 @@ Wi-Fi、BLE ペアリング、Noise 接続を使用し、音声処理・画像�
 
 ## ビルド
 
-プロジェクトのルートから実行します。
+プロジェクトのルートで ESP-IDF を有効にします。
 
 ```sh
 . /path/to/esp-idf-v6.0.3/export.sh
-firmware/tools/build.sh
 ```
+
+機種に合うコマンドでビルドと梱包を行います。
+
+| 機種 | ビルド | 梱包 | ZIP |
+| --- | --- | --- | --- |
+| AtomS3（C123） | `firmware/tools/build.sh` | `python3 firmware/tools/package.py` | `firmware/build-atoms3/muse-relay-atoms3-0.1.7.zip` |
+| AtomS3 Lite（C124） | `firmware/tools/build.sh atoms3-lite` | `python3 firmware/tools/package.py --build-dir firmware/build-atoms3-lite` | `firmware/build-atoms3-lite/muse-relay-atoms3-lite-0.1.7.zip` |
 
 SDK の取得先は `.local/hardware/muse-gadget-sdk` です。別の場所を使う場合は
 `MUSE_SDK_CHECKOUT` を指定します。使用する SDK は
 `c3d58c66a02bfea44847e0345714507166656bed` に固定しています。
-ビルド出力は `firmware/build-atoms3/` です。
-
-配布用のフラッシュ一式は `python3 firmware/tools/package.py` で作成できます。
-`firmware/build-atoms3/muse-relay-atoms3-0.1.0.zip` に各バイナリー、正しい書き込み
-オフセットを持つ `flash_args`、SHA-256 一覧が入ります。SDK トークンを埋め込んだ
-ビルドはパッケージ処理が拒否します。
+ZIP には各バイナリー、初回用の `flash_args`、アプリのみを更新する `flash_app_args`、
+ライセンスと SHA-256 一覧が入ります。
 
 ビルド時の SDK 設定には利用者のトークンを入れません。トークンと URL は USB から
 後で機器に保存します。`firmware/sdkconfig.local` は任意の開発用上書きで、Git の
 対象外です。通常は作成不要です。HTTPS 証明書の検証を無効にしないでください。
 HTTP は `CONFIG_MUSE_RELAY_ALLOW_HTTP=y` の明示的なローカル試験設定でのみ使えます。
 
-## 接続機器の確認と書き込み
+## 初回の書き込み
 
-既存ファームウェアのパーティション配置とこの構成の配置は異なる場合があります。
-アプリだけを旧オフセットへ書かず、ビルドが生成した `flash_args` を使います。
-既存ファームを復元する必要がある場合は、先に全フラッシュをローカルへ保存します。
-バックアップには資格情報が含まれる可能性があるため、公開用成果物には含めません。
+初回の導入や、異なるパーティション配置のファームウェアからの移行では `flash_args` を使います。
+書き込む前に全フラッシュをローカルへ保存します。バックアップには資格情報が含まれる可能性があります。
 
 1. ATOM S3 側面のリセットボタンを約 2 秒以上押し、ダウンロードモードにします。
    `/dev/cu.usbmodem*`（macOS）または `/dev/ttyACM*`（Linux）を確認します。
@@ -80,16 +79,113 @@ HTTP は `CONFIG_MUSE_RELAY_ALLOW_HTTP=y` の明示的なローカル試験設�
    python -m esptool --port /dev/cu.usbmodemXXXX flash-id
    ```
 
-3. 必要なバックアップ後に書き込みます。
+3. バックアップ後に、機種に合う ZIP を展開したディレクトリから書き込みます。
 
    ```sh
-   firmware/tools/flash.sh /dev/cu.usbmodemXXXX
+   python -m esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX --baud 460800 \
+       --before no-reset --after hard-reset write-flash @flash_args
    ```
 
 全フラッシュ消去は行いません。Secure Boot、フラッシュ暗号化、eFuse 書き込みは
 有効にしません。SDK の公開された開発署名鍵を使うビルドです。
 書き込み後も `waiting for download` のままなら、ボタンを押さずに USB 電源を
 入れ直します。緑 LED を点ける長押しはダウンロードモードへの操作です。
+
+## 設定を引き継ぐ更新
+
+同じパーティション配置の `muse-relay` からは、アプリだけを更新できます。USB で通常起動し、
+115200 baud の起動ログで `Project name: muse-relay` と
+`Loaded app from partition at offset 0x20000` を確認します。確認後はシリアルモニターを閉じます。
+Wi-Fi、Muse のペアリングと SDK トークン、中継設定は `0x11000` の NVS に保存されています。
+
+機種に合う ZIP を展開したディレクトリで実行します。`port` は実際の USB ポートに置き換えます。
+全フラッシュは展開先と同じ階層にある非公開のフォルダーへ保存されます。バックアップのサイズ、
+パーティション表、アプリ書き込み引数の照合に失敗すると停止します。自動切り替えが効かない場合は、側面ボタンで
+ダウンロードモードに入り、`enter_download=no-reset` に変更して実行し直します。
+[ESP32-S3 のダウンロードモード](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/advanced-topics/boot-mode-selection.html)
+
+```sh
+(
+    set -eu
+    port=/dev/cu.usbmodemXXXX
+    enter_download=usb-reset
+    flash() {
+        reset_before=$1
+        reset_after=$2
+        shift 2
+        python -m esptool --chip esp32s3 --port "$port" --baud 460800 \
+            --before "$reset_before" --after "$reset_after" "$@"
+    }
+    umask 077
+    backup=$(mktemp -d "$PWD/../muse-relay-before.XXXXXX")
+    printf 'バックアップ先 %s\n' "$backup"
+    flash "$enter_download" no-reset-stub read-flash 0x0 0x800000 "$backup/flash.bin"
+    test "$(wc -c < "$backup/flash.bin")" -eq 8388608
+    dd if="$backup/flash.bin" bs=1024 skip=64 count=3 2>/dev/null | cmp - partition-table.bin
+    test "$(cat flash_app_args)" = "$(printf '%s\n' \
+        '--flash-mode dio --flash-freq 80m --flash-size keep' '0x20000 muse-relay.bin')"
+    dd if="$backup/flash.bin" of="$backup/nvs.bin" bs=4096 skip=17 count=6
+    flash no-reset no-reset-stub write-flash @flash_app_args
+    flash no-reset no-reset-stub verify-flash 0x11000 "$backup/nvs.bin"
+    flash no-reset hard-reset flash-id
+)
+```
+
+再起動後は新しいバージョンを確認します。`>relay_status` で中継設定の読み込みと Muse 接続を確認し、
+短い依頼を送って返信を受け取ります。バックアップは手元で保管してください。
+
+## 中継サーバーからの FW 更新
+
+初回、または OTA 非対応版からの移行は上記の USB 手順で 0.1.7 を導入します。既に 0.1.4 以降の OTA 対応版なら、中継経由で更新できます。対応する HTTPS 中継は待機中の端末に次の版を配布できます。従来のジョブ API だけを持つ中継でも、これまでどおり会話できます。
+
+端末はジョブ取得時に `X-Muse-Target` と `X-Muse-Version` を送ります。対象機種は `muse-relay/atoms3/8m-ab-v1` または `muse-relay/atoms3-lite/8m-ab-v1` です。管理者が配布を指定した場合、中継は `"job": null` の応答に `firmware` を追加し、対象の `target`、3つの整数をドットで結んだ版の文字列 `version`、バイト数 `size`、小文字の `sha256`、1以上の整数 `generation` を返します。ZIP 内の署名付き `muse-relay.bin` を、同じ中継の `GET /device/firmware/{sha256}` から端末認証付きで配信し、正確な Content-Length を返してください。
+
+端末は非稼働スロットに書き込み、ハッシュ・署名・機種・プロジェクト・版を照合します。再起動後は5分以内に Muse 接続と中継ジョブ取得が成功すると新版が確定し、失敗時は旧版に戻ります。`POST /device/firmware/status` は試行識別子 `attempt`（ハッシュ.世代）、実行版 `version`、スロット `slot` と状態 `status`（検証中 `verifying`、確定 `confirmed`、旧版稼働 `previous_running`）を伝えます。転送失敗の原因を解消して同じ版を再配布するときは世代を増やします。USB 復旧では実際の起動スロットとパーティション表を必ず確認してください。ZIP のアプリ専用書き込み先は ota_0 起動時の値です。
+
+### 参考中継で 0.1.7 を配る
+
+Node.js 版と Cloudflare Workers 版は、運用者が選んだ1機種分のアプリを配信できます。各中継は1台の ATOM 用です。機種別 ZIP をリリースの `SHA256SUMS` と照合してから展開します。ZIP 内の `SHA256SUMS` の `muse-relay.bin` 行から SHA-256 を取得してください。
+
+1. `FIRMWARE_IMAGE` に展開した `muse-relay.bin` のパス、`FIRMWARE_SHA256` に上記のハッシュ、`FIRMWARE_GENERATION` に `1` を指定します。Node では起動環境、Worker では **ビルド環境** に設定します。Docker 利用時はバイナリを読み取り専用でマウントし、コンテナ内のパスと環境変数を渡します。
+2. `FIRMWARE_OFFER=false` で起動またはビルド・配備し、端末トークンで `GET /device/firmware/{sha256}` を取得してサイズとハッシュを照合します。
+3. 同じイメージで `FIRMWARE_OFFER=true` に変更して再起動または再ビルド・配備します。待機中で機種が一致する旧版端末に指示が届きます。`GET /device/firmware/status` で試行識別子、版、スロット、`confirmed` を確認します。
+
+## USB を使わない診断と復旧
+
+0.1.7 の端末は、Wi-Fi が使える間、会話のジョブ取得と独立して約60秒ごと、または状態変化時に診断を中継へ送ります。旧版の端末も通常の会話を続けられます。公開用の中継を自分で設置し、次の手順で管理画面を有効にしてください。
+
+1. この端末専用の管理者トークンを生成します。下のコマンドはローカルにトークンを保存し、設定用のハッシュを表示します。既存ファイルがある場合はハッシュの計算だけを行います。
+
+   ```sh
+   mkdir -p .local
+   (umask 077; set -C; openssl rand -hex 32 > .local/maintenance-token)
+   tr -d '[:space:]' < .local/maintenance-token | openssl dgst -sha256
+   ```
+
+2. ハッシュの64桁の16進数を Node の環境変数または Worker のランタイムシークレット `RECOVERY_ADMIN_SHA256` に設定します。管理者にはアプリ・端末・Muse と異なるトークンを使用します。
+3. 自分の HTTPS 中継の `/maintenance` を開き、ローカルに保存したトークンを入力します。管理画面では診断の受信時刻、最後の正常なジョブ取得の推定時刻、Wi-Fi・Muse の状態、直近12件の履歴を確認できます。端末は履歴を間引いて不揮発領域に保存し、再接続後に送ります。直前の未保存分は給電断で失われることがあります。
+
+| 管理画面での観測 | 対応 |
+| --- | --- |
+| 診断は届くが Muse が切断中 | 通常再接続を待つか「Muse に再接続」を選びます。Wi-Fi と診断通信が正常なら、120秒の猶予後に端末からも再接続を試みます。 |
+| ジョブ取得だけが止まる | 通信エラーと処理状態を確認します。正常取得の実績がある起動で処理が約180秒進まない場合、端末は理由を記録して再起動します。 |
+| 診断と取得時刻がともに古い | 中継の `/health`、現地の給電、Wi-Fi を確認します。端末が診断通信を再開すると、期限内の指示が届きます。 |
+
+「端末を再起動」と「Muse に再接続」の指示は5分間有効です。端末は会話・OTA 中の操作を延期し、指示 ID を保存して再送時の二重実行を防ぎます。復旧後は短い依頼を送り、対応する Muse の返信を確認してください。
+
+## AtomS3 Lite の状態 LED
+
+| LED | 状態 |
+| --- | --- |
+| 赤点灯 | Wi-Fi 未接続、またはインターネットに到達できない |
+| 橙点滅 | ネット接続あり、Muse に未接続・再接続中 |
+| 緑点灯 | Muse に接続済み・待機中 |
+| 青点滅 | 依頼の転送中、または Muse の応答待ち |
+| 紫点灯 | Muse の返信を中継中 |
+
+青は ATOM が中継から依頼を受け取ると点滅します。Wi-Fi 接続中に Muse が未接続のときや、中継との
+通信に失敗したときは、SDK の TCP 到達確認を使います。HTTPS 中継との通信が成功した場合も、
+ネットに到達できると判定します。
 
 ## トークンと接続設定
 
@@ -138,8 +234,8 @@ Muse アプリの Settings → Devices で Developer mode を有効にし、Add 
 ATOM S3 前面のボタンを短く押します。SDK トークンを変更した機器は再ペアリングが
 必要です。前面ボタンの 5 秒長押しは、ペアリングと Wi-Fi 設定の初期化です。
 
-USB コンソールの `>relay_status` は `sdk_connected`、`configured`、`gateway_configured` の真偽だけを
-返します。SDK トークン・Wi-Fi パスワード・中継トークンは返しません。
+USB コンソールの `>relay_status` は `sdk_connected`、`configured`、`gateway_configured` と
+LED の状態 `led_state` を返します。標準の AtomS3 用ビルドでは `led_state` は `off` です。
 
 ## 通信の契約
 

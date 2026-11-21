@@ -1,4 +1,4 @@
-# Muse Relay on ATOM S3
+# Muse Relay on AtomS3 and AtomS3 Lite
 
 Muse Relay is a shared Even Hub app configured with each user's own relay.
 This ATOM S3 is one optional reference implementation. Gist users do not need
@@ -15,5 +15,15 @@ Space reading is a user-configured request for a Muse-created Space adapter.
 
 Press the front button to confirm pairing. Holding it for five seconds clears
 pairing and Wi-Fi. The USB serial console reports connection/setup state.
+On the AtomS3 Lite, steady red indicates loss of network access, blinking
+amber indicates that Muse is disconnected, and green indicates a ready
+connection. Blue blinks while forwarding a request or waiting for Muse.
+Steady purple indicates that the device is relaying a reply.
 Unplug and reconnect USB power to restart. The device processes one request
 at a time; a timed-out request is reported and never replayed automatically.
+
+Firmware 0.1.4 also accepts an authenticated update offer from its configured
+HTTPS relay between requests. See the [device update contract](../docs/atoms3.md#firmware-updates-from-your-relay)
+for board targets, binary delivery, rollback and confirmation.
+
+Firmware 0.1.7 reports connection diagnostics independently of chat and can receive time-limited recovery commands. [Set up the maintenance dashboard](../docs/atoms3.md#diagnostics-and-recovery-without-usb).
