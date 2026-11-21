@@ -47,7 +47,8 @@ export async function createRelay(options) {
   }
   const server = createServer(async (req, res) => {
     try {
-      const path = new URL(req.url, 'http://relay.local').pathname;
+      const url = new URL(req.url, 'http://relay.local');
+      const path = url.pathname;
       const origin = req.headers.origin;
       if (origin) {
         const adminOrigin = config.publicUrl ? new URL(config.publicUrl).origin : 'http://' + req.headers.host;
@@ -68,7 +69,8 @@ export async function createRelay(options) {
         return send(res, 202, await atomic(() => issueCommand(maintenance, intent, now())));
       }
       const spaces = spaceExportRoute(req.method, path);
-      const muse = spaces || (path === '/v1/profile' && req.method === 'PUT') || (path === '/v1/messages' && req.method === 'POST');
+      const readLocation = req.method === 'GET' && path === '/v1/chat/location';
+      const muse = readLocation || spaces || (path === '/v1/profile' && req.method === 'PUT') || (path === '/v1/messages' && req.method === 'POST');
       const token = path.startsWith('/device/') ? config.deviceToken : muse ? config.museToken : config.relayToken;
       if (!equal(req.headers.authorization, `Bearer ${token}`)) fail(401, 'unauthorized');
       if (path === '/device/diagnostics') {
@@ -87,6 +89,7 @@ export async function createRelay(options) {
         const data = await readJson(req, 1024);
         return send(res, 200, await atomic(() => recordFirmwareStatus(maintenance, data, now())));
       }
+      if (readLocation) return send(res, 200, await atomic(() => machine.readChatLocation(url.searchParams.get('message_id'))));
       if (spaces?.kind === 'read') return send(res, 200, await atomic(() => exportSpaces(state.spaces)));
       if (req.method === 'POST' && path === '/v1/soniox-token') {
         if (!config.sonioxApiKey) fail(503, 'soniox_not_configured');

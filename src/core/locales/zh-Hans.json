@@ -1,4 +1,6 @@
 {
+  "Location update interval": "位置更新间隔",
+  "{minutes} min": "{minutes} 分钟",
   "On": "开启",
   "Location": "当前位置",
   "Share location with relay": "与中继共享位置",

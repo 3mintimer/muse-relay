@@ -58,7 +58,9 @@ Timestamps use Unix seconds. For IDs shared across the relay methods, use at mos
 | `space_id` | Configured Space ID for `kind:space` |
 | `audio` / `image` | Gadget attachments; Gist uses separate file references below |
 
-The composer’s Location button and Settings change the same saved preference (initially off). The app reads the phone’s latest fix from memory and sends immediately. Gist handlers and custom relays can use `location` as context. Keep it separate from displayed messages and transcripts. The reference Gadget relay sends a `phone-location.json` file item alongside the original text or media. Muse may show the attachment name.
+The composer’s Location button and Settings change the same saved preference (initially off). The app reads the phone’s latest fix from memory and sends immediately. Gist handlers and custom relays can use `location` as context. Keep it separate from displayed messages and transcripts. The reference Gadget relay includes the fix in the same packet's `hidden_prompt` field and appends the marker `現在地` to the visible message. It creates no location attachment.
+
+**Muse setup.** In the dedicated relay chat, when a marked turn needs location, read `GET /v1/chat/location` with the configured Muse writer credential before replying. Supply `?message_id=…` when the originating Muse message ID is available. Otherwise match the returned `text` and `created_at` to the current turn. A media-only request has empty `text`. The relay returns a fix less than five minutes old for the single in-flight request delivered to ATOM, or `{"location":null}`. Treat a missing or mismatched fix as unavailable and use this information only when the question needs it.
 
 Gadget attachment format:
 

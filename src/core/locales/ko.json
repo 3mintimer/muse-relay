@@ -1,4 +1,6 @@
 {
+  "Location update interval": "위치 갱신 간격",
+  "{minutes} min": "{minutes}분",
   "On": "켜짐",
   "Location": "현재 위치",
   "Share location with relay": "중계 서버와 위치 공유",

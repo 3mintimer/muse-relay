@@ -962,7 +962,9 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(settingsGroup('connection', t('接続', 'Connection'), relayName(draft.relay), relayChoice(), credentials(), checkButton(), checkSummary(), promptPanel()));
     content.append(settingsGroup('location', t('現在地', 'Location'), draft.shareLocation ? t('オン', 'On') : t('オフ', 'Off'),
       toggle(t('現在地を中継先と共有', 'Share location with relay'), draft.shareLocation, value => { changed('shareLocation', value); render(); },
-        t('チャット送信時に、スマートフォンで5分以内に取得した位置を添えます。位置がなくてもメッセージはすぐに送ります。', 'Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.'))));
+        t('チャット送信時に、スマートフォンで5分以内に取得した位置を添えます。位置がなくてもメッセージはすぐに送ります。', 'Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.')),
+      ...(draft.shareLocation ? [select('locationIntervalMinutes', t('位置の取得間隔', 'Location update interval'),
+        ([1, 3, 5] as const).map(minutes => [minutes, t('{minutes} 分', '{minutes} min', { minutes })]))] : [])));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');

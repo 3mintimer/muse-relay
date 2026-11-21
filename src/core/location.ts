@@ -1,14 +1,14 @@
 import { AppLocationAccuracy, type AppLocation, type EvenAppBridge } from '@evenrealities/even_hub_sdk';
-import type { ChatLocation } from './types';
+import type { ChatLocation, Settings } from './types';
 
-const intervalMs = 60_000;
-const maxAgeMs = 5 * intervalMs;
+const maxAgeMs = 5 * 60_000;
 type LocationBridge = Pick<EvenAppBridge, 'startAppLocationUpdates' | 'stopAppLocationUpdates' | 'onAppLocationChanged' | 'getAppLocation'>;
 
 // Coordinates live only in this instance. Native location work never uses the glasses command queue.
 export class ChatLocationCache {
   private bridge?: LocationBridge;
   private generation = 0;
+  private intervalMinutes?: Settings['locationIntervalMinutes'];
   private unsubscribe?: () => void;
   private timer?: ReturnType<typeof setTimeout>;
   private changes = Promise.resolve();
@@ -26,8 +26,10 @@ export class ChatLocationCache {
     }
   }
 
-  configure(bridge?: LocationBridge, restart = false) {
-    if (this.bridge === bridge && !restart) return;
+  configure(bridge?: LocationBridge, minutes: Settings['locationIntervalMinutes'] = 1, restart = false) {
+    if (this.bridge === bridge && (!bridge || this.intervalMinutes === minutes) && !restart) return;
+    const intervalMs = minutes * 60_000;
+    this.intervalMinutes = minutes;
     const previous = this.bridge;
     this.bridge = bridge;
     const generation = ++this.generation;
@@ -58,16 +60,18 @@ export class ChatLocationCache {
       await bridge.startAppLocationUpdates({ accuracy: AppLocationAccuracy.Medium, intervalMs, distanceFilter: 0 });
     }).catch(() => { /* A host may offer only one-shot fixes. */ });
     if (!bridge) return;
+    let pending = false;
     const prefetch = async () => {
       if (generation !== this.generation) return;
+      this.timer = setTimeout(prefetch, intervalMs);
+      const latest = this.current();
+      if (pending || (latest && Date.now() - latest.captured_at * 1000 < intervalMs)) return;
+      pending = true;
       try {
-        const latest = this.current();
-        if (!latest || Date.now() - latest.captured_at * 1000 >= 2 * intervalMs) {
-          accept(await bridge.getAppLocation({ accuracy: AppLocationAccuracy.Medium, timeoutMs: 5000 }));
-        }
-      } catch { /* Permission and availability are optional for chat. */ }
-      if (generation === this.generation) this.timer = setTimeout(prefetch, intervalMs);
+        accept(await bridge.getAppLocation({ accuracy: AppLocationAccuracy.Medium, timeoutMs: 5000 }));
+      } catch { /* Chat can always send without a fix. */ }
+      finally { pending = false; }
     };
-    void this.changes.then(prefetch);
+    void prefetch();
   }
 }

@@ -1,4 +1,6 @@
 {
+  "Location update interval": "Intervall für Standortaktualisierungen",
+  "{minutes} min": "{minutes} Min.",
   "On": "Ein",
   "Location": "Standort",
   "Share location with relay": "Standort mit dem Relay teilen",

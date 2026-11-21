@@ -105,6 +105,7 @@ export function validateRequest(value, imagesEnabled) {
 // Keep queued jobs on their original prompt: ATOM requires the leased byte count to match exactly.
 // This server-owned flag is assigned after hashing the client request so retries across upgrades still match.
 export function prepareMuseRequest(request) {
+  if (request.location) return { ...request, locationMarker: true };
   return request.kind === 'space' ? { ...request, spaceExportUpsert: true } : request;
 }
 export function buildMuseRequest(request) {
@@ -120,7 +121,14 @@ export function buildMuseRequest(request) {
       : `Muse Relay: refresh the read-only export for the configured space id ${JSON.stringify(request.space_id)}. Use the space mapping the owner configured. ${refreshPublish} ${request.text}`;
   }
   const files = [request.audio, request.image].filter(Boolean);
-  if (request.location) {
+  if (request.locationMarker && request.location) {
+    body.message = [body.message, '現在地'].filter(Boolean).join('\n\n');
+  }
+  if ((request.locationMarker || request.inlineLocation) && request.location) {
+    // Muse sends hidden_prompt beside message or items for context scoped to one turn.
+    body.hidden_prompt = `Phone location for this turn (WGS84, captured_at in Unix seconds, accuracy in metres): ${JSON.stringify(request.location)}. Use it if relevant. Give place names unless coordinates are requested.`;
+  } else if (request.location) {
+    // Already queued by v22: the device may already hold a lease for this exact byte count.
     const data = new TextEncoder().encode(JSON.stringify(request.location));
     files.push({ mime: 'application/json', name: 'phone-location.json', data_base64: encodeBase64(data) });
   }
@@ -343,7 +351,9 @@ export function createMachine(state, {now = Date.now} = {}) {
       const text = bounded(payload.display_text || payload.text || payload.content, 10_000);
       if (text && job.request.audio) {
         const source = state.messages.find(m => m.id === job.request.id);
-        if (source) source.text = text;
+        if (source) source.text = job.request.locationMarker
+          ? text.replace(/(?:^|\n)現在地(?=\n|$)/u, '').trim()
+          : text;
       }
       return;
     }
@@ -451,6 +461,17 @@ export function createMachine(state, {now = Date.now} = {}) {
     job.deliveredAt ||= now(); job.leaseUntil = now() + LEASE_MS;
     return job.request;
   }
+  function readChatLocation(messageId) {
+    // Only one job can be in flight. Polls and lookups never extend its lease.
+    const time = now();
+    const job = state.jobs.find(item => item.status === 'leased');
+    const request = job?.request;
+    const fix = request?.location;
+    if (!request?.locationMarker || !fix || !job.deliveredAt || job.leaseUntil <= time
+      || time - job.queuedAt > JOB_TTL_MS || fix.captured_at * 1000 > time || time - fix.captured_at * 1000 >= 300_000
+      || (messageId !== null && !job.museIds.includes(messageId))) return { location: null };
+    return { location: fix, created_at: request.created_at, text: request.text, request_id: request.id };
+  }
   function publishMessage(message) {
     const index = state.messages.findIndex(item => item.id === message.id);
     if (index >= 0) state.messages[index] = message; else state.messages.push(message);
@@ -477,5 +498,5 @@ export function createMachine(state, {now = Date.now} = {}) {
     state.sonioxCalls.push(time);
   }
   function serialize() { state.streams = Object.fromEntries([...streamBuffers].map(([id,bytes])=>[id,encodeBase64(bytes)])); state.pending=Object.fromEntries(beforeAck); return state; }
-  return {state,sweep,addRequest,handleDeviceEvent,leaseNext,takeRequest,publishMessage,setSpaces,upsertSpace,setProfile,snapshot,useSoniox,serialize};
+  return {state,sweep,addRequest,handleDeviceEvent,leaseNext,takeRequest,readChatLocation,publishMessage,setSpaces,upsertSpace,setProfile,snapshot,useSoniox,serialize};
 }

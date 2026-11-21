@@ -122,7 +122,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   const locationCache = new ChatLocationCache(() => emit());
   function syncLocation(restart = false) {
     const enabled = !disposed && state.settings.configured && state.settings.shareLocation;
-    locationCache.configure(enabled ? glasses.bridge : undefined, restart && enabled);
+    locationCache.configure(enabled ? glasses.bridge : undefined, state.settings.locationIntervalMinutes, restart && enabled);
   }
   const raise = new HeadRaise();
   let imuRequested = false;

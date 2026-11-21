@@ -7,7 +7,7 @@ export const defaults: Settings = {
   sonioxAuth: 'auto', sonioxApiKey: '', sonioxTokenUrl: '', sonioxTokenAuth: '', sonioxGatewayToken: '', voice: 'muse', mic: 'glasses', speakerFilter: 'all',
   theme: 'system', language: 'system',
   headWake: false, headWakeMic: false, headWakeAngle: 30, neutralPitch: 0,
-  pollSeconds: 15, autoHideSeconds: 0, returnToChatAfterSend: true, chatLayout: 'exchange', shareLocation: false, images: false, configured: false,
+  pollSeconds: 15, autoHideSeconds: 0, returnToChatAfterSend: true, chatLayout: 'exchange', shareLocation: false, locationIntervalMinutes: 1, images: false, configured: false,
   homeAvatar: 'animation', waitingAvatar: 'animation',
 };
 
@@ -78,6 +78,7 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
   result.pollSeconds = Math.max(5, Math.min(300, Math.round(Number(result.pollSeconds) || 15)));
   if (![0,5,10,15,20,25,30].includes(result.autoHideSeconds)) result.autoHideSeconds = 0;
   result.shareLocation = input.shareLocation === true;
+  if (![1, 3, 5].includes(result.locationIntervalMinutes)) result.locationIntervalMinutes = defaults.locationIntervalMinutes;
   result.headWake = result.headWake === true && result.autoHideSeconds > 0;
   result.headWakeMic = result.headWakeMic === true;
   if (!Number.isInteger(result.headWakeAngle) || result.headWakeAngle < 10 || result.headWakeAngle > 60) result.headWakeAngle = defaults.headWakeAngle;

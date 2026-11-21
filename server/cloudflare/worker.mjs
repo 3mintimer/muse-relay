@@ -103,7 +103,8 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         }
         const device = path.startsWith('/device/');
         const spaces = spaceExportRoute(request.method, path);
-        const muse = spaces || (path === '/v1/profile' && request.method === 'PUT') || (path === '/v1/messages' && request.method === 'POST') || (path === '/admin/gc' && request.method === 'POST');
+        const readLocation = request.method === 'GET' && path === '/v1/chat/location';
+        const muse = readLocation || spaces || (path === '/v1/profile' && request.method === 'PUT') || (path === '/v1/messages' && request.method === 'POST') || (path === '/admin/gc' && request.method === 'POST');
         const token = device ? config.deviceToken : muse ? config.museToken : config.relayToken;
         if (!equal(request.headers.get('authorization'), `Bearer ${token}`)) fail(401, 'unauthorized');
         if (!env.DB || !env.BUCKET) fail(503, 'storage_not_configured');
@@ -121,6 +122,10 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         }
         const store = new D1StateStore(env.DB);
         const blobs = new R2Attachments(env.DB, env.BUCKET, now);
+        if (readLocation) {
+          const { state } = await store.load();
+          return response(200, createMachine(state, { now }).readChatLocation(url.searchParams.get('message_id')), headers);
+        }
         if (spaces?.kind === 'read') {
           const { state } = await store.load();
           return response(200, await exportSpaces(state.spaces, image => blobs.get(image)), headers);

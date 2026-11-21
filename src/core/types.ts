@@ -32,6 +32,7 @@ export interface Settings {
   returnToChatAfterSend: boolean;
   chatLayout: 'exchange' | 'single';
   shareLocation: boolean;
+  locationIntervalMinutes: 1 | 3 | 5;
   images: boolean;
   homeAvatar: 'animation' | 'still' | 'off';
   waitingAvatar: 'animation' | 'off';

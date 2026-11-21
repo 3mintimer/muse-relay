@@ -5,7 +5,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createWorker } from './worker.mjs';
 import { D1StateStore } from './storage.mjs';
 import { linkLiveVoice, LIVE_VOICE_PROTOCOL } from './live-voice.mjs';
-import { buildMuseRequest, createMachine, emptyState, fingerprint, validateRequest } from '../core.mjs';
+import { buildMuseRequest, createMachine, emptyState, fingerprint, prepareMuseRequest, validateRequest } from '../core.mjs';
 
 // Execute the adapter's actual SQL. Each batch is a SQLite transaction, like D1.
 class TestD1 {
@@ -371,20 +371,78 @@ test('Worker diagnostics and recovery commands use R2 without taking jobs', asyn
   await checkMaintenance(call,config,ms=>{clock+=ms});
 });
 
-test('chat location reaches the Muse file item without changing the message or leaking to the snapshot', async () => {
+test('marked chats carry their fix separately from text and media; older leases retain their byte counts', async () => {
   const location = { latitude: 12.125, longitude: -34.5, captured_at: 100, accuracy: 20 };
   const input = { id: 'loc1', kind: 'chat', created_at: 101, text: 'Where am I?' };
   const plain = validateRequest(input, false);
   const request = validateRequest({ ...input, location: { ...location, private_note: 'drop' } }, false);
-  const packet = buildMuseRequest(request);
-  assert.equal(packet.message, input.text);
-  assert.deepEqual(packet.items[0], { type: 'text', text: input.text });
-  assert.equal(packet.items[1].filename, 'phone-location.json');
-  assert.deepEqual(JSON.parse(atob(packet.items[1].data_base64)), location);
+  const prepared = prepareMuseRequest(request);
+  const packet = buildMuseRequest(prepared);
+  assert.deepEqual(Object.keys(packet).sort(), ['hidden_prompt', 'message', 'output_modality']);
+  assert.equal(packet.message, input.text + '\n\n現在地');
+  assert.ok(packet.hidden_prompt.includes(JSON.stringify(location)));
+  assert.doesNotMatch(packet.hidden_prompt, /private_note/);
+  for (const [kind, mime] of [['audio', 'audio/wav'], ['image', 'image/png']]) {
+    const asset = { mime, name: 'sample', data_base64: 'AA==' };
+    const media = buildMuseRequest({ ...prepared, text: '', [kind]: asset });
+    assert.equal(media.hidden_prompt, packet.hidden_prompt);
+    assert.deepEqual(media.items, [{ type: 'text', text: '現在地' }, { type: 'file', mime_type: mime, filename: 'sample', data_base64: 'AA==' }]);
+  }
+  assert.equal(validateRequest({ ...input, hidden_prompt: 'caller text', locationMarker: true }, false).locationMarker, undefined);
   assert.deepEqual(buildMuseRequest(plain), { message: input.text, output_modality: 'text' });
   assert.deepEqual(validateRequest({ ...input, location: { ...location, latitude: 91 } }, false), plain);
   assert.equal(validateRequest({ ...input, kind: 'space', space_id: 'test', location }, false).location, undefined);
-  const machine = createMachine(emptyState(), { now: () => 101000 });
-  machine.addRequest(request, await fingerprint(request));
-  assert.doesNotMatch(JSON.stringify(machine.snapshot(false)), /latitude|12\.125/);
+  for (const queued of [request, { ...request, inlineLocation: true }, prepared]) {
+    const machine = createMachine(emptyState(), { now: () => 101000 });
+    machine.addRequest({ ...queued }, await fingerprint(request));
+    const job = machine.leaseNext();
+    const leased = buildMuseRequest(machine.takeRequest(job.request.id));
+    assert.equal(job.requestBytes, Buffer.byteLength(JSON.stringify(leased)));
+    assert.equal(leased.message, queued.locationMarker ? packet.message : input.text);
+    if (!queued.locationMarker && !queued.inlineLocation) assert.equal(leased.items.at(-1).filename, 'phone-location.json');
+    else assert.equal(leased.items, undefined);
+    assert.doesNotMatch(JSON.stringify(machine.snapshot(false)), /latitude|12\.125|現在地/);
+  }
+});
+
+test('Muse reads only a delivered, active and recent location on the authenticated route', async t => {
+  const DB = new TestD1();
+  t.after(() => DB.sqlite.close());
+  await applyMigrations(DB);
+  const env = { DB, BUCKET: new TestR2(), RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40) };
+  let now = 1_000_000;
+  const worker = createWorker({ now: () => now });
+  const call = (path, token, body) => worker.fetch(new Request('https://relay.example' + path, {
+    method: body ? 'POST' : 'GET', headers: token ? { authorization: 'Bearer ' + token } : {}, body: body && JSON.stringify(body),
+  }), env);
+  const route = '/v1/chat/location';
+  const get = async (suffix = '') => (await call(route + suffix, env.MUSE_TOKEN)).json();
+  for (const token of [undefined, env.RELAY_TOKEN, env.DEVICE_TOKEN]) assert.equal((await call(route, token)).status, 401);
+  assert.equal((await call(route, env.MUSE_TOKEN)).headers.get('cache-control'), 'no-store');
+  const location = { latitude: 12.5, longitude: -3.5, captured_at: 900, accuracy: 22 };
+  const input = { id: 'here', kind: 'chat', created_at: 999, text: 'Nearest station?', location };
+  assert.equal((await call('/v1/requests', env.RELAY_TOKEN, input)).status, 202);
+  assert.deepEqual(await get(), { location: null });
+  const { job } = await (await call('/device/jobs', env.DEVICE_TOKEN)).json();
+  assert.deepEqual(await get(), { location: null });
+  const packet = await call('/device/jobs/here/request', env.DEVICE_TOKEN);
+  assert.equal(Number(packet.headers.get('content-length')), job.request_bytes);
+  assert.equal((await packet.json()).message, 'Nearest station?\n\n現在地');
+  const event = (event_id, type, body) => call('/device/events', env.DEVICE_TOKEN, { job_id: input.id, session_id: job.session_id, event_id, type, body });
+  assert.equal((await event('ack', 'muse_ack', { session_id: job.session_id, is_thread: true, message_id: 'turn-id' })).status, 200);
+  const found = { location, request_id: input.id, text: input.text, created_at: input.created_at };
+  assert.deepEqual(await get(), found);
+  assert.deepEqual(await get('?message_id=turn-id'), found);
+  assert.deepEqual(await get('?message_id=different-turn'), { location: null });
+  now = 1_170_000;
+  assert.equal((await event('hb', 'heartbeat', {})).status, 200);
+  now = 1_200_000;
+  assert.deepEqual(await get(), { location: null });
+  now = 1_201_000;
+  assert.equal((await event('done', 'error', {})).status, 200);
+  assert.equal((await call('/v1/requests', env.RELAY_TOKEN, { ...input, id: 'off', location: undefined })).status, 202);
+  await call('/device/jobs', env.DEVICE_TOKEN);
+  await call('/device/jobs/off/request', env.DEVICE_TOKEN);
+  assert.deepEqual(await get(), { location: null });
+  assert.deepEqual(await get('?message_id=turn-id'), { location: null });
 });

@@ -9,6 +9,7 @@ import { wav } from '../src/core/media.ts';
 import { Glasses } from '../src/core/glasses.ts';
 import { decodeSavedState, LOCAL_STATE_KEY, StateStorage, type SavedState } from '../src/core/persistence.ts';
 import { resolveLocale, speechLanguage } from '../src/core/i18n.ts';
+import { ChatLocationCache } from '../src/core/location.ts';
 import { ReplyPoll } from '../src/core/reply-poll.ts';
 import {parseSpaceControl} from '../protocol/space-controls.mjs';
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from '../src/core/chat.ts';
@@ -483,4 +484,47 @@ test('HTTPS and Gist receive the same optional motion record independently of or
   }}));
   const gist=await new GistRelay({...defaults,gistId:'a'.repeat(32),githubToken:'dummy'}).read();
   assert.deepEqual(gist.motions,https.motions);assert.deepEqual(gist.spaces,https.spaces);
+});
+
+test('location follows the saved 1, 3 or 5 minute cadence, including while native startup waits', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_800_000_000_000 });
+  const cache = new ChatLocationCache();
+  const starts: number[] = [];
+  const reads: number[] = [];
+  let resume!: (value: boolean) => void;
+  const starting = new Promise<boolean>(resolve => { resume = resolve; });
+  const bridge = {
+    onAppLocationChanged: () => () => {},
+    startAppLocationUpdates: async (options?: {intervalMs?:number}) => {
+      starts.push(options?.intervalMs ?? 0);
+      return starting;
+    },
+    stopAppLocationUpdates: async () => true,
+    getAppLocation: async () => {
+      reads.push(Date.now());
+      return { latitude: 1, longitude: 2, timestamp: Date.now() };
+    },
+  };
+  for (const minutes of [1, 3, 5] as const) {
+    cache.configure(bridge, minutes);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const since = reads.length;
+    assert.equal(starts.at(-1), minutes * 60_000);
+    assert.ok(cache.current());
+    t.mock.timers.tick(minutes * 60_000 - 1);
+    assert.equal(reads.length, since);
+    t.mock.timers.tick(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(reads.length, since + 1);
+    assert.equal(cache.current()?.captured_at, Math.floor(Date.now()/1000));
+    resume(true);
+  }
+  cache.configure();
+  const stopped = reads.length;
+  t.mock.timers.tick(300_000);
+  assert.equal(reads.length, stopped);
+  assert.equal(cache.current(), undefined);
+  for (const value of [undefined, 0, 2, '3']) {
+    assert.equal(validateSettings({ ...defaults, locationIntervalMinutes: value } as Settings, false).locationIntervalMinutes, 1);
+  }
 });
