@@ -12,11 +12,12 @@ function sonioxInstruction(settings: Settings): string {
   if (sonioxAuthMode(settings) === 'api-key') return 'Authentication: I enter my personal Soniox API key in Muse Relay settings. The app connects directly to Soniox. Do not build or require a token server, ask for this key, put it in a Gist, or forward it to Muse/the relay. No Soniox server configuration is needed.';
   return `Authentication: use a temporary-key server, keeping the long-term Soniox key on that server. ${settings.sonioxTokenUrl.trim()
     ? 'Reuse the selected custom endpoint and its own separately configured credentials. Never inherit credentials from a different origin.'
-    : settings.relay === 'gadget' ? 'Use the existing relay /v1/soniox-token route and phone access credentials.'
+    : settings.relay !== 'gist' ? 'Use the existing relay /v1/soniox-token route and phone access credentials.'
     : 'Provide an authenticated HTTPS temporary-key endpoint through the secure setup flow.'} Return a snx_temp_ key for transcribe_websocket. The app sends it only to Soniox in WebSocket protocols, not in a config message.`;
 }
 
 function relayTranscription(settings: Settings): string {
+  if (settings.relay === 'custom') return 'Use the transcription configured on my server and pass the result to Muse.';
   return settings.relay === 'gist'
     ? 'Use the Muse-side Gist handler to transcribe the WAV with a Whisper-compatible model or another configured transcriber.'
     : 'Reuse the relay\'s existing audio handling. The reference Gadget relay forwards the WAV to Muse through the SDK. If a custom relay already transcribes WAV on the server, use its configured transcriber and pass the transcript to Muse.';
@@ -41,8 +42,9 @@ export function spacePrompt(settings: Settings, options: SpacePromptOptions, rel
   const selected = [...new Set(options.controls)].map(type => controls[type]);
   const transport = settings.relay === 'gist'
     ? 'GitHub Gist: write muse-relay-spaces.json as {spaces:[...]}. Read immutable muse-relay-request-<id>.json files; a voice attachment is audio_file/audio_mime/audio_name and the referenced file contains base64 WAV. The optional adapters/gist handler can return spaces in its result. Use the existing configured Gist writer, preserve other exports, and keep a single writer.'
+    : settings.relay === 'custom' ? 'Use my server’s own Muse integration to publish this space in the spaces array of GET /v1/snapshot. Preserve all other exports.'
     : 'Muse Gadget SDK via my existing HTTPS relay/home gadget: use the separate MUSE_TOKEN for GET <relay>/v1/spaces and PUT <relay>/v1/spaces/<id>. Put the single space object with the same ID as in the URL. On an older relay, only use the existing full-list write flow if you have the complete export to preserve. Reuse the configured secure credentials; the phone token cannot publish. If needed, the hosting gateway key goes only to that relay origin. SDK display.draw_* does not create a G2 space.';
-  const voice = !options.controls.includes('microphone') ? '' : settings.voice === 'soniox' || (settings.relay === 'gadget' && relayLiveVoice)
+  const voice = !options.controls.includes('microphone') ? '' : settings.voice === 'soniox' || (settings.relay !== 'gist' && relayLiveVoice)
     ? 'Microphone actions carry final Soniox text. Use it directly; do not transcribe it again.'
     : `A submitted microphone action carries one mono PCM WAV from the ${settings.mic === 'phone' ? 'phone' : 'G2'} microphone. ${relayTranscription(settings)} Use the result to update the space.`;
   return [
@@ -64,6 +66,7 @@ export function avatarPrompt(settings: Settings): string {
     'Read the existing image bytes. Use PNG, JPEG or WebP, at most 250000 decoded bytes. Export avatar:{mime,data_base64,name}; a URL or file path alone is not an image export.',
     settings.relay === 'gist'
       ? 'Using the existing configured Gist writer, write muse-relay-profile.json as {profile:{name,avatar:{mime,data_base64,name},updated_at}}. updated_at is Unix seconds. Preserve other Gist files.'
+      : settings.relay === 'custom' ? 'Use my server’s own integration to publish profile:{name,avatar,updated_at} in GET /v1/snapshot. Use Unix seconds and preserve the other snapshot fields.'
       : 'Using the existing HTTPS relay configuration, PUT <relay>/v1/profile with Authorization: Bearer MUSE_TOKEN and body {name,avatar:{mime,data_base64,name}}. Use the separate Muse writer token, not the phone token. If the host requires a gateway key, send it only to that relay origin.',
     `Image display is ${settings.images ? 'enabled' : 'disabled'} in the app. Do not change app settings or create a replacement avatar.`,
     'Obtain credentials only through the existing secure configuration. Keep tokens and personal URLs out of replies and exported profile content. Confirm only a successful export; Muse Relay displays the avatar on its G2 home screen when images are enabled.',
@@ -85,6 +88,7 @@ export function animationPrompt(settings:Settings):string {
     `Export both sheets together using this reserved asset record. Replace UNIX_SECONDS with a current Unix timestamp newer than the previous export and each BASE64_PNG_BYTES with the actual sheet's base64: ${JSON.stringify(exportShape)}.`,
     settings.relay==='gist'
       ? 'With the existing configured Gist writer, write this single JSON object to muse-relay-motions.json. Preserve all other Gist files. Keep these images separate from the text-only watcher spaces result.'
+      : settings.relay === 'custom' ? 'Use my server’s own integration to export the record in the spaces array of GET /v1/snapshot. Preserve the other spaces and profile.'
       : `Using the existing HTTPS relay, PUT the single record to /v1/spaces/${MOTION_SPACE_ID} using the separate Muse writer token (Authorization: Bearer MUSE_TOKEN). If a hosting gateway key is required send it only to that relay origin. Leave other exports intact.`,
     'Keep tokens and personal URLs out of the output. After a successful write, tell me to enable images and refresh Muse Relay. If export is unavailable, provide the two sets of 16 square image files numbered 01–16 for manual import in Settings.',
   ].join('\n\n');
@@ -97,6 +101,19 @@ export function museSetupPrompt(settings: Settings, relayLiveVoice = false): str
   const live = !gist && !soniox && relayLiveVoice;
   const language = languageName(settings.language);
   const microphone = settings.mic === 'phone' ? 'phone microphone' : 'G2 glasses microphone';
+  if (settings.relay === 'custom') {
+    const voice = soniox ? `Soniox transcribes directly from the ${microphone}. Send only final text to my server. ${sonioxInstruction(settings)}`
+      : live ? `My relay advertises capabilities.live_transcription. Implement /v1/voice/live per the protocol and send the final transcript as text from the ${microphone}.`
+      : `For voice input the app sends one mono WAV from the ${microphone}. ${relayTranscription(settings)} Return the transcript as text on the original You message if available.`;
+    return [
+      `Set up a custom relay server for my Muse Relay app. Use ${language} for replies. Choose the server-to-Muse integration appropriate to my environment.`,
+      'Implement the app-facing contract at https://github.com/3mintimer/muse-relay/blob/beta/docs/protocol.md#custom-relay. Accept POST /v1/requests {id,kind,text,created_at}, deduplicate by id and return HTTP 202 with JSON. GET /v1/snapshot starts with {"messages":[]}. After processing, return a message {id,from:"Muse",type:"text",text,ts,reply_to} with Unix seconds and the original request id.',
+      'Allow the origin shown in my app. The phone bearer token and the hosting access key are independently optional. Obtain configured credentials securely and keep personal URLs and keys out of replies.',
+      `${voice} ${speakerInstruction(settings)}`,
+      settings.images ? 'For images, return inline image attachments or serve GET /v1/files/:name. Advertise capabilities.images only if image input is supported.' : 'Images are disabled in my app.',
+      'Spaces and profile are optional fields in the snapshot. Only create them on request. Verify one new text request and matching reply first.',
+    ].join('\n\n');
+  }
   const transport = gist
     ? `Transport: my secret GitHub Gist. Obtain its ID and token through the available secure configuration flow; do not request tokens in chat.
 Read immutable muse-relay-request-<id>.json files as {protocol:"muse-relay/1",id,kind:"chat"|"space",text,created_at,space_id?}. Attachments use audio_file/audio_mime/audio_name or image_file/image_mime/image_name; the referenced Gist file contains base64 bytes, not an inline audio/image object in the request JSON.

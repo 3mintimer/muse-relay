@@ -12,6 +12,7 @@ Send a message from your phone or Even G2 and read Muse’s reply on your glasse
 | --- | --- |
 | GitHub Gist | A Gist, GitHub token, and Muse-side request/reply handler |
 | Muse Gadget SDK | An HTTPS relay reachable away from home, a supported device, SDK token, and Muse pairing |
+| Custom relay server | Your own server implementing the [app HTTPS protocol](docs/protocol.md#custom-relay) and a connection to Muse. Enter its base URL and optional token |
 | Soniox live transcription | Your own Soniox API key or a server that issues temporary keys |
 | Spaces and avatar | Ask Muse to export the existing content and image |
 
@@ -26,6 +27,8 @@ flowchart LR
   App <--> Relay[Your HTTPS relay]
   Relay <--> Gadget[Muse Gadget at home]
   Gadget <--> Muse
+  App <--> Custom[Custom relay server]
+  Custom <-->|Your integration| Muse
 ```
 
 The Gadget connects outbound from home to fetch requests. Your phone does not need a direct connection to the home device. The Gist watcher invokes a handler you provide; that handler implements the Muse connection and voice processing.

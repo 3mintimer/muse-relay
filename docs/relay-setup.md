@@ -10,14 +10,17 @@ Choose a method → ask Muse to set it up → enter and save your connection.
 |---|---|---|
 | Gist | Settings → Connection → Gist → Check connection → Save | Top status: Gist |
 | Gadget | Settings → Connection → Muse Gadget SDK → Check connection → Save | Top status: Muse Gadget |
-| Both | Chat → type a short message → Send | Muse replies to that message |
-| Both | Chat → Voice → speak → Stop and send | Muse replies to the spoken request |
-| Both | If Soniox is selected: record and send | Final input text and Muse's reply |
-| Both | Optional: open a Space, received image, or G2 home | The requested content or avatar |
-| Both | Reply → Show on glasses | The reply on physical G2 |
-| Both | Away from home: mobile data → send again | A new matching reply |
+| Custom relay server | Enter the base URL → Check connection → Save | Relay responds, then a new chat request receives its matching Muse reply |
+| All routes | Chat → type a short message → Send | Muse replies to that message |
+| All routes | Chat → Voice → speak → Stop and send | Muse replies to the spoken request |
+| All routes | If Soniox is selected: record and send | Final input text and Muse's reply |
+| All routes | Optional: open a Space, received image, or G2 home | The requested content or avatar |
+| All routes | Reply → Show on glasses | The reply on physical G2 |
+| All routes | Away from home: mobile data → send again | A new matching reply |
 
 Voice uses the mode and microphone saved in **Settings → Voice & images**. Relay-side transcription appears only if returned. **Connected / Device online** alone does not verify a Muse reply.
+
+A custom relay needs only its HTTPS base URL. Enter the phone token and hosting key if your server requires them. Allow the origin shown in the app and supply your own connection to Muse. [Minimal requests, acknowledgements and replies](protocol.md#custom-relay)
 
 <details>
 <summary>Prepare the relay and select settings</summary>
@@ -39,6 +42,7 @@ flowchart LR
 |---|---|---|
 | GitHub Gist | Your Gist, token, and Muse-side handler | Gist ID or URL, GitHub token |
 | Muse Gadget SDK | Your HTTPS relay, SDK-compatible device, SDK token, and Muse pairing | Relay URL, phone connection key |
+| Custom relay server | A server implementing the app’s HTTPS contract and your own Muse integration | Base URL, optional phone token and hosting key |
 
 The Gadget UI names ATOM S3 as the reference device. Implement the relay for your own SDK-compatible device and hosting while preserving the [app contract](protocol.md). You do not have to use the bundled server/watcher or rebuild an EHPK for each user.
 
@@ -228,7 +232,7 @@ Use your saved relay and selected features. For voice tests, first save the mode
 | Soniox · Gist / Gadget, if selected | Check Soniox in **Voice & images**, save → **Chat → Voice → Stop and send** | Captions/final input text, then Muse reply. A silent connection check is not this test |
 | Space · Gist / Gadget, if requested | **Spaces → Add → Add an exported space** → refresh/add → open an item | Exported content; declared actions produce updated content/value after acceptance |
 | Image · Gist / Gadget, if enabled | Ask Muse for an image → received reply → **Show on glasses** | Image on G2; separate from image input into a Gadget |
-| Avatar · either route, optional | **Settings → Avatar & animation → Manage artwork → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
+| Avatar · any route, optional | **Settings → Avatar & animation → Manage artwork → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
 | Mobile data · Gist / Gadget | Keep required devices/handlers running; away from home, turn phone Wi-Fi off and use mobile data → **Chat → Send** or **Voice → Stop and send** | New matching reply on phone and G2 over mobile data |
 
 **Connected / Device online** is not a Muse round trip. Reading fails → relay operator; no reply after a successful read → Muse/handler implementer; phone reply works but G2 does not → Even/G2 connection and **Show on glasses**.

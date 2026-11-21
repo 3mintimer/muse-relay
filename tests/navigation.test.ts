@@ -1675,3 +1675,20 @@ test('switching off an available animation stops its transfers and preserves the
   assert.equal(state.motions.working.frames, frames);
   assert.equal(state.settings.images, true);
 });
+
+test('a pending read from the previous relay cannot replace or stall custom chat', async t => {
+  const app = await appFixture(t);
+  const oldRead = deferred<Response>();
+  const reading = deferred<void>();
+  app.setRead(async () => { reading.resolve(); return oldRead.promise; });
+  const pending = app.controller.refresh();
+  await reading.promise;
+  const next = { messages:[{id:'new-reply', from:'Muse', type:'text' as const, text:'New relay', ts:2}], spaces:[] };
+  app.setRead(async () => response(next));
+  await app.controller.saveSettings({...app.controller.state.settings, relay:'custom', customRelayUrl:'https://relay.example.test'});
+  await until(() => app.controller.state.snapshot.messages[0]?.id === 'new-reply', 'new relay can poll while the old read is pending');
+  oldRead.resolve(response(fixture()));
+  await pending;
+  assert.deepEqual(app.controller.state.snapshot.messages.map(m => m.id), ['new-reply']);
+  assert.deepEqual(app.controller.state.selectedSpaceIds, []);
+});

@@ -12,6 +12,7 @@
 | --- | --- |
 | GitHub Gist | Gist、GitHub トークン、Muse 側の受信・返信処理 |
 | Muse Gadget SDK | 外出先から届く HTTPS 中継、対応機器、SDK トークン、Muse とのペアリング |
+| カスタム中継サーバー | [アプリのHTTPS仕様](docs/protocol.ja.md#custom-relay)に対応するサーバーとMuseへの接続処理。ベースURLは必須、トークンは任意 |
 | Soniox のリアルタイム文字起こし | 本人の Soniox API キー、または一時キーを発行するサーバー |
 | スペース・アバター | Muse に既存の内容・画像を書き出す処理を依頼 |
 
@@ -26,6 +27,8 @@ flowchart LR
   App <--> Relay[利用者の HTTPS 中継]
   Relay <--> Gadget[自宅の Muse Gadget]
   Gadget <--> Muse
+  App <--> Custom[カスタム中継サーバー]
+  Custom <-->|利用者が設定| Muse
 ```
 
 Gadget は自宅から中継へ接続して依頼を取得します。外出先のスマートフォンから自宅機器へ直接接続する必要はありません。Gist watcher は利用者のハンドラーを呼び出す参考実装で、Muse 接続や音声処理はハンドラー側に実装します。

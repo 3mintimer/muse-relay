@@ -1,4 +1,11 @@
 {
+  "Custom relay server": "自訂中繼伺服器",
+  "Choose how your server connects to Muse": "自行設定伺服器與 Muse 的連線方式",
+  "Base URL": "基底 URL",
+  "Phone access token (optional)": "手機存取權杖（選用）",
+  "Audio → custom relay → Muse": "音訊 → 自訂中繼 → Muse",
+  "View protocol": "查看通訊協定",
+  "Enter the base URL.": "請輸入基底 URL。",
   "Home": "首頁",
   "Waiting for reply": "等待回覆",
   "Still avatar": "靜態頭像",

@@ -1,6 +1,7 @@
 // Run against the built phone app in Chrome. All relay traffic stays on the test server.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createServer } from 'node:http';
 import { chromium } from 'playwright-core';
 import { preview } from 'vite';
 
@@ -19,6 +20,7 @@ async function openPhone(t, snapshot = { messages: [], spaces: [] }, settings = 
     }
   }, settings);
   await page.route('**/v1/snapshot', async route => {
+    if (new URL(route.request().url()).pathname !== '/v1/snapshot') return route.continue();
     await route.fulfill({ json: await snapshot });
   });
   const url = 'http://127.0.0.1:' + server.httpServer.address().port;
@@ -96,48 +98,116 @@ test('chat history scrolls to the oldest message and back to the composer', { ti
   assert.ok(await composer.evaluate(field => field === document.activeElement));
 });
 
-test('phone settings scroll in both directions with the keyboard open and Save survives a relay refresh', { timeout: 30_000 }, async t => {
-  // Hold the first real poll until a finger is on Save.
-  const poll = Promise.withResolvers();
-  const { page, touch } = await openPhone(t, poll.promise);
-  await page.getByRole('button', { name: 'Settings', exact: true }).tap();
-  await page.locator('[data-group="display"] > summary').tap();
-  await page.getByLabel('Theme', { exact: true }).selectOption('dark');
-  await page.locator('[data-group="connection"] > summary').tap();
-  const token = page.getByLabel('Phone access token', { exact: true });
-  await token.tap();
-  await token.fill('test');
+for (const [mode, theme] of [['gadget', 'dark'], ['custom', 'light'], ['custom', 'dark']]) {
+  test(`${mode} settings scroll with the keyboard open and Save survives a relay refresh (${theme})`, { timeout: 30_000 }, async t => {
+    // Hold the first real poll until a finger is on Save.
+    const poll = Promise.withResolvers();
+    const { page, touch } = await openPhone(t, poll.promise, { relay: mode, customRelayUrl: 'http://127.0.0.1', customRelayToken: 'test' });
+    await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+    await page.locator('[data-group="display"] > summary').tap();
+    await page.getByLabel('Theme', { exact: true }).selectOption(theme);
+    await page.locator('[data-group="connection"] > summary').tap();
+    const token = page.getByLabel(mode === 'custom' ? 'Phone access token (optional)' : 'Phone access token', { exact: true });
+    await token.tap();
+    await token.fill('test');
 
-  // Model a WebView where only the visual viewport shrinks for the keyboard
-  // and swiping the document itself cannot reveal content below the viewport.
-  assert.ok(await token.evaluate(el => document.activeElement === el && el.closest('details').open),
-    'the keyboard scenario starts with the connection field open and focused');
-  await page.evaluate(() => {
-    for (const element of [document.documentElement, document.body]) {
-      element.style.height = '100%';
-      element.style.overflow = 'hidden';
-    }
-    Object.defineProperty(visualViewport, 'height', { configurable: true, value: 320 });
-    visualViewport.dispatchEvent(new Event('resize'));
+    // Model a WebView where only the visual viewport shrinks for the keyboard
+    // and swiping the document itself cannot reveal content below the viewport.
+    assert.ok(await token.evaluate(el => document.activeElement === el && el.closest('details').open),
+      'the keyboard scenario starts with the connection field open and focused');
+    await page.evaluate(() => {
+      for (const element of [document.documentElement, document.body]) {
+        element.style.height = '100%';
+        element.style.overflow = 'hidden';
+      }
+      Object.defineProperty(visualViewport, 'height', { configurable: true, value: 320 });
+      visualViewport.dispatchEvent(new Event('resize'));
+    });
+    const last = page.getByRole('button', { name: 'Remove saved connection details' });
+    await swipeToControl(touch, last);
+    assert.ok(await last.isEnabled());
+    await swipeToControl(touch, token);
+
+    const save = page.getByRole('button', { name: 'Save settings', exact: true });
+    const { x, y } = await swipeToControl(touch, save);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    const response = page.waitForResponse(res => new URL(res.url()).pathname === '/v1/snapshot');
+    poll.resolve({ messages: [], spaces: [] });
+    await (await response).finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.getByText('Settings saved in this browser.', { exact: true }).waitFor();
+    await page.reload();
+    await page.getByRole('button', { name: 'Settings', exact: true }).tap();
+    await page.locator('[data-group="display"] > summary').tap();
+    assert.equal(await page.getByLabel('Theme', { exact: true }).inputValue(), theme);
   });
-  const last = page.getByRole('button', { name: 'Remove saved connection details' });
-  await swipeToControl(touch, last);
-  assert.ok(await last.isEnabled());
-  await swipeToControl(touch, token);
+}
 
-  const save = page.getByRole('button', { name: 'Save settings', exact: true });
-  const { x, y } = await swipeToControl(touch, save);
-  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-  const response = page.waitForResponse(res => new URL(res.url()).pathname === '/v1/snapshot');
-  poll.resolve({ messages: [], spaces: [] });
-  await (await response).finished();
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await page.getByText('Settings saved in this browser.', { exact: true }).waitFor();
+test('custom setup checks the snapshot and exchanges chat over an anonymous HTTP subpath', { timeout: 45_000 }, async t => {
+  const calls = [];
+  const messages = [];
+  const relay = createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, OAI-Sites-Authorization');
+    if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
+    calls.push({ path: req.url, auth: req.headers.authorization, hosting: req.headers['oai-sites-authorization'] });
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/locked/v1/snapshot') { res.writeHead(401).end('{}'); return; }
+    if (req.url === '/invalid/v1/snapshot') { res.end('{}'); return; }
+    if (req.url === '/muse/v1/snapshot') { res.end(JSON.stringify({ messages })); return; }
+    if (req.url === '/muse/v1/requests' && req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const request = JSON.parse(Buffer.concat(chunks));
+      messages.push({ id: 'muse_example', from: 'Muse', type: 'text', text: 'Reply to ' + request.text, ts: request.created_at + 1, reply_to: request.id });
+      res.writeHead(202).end(JSON.stringify({ accepted: true, id: request.id })); return;
+    }
+    res.writeHead(404).end('{}');
+  });
+  await new Promise(resolve => relay.listen(0, '127.0.0.1', resolve));
+  t.after(() => { relay.closeAllConnections(); return new Promise(resolve => relay.close(resolve)); });
+  const base = 'http://127.0.0.1:' + relay.address().port;
+  const { page } = await openPhone(t, { messages: [] }, { configured: false });
+  await page.locator('input[value="custom"]').check();
+  const next = page.getByRole('button', { name: 'Next', exact: true });
+  await next.tap();
+  const url = page.getByLabel('Base URL', { exact: true });
+  const check = page.getByRole('button', { name: 'Check connection', exact: true });
+  const save = page.getByRole('button', { name: 'Save and open', exact: true });
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  for (const [path, error] of [['/locked', 'HTTP 401'], ['/invalid', 'Relay messages missing'], ['/muse/', null]]) {
+    await url.fill(base + path);
+    assert.equal(await page.getByLabel('Phone access token (optional)', { exact: true }).inputValue(), '');
+    await next.tap(); await next.tap(); await check.tap();
+    if (error) {
+      await page.getByRole('alert').filter({ hasText: error }).first().waitFor();
+      assert.ok(await save.isDisabled());
+      await back.tap(); await back.tap();
+    }
+  }
+  await save.tap();
+  const message = page.getByRole('textbox', { name: 'Message', exact: true });
+  await message.fill('custom chat');
+  await page.getByRole('button', { name: 'Send', exact: true }).tap();
+  await page.getByText('Reply to custom chat', { exact: true }).waitFor();
+  assert.equal(calls.filter(call => call.path === '/muse/v1/requests').length, 1);
+  assert.ok(calls.every(call => call.auth === undefined && call.hosting === undefined));
   await page.reload();
+  await page.getByText('Custom relay server connected', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).tap();
-  await page.locator('[data-group="display"] > summary').tap();
-  assert.equal(await page.getByLabel('Theme', { exact: true }).inputValue(), 'dark');
+  await page.locator('[data-group="connection"] > summary').tap();
+  assert.equal(await url.inputValue(), base + '/muse');
+  await page.locator('input[value="gadget"]').check();
+  const gadgetUrl = page.getByLabel('Relay server URL', { exact: true });
+  assert.equal(await gadgetUrl.inputValue(), new URL(page.url()).origin);
+  assert.equal(await page.getByLabel('Phone access token', { exact: true }).inputValue(), 'test');
+  await check.tap();
+  await page.getByRole('button', { name: 'Save settings', exact: true }).tap();
+  await page.getByRole('button', { name: 'Chat', exact: true }).tap();
+  await page.getByText('No messages yet', { exact: true }).waitFor();
+  assert.equal(await page.getByText('Reply to custom chat', { exact: true }).count(), 0);
 });
 
 test('swiping the head-angle chart scrolls the page and dragging the marker adjusts the angle', { timeout: 30_000 }, async t => {

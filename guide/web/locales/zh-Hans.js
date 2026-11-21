@@ -1,5 +1,15 @@
 // English source keys; protocol identifiers and numbered placeholders remain unchanged.
 export default {
+  "Custom relay server": "自定义中继服务器",
+  "Choose how your server connects to Muse": "自行设置服务器与 Muse 的连接方式",
+  "Base URL": "基础 URL",
+  "Phone access token (optional)": "手机访问令牌（可选）",
+  "Hosting access key (optional)": "托管访问密钥（可选）",
+  "Check the saved relay name at the top of the app.": "在应用顶部确认已保存的中继名称。",
+  "Enter the base URL. Add a phone token or hosting key only if your server requires it.": "输入基础 URL。仅在服务器要求时填写手机令牌或托管密钥。",
+  "Allow the origin shown in the app in your server’s CORS settings.": "在服务器的 CORS 设置中允许应用显示的来源。",
+  "Process each request ID once and return HTTP 202 with JSON.": "每个请求 ID 只处理一次，接收时返回 HTTP 202 和 JSON。",
+  "Return the matching reply in messages with reply_to set to the request ID.": "在 messages 中返回对应回复，并将 reply_to 设为请求 ID。",
   "Head-up recording · Beta 0.3.13+": "抬头录音 · Beta 0.3.13+",
   "Settings → Head-up display → Raise head to wake → Record on wake. Tap the glasses to send or double-tap to cancel.": "设置 → 抬头显示 → 抬头唤醒显示 → 唤醒时开始录音。轻点眼镜发送，轻点两下取消。",
   "Live captions on compatible HTTPS relays": "兼容的 HTTPS 中继支持实时字幕",

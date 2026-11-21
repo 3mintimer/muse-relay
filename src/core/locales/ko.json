@@ -1,4 +1,11 @@
 {
+  "Custom relay server": "사용자 지정 중계 서버",
+  "Choose how your server connects to Muse": "서버를 Muse에 연결하는 방식을 직접 설정",
+  "Base URL": "기본 URL",
+  "Phone access token (optional)": "휴대폰 액세스 토큰(선택 사항)",
+  "Audio → custom relay → Muse": "오디오 → 사용자 지정 중계 → Muse",
+  "View protocol": "구현 사양 보기",
+  "Enter the base URL.": "기본 URL을 입력하세요.",
   "Home": "홈",
   "Waiting for reply": "답장 대기",
   "Still avatar": "정지 아바타",

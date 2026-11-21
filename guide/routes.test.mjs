@@ -77,6 +77,7 @@ test('all nine pages contain translated titles, actions, navigation, and languag
     assert.match(html, new RegExp(`<html lang="${code}"`));
     for (const [tag, key] of [
       ['title', 'Muse Relay — Guide & setup'],
+      ['strong', 'Custom relay server'],
       ['h2', 'Ask Muse to set it up'],
       ['button', 'Copy instructions'],
       ['summary', 'Reply arrived, but no transcript'],

@@ -1,5 +1,5 @@
 import type { Settings } from './types';
-import { endpoint, resolveSonioxConnection } from './config';
+import { endpoint, httpsConnection, resolveSonioxConnection } from './config';
 import { jsonResponse, record } from '../relay/protocol';
 import { speechLanguage } from './i18n';
 
@@ -45,12 +45,16 @@ export class SonioxStream {
     let url = 'wss://stt-rt.soniox.com/transcribe-websocket';
     let protocols: string[];
     if (viaRelay) {
-      const relayUrl = new URL(`${endpoint(settings.relayUrl)}/v1/voice/live`);
+      const { url: baseUrl, token } = httpsConnection(settings);
+      const relayUrl = new URL(`${endpoint(baseUrl)}/v1/voice/live`);
       relayUrl.protocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
       url = relayUrl.href;
-      const token = settings.relayToken.trim();
-      if (!/^[A-Za-z0-9_-]{32,200}$/.test(token)) throw new Error('Relay token');
-      protocols = ['muse-relay-voice', token];
+      protocols = ['muse-relay-voice'];
+      if (settings.relay === 'custom') {
+        // WebSocket subprotocols are tokens and each offered name must be unique.
+        if (token && (!/^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/.test(token) || token === protocols[0])) throw new Error('Relay token');
+      } else if (!/^[A-Za-z0-9_-]{32,200}$/.test(token)) throw new Error('Relay token');
+      if (token) protocols.push(token);
     } else {
       const connection = resolveSonioxConnection(settings);
       let key: string;

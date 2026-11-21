@@ -1,4 +1,4 @@
-export type RelayMode = 'gist' | 'gadget';
+export type RelayMode = 'gist' | 'gadget' | 'custom';
 export type Theme = 'system' | 'light' | 'dark';
 export type Locale = 'en' | 'zh-Hans' | 'zh-Hant' | 'ja' | 'es' | 'fr' | 'de' | 'it' | 'ko';
 export type Language = 'system' | Locale;
@@ -10,6 +10,9 @@ export interface Settings {
   relayUrl: string;
   relayToken: string;
   gatewayToken: string;
+  customRelayUrl: string;
+  customRelayToken: string;
+  customGatewayToken: string;
   sonioxAuth: 'auto' | 'api-key' | 'token-server';
   sonioxApiKey: string;
   sonioxTokenUrl: string;

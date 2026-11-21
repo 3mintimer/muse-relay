@@ -1,6 +1,16 @@
 // English is the canonical message key; values are Japanese.
 // Numeric placeholders are substituted by i18n.js; protocol JSON remains literal.
 export const japanese = {
+  "Custom relay server": "カスタム中継サーバー",
+  "Choose how your server connects to Muse": "Museとの接続方法は自分で設定",
+  "Base URL": "ベースURL",
+  "Phone access token (optional)": "スマートフォン用トークン（任意）",
+  "Hosting access key (optional)": "ホスティング用接続キー（任意）",
+  "Check the saved relay name at the top of the app.": "アプリ上部で保存した中継名を確認します。",
+  "Enter the base URL. Add a phone token or hosting key only if your server requires it.": "ベースURLを入力します。サーバーが要求する場合にスマートフォン用トークンやホスティング用キーを追加します。",
+  "Allow the origin shown in the app in your server’s CORS settings.": "アプリに表示されるOriginをサーバーのCORS設定で許可します。",
+  "Process each request ID once and return HTTP 202 with JSON.": "依頼IDごとに一度だけ処理し、受付時にHTTP 202とJSONを返します。",
+  "Return the matching reply in messages with reply_to set to the request ID.": "messages に返信を含め、reply_to に元の依頼IDを設定します。",
   "Head-up recording · Beta 0.3.13+": "頭上げ録音 · Beta 0.3.13以降",
   "Settings → Head-up display → Raise head to wake → Record on wake. Tap the glasses to send or double-tap to cancel.": "設定 → 頭上げ表示 → 頭を上げて表示 → 表示と同時に録音。眼鏡をタップして送信、ダブルタップで中止。",
   "Live captions on compatible HTTPS relays": "対応する HTTPS 中継でリアルタイム字幕",

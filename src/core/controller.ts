@@ -4,9 +4,9 @@ import { getTextWidth } from '@evenrealities/pretext';
 import type { AppController, AppState, Attachment, Message, Relay, RelayRequest, Settings, SpaceItem, SpaceControl, MuseProfile } from './types';
 import { motionKinds, type MotionKind } from './types';
 import { AvatarMotions, avatarDisplay } from './motions';
-import { defaults, validateSettings } from './config';
+import { connectionSignature, defaults, httpsConnection, validateSettings } from './config';
 import { GistRelay } from '../relay/gist';
-import { GadgetRelay } from '../relay/gadget';
+import { HttpsRelay } from '../relay/gadget';
 import { Glasses, glassBodyRows, type GlassMenuItem, type GlassTextStyle } from './glasses';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, hasAudiblePcm, resizeImage, wav } from './media';
@@ -448,23 +448,29 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.recording||voiceBusy||savingSettings||state.busy)throw new Error('Busy');
     if(!clear&&!persistenceReady&&!settings.configured)throw new Error('Settings read failed');
     const checked=validateSettings(settings,settings.configured);
-    const connectionChanged=clear||(['configured','relay','gistId','githubToken','relayUrl','relayToken','gatewayToken'] as const)
-      .some(key=>checked[key]!==state.settings[key]);
+    const resetHistory = clear || connectionSignature(checked) !== connectionSignature(state.settings);
+    const connectionChanged = resetHistory || checked.configured !== state.settings.configured;
     ++settingsGeneration;savingSettings=true;state.busy=true;clearTimeout(saveTimer);emit();
-    const saved=clear?{settings:checked,snapshot:{messages:[],spaces:[]},readIds:[],hiddenIds:[],selectedSpaceIds:[]}: {...serializable(),settings:checked};
+    const saved=resetHistory?{settings:checked,snapshot:{messages:[],spaces:[]},readIds:[],hiddenIds:[],selectedSpaceIds:[]}: {...serializable(),settings:checked};
     try{
       const mode=await storage.save(saved,true);
       state.settings=checked;
       if(!checked.autoHideSeconds){state.displaySleeping=false;autoHiddenReplies.clear();}
       if(!checked.returnToChatAfterSend&&screen!=='message')followingChat=undefined;
       displayDeadline=0;
-      if(clear){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.motions;delete state.snapshot.capabilities;avatarFailedKey='';}
+      if(resetHistory){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
+      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();readJob=undefined;configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.motions;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
           :text('このブラウザーの接続情報を削除しました。','Connection details removed from this browser.')):savedNotice(state.persistence);
-      if(clear){localSent.length=0;screen='home';state.selectedMessageId=undefined;feedback=undefined;}
+      if (resetHistory) {
+        localSent.length = 0; deliveryNotice = undefined; lastChatPage = undefined;
+        state.selectedMessageId = undefined; state.spaceAction = undefined; state.lastSync = undefined;
+        spaceId = ''; spaceItemId = ''; spaceLayouts.clear(); spaceEditor = undefined;
+        ++actionSerial; pendingMenuAction = undefined; contextualOpen = false; menuActions = [];
+        screen = 'home'; page = 0; feedback = undefined;
+      }
       raise.reset();fire(syncImu());
       document.documentElement.dataset.evenTheme=checked.theme;
       try{localStorage.setItem('muse-relay-theme',checked.theme);}catch{/* Cosmetic preference only. */}
@@ -489,9 +495,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const timeout=setTimeout(finish,1500);
     });
   }
-  function makeRelay(settings:Settings):Relay{return settings.relay==='gist'?new GistRelay(settings):new GadgetRelay(settings);}
+  function makeRelay(settings:Settings):Relay{return settings.relay==='gist'?new GistRelay(settings):new HttpsRelay(settings);}
   function configureRelay(settings:Settings){
-    const address=settings.relay==='gist'?settings.gistId:settings.relayUrl;
+    const address=settings.relay==='gist'?settings.gistId:httpsConnection(settings).url;
     motions.restore(JSON.stringify([settings.relay,address]));
     relay=settings.configured?makeRelay(settings):undefined;
     hasLiveSnapshot=false;state.connected=false;
@@ -706,7 +712,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(explicit){avatarFailedKey='';avatarRetryAfter=0;syncMotions(true);}
     if(!relay){if(explicit)throw new Error('Relay token');return;}
     // A manual refresh joins the existing read instead of silently doing nothing.
-    if(!readJob)readJob=readSnapshot().finally(()=>{readJob=undefined;});
+    if (!readJob) {
+      const job = readSnapshot().finally(() => { if (readJob === job) readJob = undefined; });
+      readJob = job;
+    }
     if(explicit)await readJob;else await readJob.catch(()=>{});
   }
   async function readSnapshot(){
@@ -775,7 +784,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   async function send(request:RelayRequest){
     if(!relay)throw new Error('Relay token');
     if(state.busy)throw new Error('Busy');
-    if(request.image&&state.settings.relay==='gadget'&&state.snapshot.capabilities?.images!==true)throw new Error('Image sending unavailable');
+    if(request.image&&state.settings.relay!=='gist'&&state.snapshot.capabilities?.images!==true)throw new Error('Image sending unavailable');
     const current=relay,beforeIds=new Set(state.snapshot.messages.map(message=>message.id));
     // In a legacy Gist, the next unlinked answer could still belong to an earlier open turn.
     const priorTurn=state.settings.relay==='gist'?visible().filter(m=>m.from!=='Relay'&&!m.id.startsWith('status_')).at(-1):undefined;
@@ -790,12 +799,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         if(awaitingReplies.size>50)awaitingReplies.delete(awaitingReplies.keys().next().value!);
         takeReplies(state.snapshot.messages); // A response can arrive before the send acknowledgement.
       }
-      if(state.settings.relay==='gadget'&&active&&!disposed){replyPoll.sent(request.id);replyPoll.observe(state.snapshot.messages);}
+      if(state.settings.relay!=='gist'&&active&&!disposed){replyPoll.sent(request.id);replyPoll.observe(state.snapshot.messages);}
       const turn={id:request.id,previousIds:beforeIds,needsReplyId};
       state.notice=text('中継へ送信しました。Muse の応答を待っています。','Sent to relay. Waiting for Muse.');
       deliveryNotice=request.kind==='chat'?{sent:turn,message:state.notice}:undefined;
       clearAnsweredNotice(state.snapshot.messages);emit();saveSoon();
-      if(state.settings.relay==='gadget')armPoll();else armPoll(2000);
+      if(state.settings.relay!=='gist')armPoll();else armPoll(2000);
       return turn;
     }finally{state.busy=false;emit();}
   }
@@ -917,7 +926,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       // Arm audio before sending any display updates or waiting for Soniox.
       state.recording=true;
       const opening=glasses.microphone(true,state.settings.mic==='phone');
-      const relayLiveVoice=state.settings.voice==='muse'&&state.settings.relay==='gadget'&&state.snapshot.capabilities?.live_transcription===true;
+      const relayLiveVoice=state.settings.voice==='muse'&&state.settings.relay!=='gist'&&state.snapshot.capabilities?.live_transcription===true;
       if(state.settings.voice==='soniox'||relayLiveVoice){
         const onText = (value: string) => {
           if(value===state.transcript)return;
@@ -994,7 +1003,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         req=voiceRequest(transcript);
       }else{
         req=voiceRequest('');
-        req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture, state.settings.relay === 'gadget' && captureBytes > 1_099_956))};
+        req.audio={mime:'audio/wav',name:'voice.wav',data_base64:base64(wav(capture, state.settings.relay !== 'gist' && captureBytes > 1_099_956))};
       }
       voiceSending=true;voiceStatus=text('送信中…','Sending…');void render().catch(error);
       state.busy=false;const accepted=await send(req);if(!target)sentChat=accepted;

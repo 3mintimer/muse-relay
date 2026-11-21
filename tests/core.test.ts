@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GistRelay } from '../src/relay/gist.ts';
-import { GadgetRelay } from '../src/relay/gadget.ts';
+import { HttpsRelay } from '../src/relay/gadget.ts';
 import { SonioxStream, checkSonioxConnection } from '../src/core/soniox.ts';
 import { defaults, endpoint, gistId, resolveSonioxConnection, validateSettings } from '../src/core/config.ts';
 import { parseSnapshot } from '../src/relay/protocol.ts';
@@ -125,7 +125,7 @@ test('incoming Gadget images remain readable when image uploads are disabled',as
     ?{messages:[{id:'muse_export_image',from:'Muse',type:'image',image_file:'received.png',ts:1}],spaces:[],capabilities:{audio:true,images:false,spaces:true}}
     :{mime:'image/png',name:'received.png',data_base64:'AAAA'}));
   try{
-    const relay=new GadgetRelay({...defaults,relay:'gadget',relayUrl:'https://relay.example.com',relayToken:'test-only'});
+    const relay=new HttpsRelay({...defaults,relay:'gadget',relayUrl:'https://relay.example.com',relayToken:'test-only'});
     const snapshot=await relay.read();assert.equal(snapshot.capabilities?.images,false);
     const message=snapshot.messages[0]!;assert.equal(message.type,'image');assert.equal(message.text,'');
     assert.equal((await relay.attachment(message.image_file!,'image/png')).data_base64,'AAAA');
@@ -181,10 +181,10 @@ test('hosting credentials stay on their configured HTTP endpoint and out of GitH
     sonioxTokenUrl:'https://speech.example.com/key',sonioxTokenAuth:'speech-endpoint-test',sonioxGatewayToken:'speech-hosting-test'};
   const stream=new SonioxStream(()=>{},()=>{}),withoutGateway=new SonioxStream(()=>{},()=>{}),automatic=new SonioxStream(()=>{},()=>{});
   try{
-    const relay=new GadgetRelay(settings);await relay.read();
+    const relay=new HttpsRelay(settings);await relay.read();
     await relay.send({id:'headers-only',kind:'chat',text:'test',created_at:1});
     for(const call of calls){const headers=new Headers(call.options?.headers);assert.equal(headers.get('Authorization'),'Bearer phone-test');assert.equal(headers.get('OAI-Sites-Authorization'),'Bearer relay-hosting-test');assert.equal(call.options?.redirect,'error');}
-    await new GadgetRelay({...settings,gatewayToken:''}).read();
+    await new HttpsRelay({...settings,gatewayToken:''}).read();
     assert.equal(new Headers(calls.at(-1)?.options?.headers).has('OAI-Sites-Authorization'),false);
     await new GistRelay({...settings,gistId:'a'.repeat(32),githubToken:'github-test'}).read();
     assert.equal(new Headers(calls.at(-1)?.options?.headers).has('OAI-Sites-Authorization'),false);
@@ -211,6 +211,56 @@ test('hosting credentials stay on their configured HTTP endpoint and out of GitH
     for(const socket of sockets){assert.equal(socket.url,'wss://stt-rt.soniox.com/transcribe-websocket');assert.deepEqual(socket.protocols,['soniox-api-key','snx_temp_test-only']);}
     assert.doesNotMatch(JSON.stringify(sockets),/relay-hosting-test|speech-hosting-test|speech-endpoint-test|phone-test/);
   }finally{stream.cancel();withoutGateway.cancel();automatic.cancel();globalThis.fetch=originalFetch;globalThis.WebSocket=originalSocket;}
+});
+
+test('custom HTTP, live captions and Soniox use only the selected server’s credentials', async t => {
+  const settings = validateSettings({ ...defaults, relay: 'custom', customRelayUrl: 'https://example.com/muse/',
+    relayUrl: 'https://gadget.example.com', relayToken: 'gadget-phone', gatewayToken: 'gadget-host' });
+  assert.equal(settings.customRelayUrl, 'https://example.com/muse');
+  assert.throws(() => validateSettings({ ...settings, relay: 'gadget', relayToken: '' }));
+  assert.throws(() => validateSettings({ ...settings, customRelayUrl: 'http://example.com' }));
+  const calls: { url: string; headers: Headers }[] = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url: String(url), headers: new Headers(init.headers) });
+    return Response.json(String(url).includes('/files/') ? { mime:'image/png', data_base64:'AA==', name:'a.png' } : { messages: [] });
+  });
+  const sockets: { url: string; protocols: string[] }[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1; bufferedAmount = 0; onopen?: () => void;
+    constructor(url: string, protocols: string[]) { sockets.push({ url, protocols }); queueMicrotask(() => this.onopen?.()); }
+    send() {} close() {}
+  }
+  const original = globalThis.WebSocket;
+  globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+  t.after(() => { globalThis.WebSocket = original; });
+  for (const token of ['', 'custom-phone']) for (const gatewayToken of ['', 'custom-host']) {
+    const selected = { ...settings, customRelayToken: token, customGatewayToken: gatewayToken };
+    const relay = new HttpsRelay(selected);
+    await relay.read();
+    await relay.send({ id:'r_test', kind:'chat', text:'Hello', created_at:1 });
+    await relay.attachment('a file', 'image/png');
+    assert.deepEqual(calls.map(c => c.url), ['snapshot','requests','files/a%20file'].map(path => settings.customRelayUrl + '/v1/' + path));
+    for (const {headers} of calls.splice(0)) {
+      assert.equal(headers.get('Authorization'), token ? 'Bearer ' + token : null);
+      assert.equal(headers.get('OAI-Sites-Authorization'), gatewayToken ? 'Bearer ' + gatewayToken : null);
+    }
+    assert.deepEqual(resolveSonioxConnection(selected), { mode:'token-server', url:settings.customRelayUrl + '/v1/soniox-token', token, gatewayToken, usesRelay:true });
+    const live = new SonioxStream(() => {}, () => {});
+    await live.start(selected, true); live.cancel();
+    assert.deepEqual(sockets.pop(), { url:'wss://example.com/muse/v1/voice/live', protocols:token ? ['muse-relay-voice', token] : ['muse-relay-voice'] });
+  }
+});
+
+test('custom Muse instructions describe the app protocol and leave the integration to the server owner', async () => {
+  const {museSetupPrompt, spacePrompt, avatarPrompt, animationPrompt} = await import('../src/ui/prompts.ts');
+  const settings = {...defaults, relay:'custom' as const, customRelayUrl:'https://private.example', customRelayToken:'private-token'};
+  for (const prompt of [museSetupPrompt(settings), spacePrompt(settings, {name:'Test',purpose:'Test',layout:'list',controls:[]}),
+    avatarPrompt(settings), animationPrompt(settings)]) {
+    assert.match(prompt, /GET \/v1\/snapshot/);
+    assert.doesNotMatch(prompt, /MUSE_TOKEN|ATOM S3|Gadget SDK|private.example|private-token/);
+  }
+  assert.match(museSetupPrompt(settings, true), /live_transcription/);
 });
 
 const savedFixture = (): SavedState => ({ settings: { ...defaults, relay: 'gadget', relayUrl: 'https://relay.example.com', relayToken: 'test-only-connection', configured: true },

@@ -1,7 +1,7 @@
 import type { AppController, Attachment, Settings, Snapshot, Space, SpaceItem, Message } from '../core/types';
 import { avatarDisplay } from '../core/motions';
 import { headAngleDial } from './head-angle';
-import { defaults, endpoint, resolveSonioxConnection, sonioxAuthMode } from '../core/config';
+import { connectionSignature, defaults, endpoint, resolveSonioxConnection, sonioxAuthMode } from '../core/config';
 import { button, el, externalLink, icon, type IconName } from './dom';
 import { animationPrompt, avatarPrompt, museSetupPrompt, spacePrompt, type SpacePromptControl, type SpacePromptOptions } from './prompts';
 import { locales, resolveLocale, translate } from '../core/i18n';
@@ -75,16 +75,19 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   root.replaceChildren(shell);
   const t = (ja: string, en: string, values: Record<string, string | number> = {}) => translate(draft.language, ja, en, values);
   const languageOptions = (): [Language, string][] => [['system', t('端末に合わせる', 'Follow phone')], ...locales.map(locale => [locale.code, locale.label] as [Language, string])];
-  const signature = (settings = draft) => JSON.stringify([settings.relay, settings.gistId, settings.githubToken, settings.relayUrl, settings.relayToken, settings.gatewayToken]);
+  const signature = (settings = draft) => connectionSignature(settings);
   const voiceSignature = (settings = draft) => JSON.stringify([sonioxAuthMode(settings), settings.sonioxApiKey, settings.sonioxTokenUrl, settings.sonioxTokenAuth, settings.sonioxGatewayToken, signature(settings), settings.language]);
   const connectionChecked = () => Boolean(testResult && testedSignature === signature());
-  const relayLiveVoice = () => draft.relay === 'gadget' && (connectionChecked() ? testResult
+  const relayLiveVoice = () => draft.relay !== 'gist' && (connectionChecked() ? testResult
     : signature() === signature(controller.state.settings) ? controller.state.snapshot : null)?.capabilities?.live_transcription === true;
   const needsConnectionCheck = () => signature() !== signature(controller.state.settings) && !connectionChecked();
   const settingsDirty = () => settingKeys.some(key => draft[key] !== savedSettings[key]);
   const editable = () => !working && !controller.state.busy;
 
   function changed<K extends keyof Settings>(key: K, value: Settings[K]) {
+    if (key === 'customRelayUrl' && draft.customRelayUrl.trim() && draft.customRelayUrl.trim().replace(/\/$/, '') !== String(value).trim().replace(/\/$/, '')) {
+      draft.customRelayToken = ''; draft.customGatewayToken = '';
+    }
     draft[key] = value;
     if (key === 'sonioxApiKey' && String(value).trim() && draft.sonioxAuth === 'auto') draft.sonioxAuth = 'api-key';
     uiError = ''; uiNotice = '';
@@ -143,15 +146,17 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function openVoiceSettings() { view = 'settings'; settingsGroups.add('voice'); render(); root.querySelector('[data-group="voice"]')?.scrollIntoView({ block: 'start' }); }
   function capabilityHelp() {
     const body = el('div', 'capability-help');
-    const row = (label: string, gist: string, gadget: string) => el('tr', '', el('th', '', label), el('td', '', gist), el('td', '', gadget));
-    body.append(el('table', 'capability-table', el('thead', '', row('', 'Gist', 'Gadget')), el('tbody', '',
-      row(t('チャット・スペース', 'Chat & Spaces'), '✓', '✓'), row(t('画像を受信', 'Receive images'), '✓', '✓'), row('Soniox', '✓', '✓'),
-      row(t('追加の機器', 'Extra hardware'), '—', t('必要', 'Required')),
-      row(t('機器の接続状態', 'Device status'), '—', '✓'),
+    const dependent = t('中継による', 'Relay dependent');
+    const row = (label: string, gist: string, gadget: string, custom = dependent) =>
+      el('tr', '', el('th', '', label), ...[gist, gadget, custom].map(value => el('td', '', value)));
+    body.append(el('table', 'capability-table', el('thead', '', row('', 'Gist', 'Gadget', relayName('custom'))), el('tbody', '',
+      row(t('チャット・スペース', 'Chat & Spaces'), '✓', '✓'), row(t('画像を受信', 'Receive images'), '✓', '✓'), row('Soniox', '✓', '✓', '✓'),
+      row(t('追加の機器', 'Extra hardware'), '—', t('必要', 'Required'), '—'),
+      row(t('機器の接続状態', 'Device status'), '—', '✓', '—'),
       row(voiceTitle('muse'), t('Muse側で対応', 'Muse handler'), 'SDK → Muse'),
       row(t('画像を送信', 'Send images'), t('Muse側で対応', 'Muse handler'), t('中継による', 'Relay dependent')))));
     body.append(el('p', 'message-body', t('GistはMuse側に監視・処理の実装が必要です。Gadgetはペアリング済み機器とHTTPS中継を使います。', 'Gist needs a watcher and handler on the Muse side. Gadget uses a paired device and an HTTPS relay.')),
-      el('p', 'message-body', t('SDKは機器の画面・ボタン・センサーなどを扱えます。ATOM S3の参考実装は中継専用です。G2のスペースへ表示するには、どちらもデータの書き出しが必要です。', 'The SDK can use device displays, buttons and sensors. The reference ATOM S3 build is a relay only. Both methods need a data export for G2 Spaces.')));
+      el('p', 'message-body', relayName('custom') + ' · ' + t('Museとの接続方法は自分で設定', 'Choose how your server connects to Muse')));
     return body;
   }
   function field(key: keyof Settings, label: string, placeholder = '', secret = false) {
@@ -193,6 +198,13 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function header() {
     return el('header', 'app-header', el('h1', '', 'Muse Relay'), !wizard && settingsDirty() ? el('span', 'muted', t('未保存の変更', 'Unsaved changes')) : null);
   }
+  function relayName(mode: Settings['relay']) {
+    if (mode === 'gist') return 'GitHub Gist';
+    return mode === 'gadget' ? 'Muse Gadget SDK' : t('カスタム中継サーバー', 'Custom relay server');
+  }
+  function relayIcon(mode: Settings['relay']): IconName {
+    return mode === 'gist' ? 'cloud' : mode === 'gadget' ? 'home' : 'network';
+  }
   function audioRelay(settings = draft) {
     return settings.relay === 'gist' ? 'GitHub Gist' : t('HTTPS 中継', 'HTTPS relay');
   }
@@ -202,7 +214,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   function flow(settings = draft) {
     const nodes: [string, IconName, string?][] = [
       ['G2', 'glasses'], [t('スマホ', 'Phone'), 'phone'],
-      ...(settings.relay === 'gist' ? [[t('GitHub Gist', 'GitHub Gist'), 'cloud'] as [string, IconName]] : [
+      ...(settings.relay === 'custom' ? [[relayName('custom'), 'network'] as [string, IconName]] : settings.relay === 'gist' ? [[t('GitHub Gist', 'GitHub Gist'), 'cloud'] as [string, IconName]] : [
         [t('HTTPS 中継', 'HTTPS relay'), 'network'] as [string, IconName], ['Muse Gadget', 'home', t('自宅', 'At home')] as [string, IconName, string],
       ]), ['Muse', 'chat'],
     ];
@@ -218,6 +230,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const voiceRoute = settings.voice === 'soniox'
       ? t('音声 → Soniox → 確定文字を{relay}へ', 'Audio → Soniox → final text to {relay}', { relay: audioRelay(settings) })
       : settings.relay === 'gist' ? t('音声ファイル → Gist → Muse側の処理', 'Audio file → Gist → Muse handler')
+        : settings.relay === 'custom' ? t('音声 → カスタム中継 → Muse', 'Audio → custom relay → Muse')
         : t('音声ファイル → HTTPS中継 → Gadget → Muse', 'Audio file → HTTPS relay → Gadget → Muse');
     block.append(el('div', 'voice-flow', icon('mic'), el('span', '', voiceRoute)));
     return block;
@@ -226,7 +239,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const s = controller.state;
     const group = el('div', 'connection-strip'); group.setAttribute('aria-label', t('接続状態', 'Connection status'));
     group.append(el('span', `status-pill ${s.glasses ? 'is-ready' : ''}`, icon('glasses'), t(s.glasses ? 'G2 接続済み' : 'G2 未接続', s.glasses ? 'G2 connected' : 'G2 not connected')));
-    const relay = s.settings.relay === 'gist' ? 'Gist' : 'Muse Gadget';
+    const relay = s.settings.relay === 'gist' ? 'Gist' : s.settings.relay === 'gadget' ? 'Muse Gadget' : relayName('custom');
     group.append(el('span', `status-pill ${s.connected ? 'is-ready' : ''}`, icon(s.settings.relay === 'gist' ? 'cloud' : 'network'), s.connected ? t('{relay} 接続済み', '{relay} connected', { relay }) : t('{relay} 未接続', '{relay} not connected', { relay })));
     if (s.settings.relay === 'gadget') group.append(el('span', 'status-pill', icon('home'), s.snapshot.device?.connected ? t('機器 オンライン', 'Device online') : t('機器 応答待ち', 'Waiting for device')));
     if (s.displaySleeping) {
@@ -250,13 +263,13 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   }
   function relayChoice() {
     const choices = el('fieldset', 'relay-choices'); choices.append(el('legend', 'sr-only', t('中継方式', 'Relay method')));
-    for (const mode of ['gist', 'gadget'] as const) {
+    for (const mode of ['gist', 'gadget', 'custom'] as const) {
       const selected = draft.relay === mode;
       const input = el('input', 'even-radio'); input.type = 'radio'; input.name = 'relay'; input.value = mode; input.checked = selected;
       focusKey(input, `relay-${mode}`);
       input.addEventListener('change', () => { changed('relay', mode); testResult = null; render(); });
-      const label = el('label', `relay-choice ${selected ? 'is-selected' : ''}`, icon(mode === 'gist' ? 'cloud' : 'home'),
-        el('span', 'choice-copy', el('strong', '', mode === 'gist' ? 'GitHub Gist' : 'Muse Gadget SDK'), el('span', '', mode === 'gist' ? t('追加の機器なし', 'No extra hardware') : t('自宅の機器（例: ATOM S3）', 'Home device, e.g. ATOM S3'))), input);
+      const label = el('label', `relay-choice ${selected ? 'is-selected' : ''}`, icon(relayIcon(mode)),
+        el('span', 'choice-copy', el('strong', '', relayName(mode)), el('span', '', mode === 'gist' ? t('追加の機器なし', 'No extra hardware') : mode === 'custom' ? t('Museとの接続方法は自分で設定', 'Choose how your server connects to Muse') : t('自宅の機器（例: ATOM S3）', 'Home device, e.g. ATOM S3'))), input);
       choices.append(label);
     }
     return el('div', '', choices, flow(), withHint(el('div', 'feature-strip', icon('chat'), icon('spaces'), icon('image'), el('span', '', t('チャット・スペース・画像受信', 'Chat · Spaces · receive images'))), t('中継方式の違い', 'Compare relay methods'), capabilityHelp));
@@ -301,13 +314,19 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   }
   function credentials() {
     const card = el('div', 'even-card form-card');
-    card.append(el('h3', 'connection-heading', icon(draft.relay === 'gist' ? 'cloud' : 'home'), draft.relay === 'gist' ? 'GitHub Gist' : 'Muse Gadget SDK'));
+    card.append(el('h3', 'connection-heading', icon(relayIcon(draft.relay)), relayName(draft.relay)));
     if (draft.relay === 'gist') {
       card.append(field('gistId', t('Gist ID または URL', 'Gist ID or URL'), 'https://gist.github.com/…'), field('githubToken', t('GitHub トークン', 'GitHub token'), 'gist scope', true));
       card.append(hint(t('Gistの保存内容', 'Gist storage'), t('Secret Gist も、URL を知る人は閲覧できます。音声や画像は履歴に残ります。', 'Anyone with a secret Gist URL can read it. Audio and images remain in revision history.')));
       card.append(el('div', 'link-row', externalLink(t('Gist を作成', 'Create a Gist'), 'https://gist.github.com/'), externalLink(t('トークンを取得', 'Get a token'), 'https://github.com/settings/tokens/new?scopes=gist&description=Muse%20Relay')));
       const setup = el('details', 'gist-initializer', el('summary', '', t('初めて Gist を作る', 'Create your first Gist')), copyValue(t('ファイル名', 'Filename'), 'g2muse-relay.json', 'gist-filename'), copyValue(t('初期内容', 'Initial content'), '{"messages":[]}', 'gist-content'));
       setup.open = gistInitializerOpen; setup.addEventListener('toggle', () => { gistInitializerOpen = setup.open; }); card.append(setup);
+    } else if (draft.relay === 'custom') {
+      const doc = resolveLocale(draft.language) === 'ja' ? 'protocol.ja.md' : 'protocol.md';
+      card.append(field('customRelayUrl', t('ベースURL', 'Base URL'), 'https://example.com/muse'),
+        field('customRelayToken', t('スマートフォン用トークン（任意）', 'Phone access token (optional)'), '', true),
+        hostingKey('customGatewayToken'), originSettings(),
+        externalLink(t('実装仕様を見る', 'View protocol'), `https://github.com/3mintimer/muse-relay/blob/beta/docs/${doc}#custom-relay`));
     } else {
       card.append(importConnection(), field('relayUrl', t('中継サーバー URL', 'Relay server URL'), 'https://relay.example.com'), field('relayToken', t('スマートフォン用トークン', 'Phone access token'), '', true));
       card.append(hint(t('中継サーバー URL', 'Relay server URL'), t('外出先から接続できる HTTPS URL を入力します。', 'Use an HTTPS URL reachable when you are away from home.')));
@@ -315,7 +334,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     }
     return card;
   }
-  function hostingKey(key: 'gatewayToken' | 'sonioxGatewayToken') {
+  function hostingKey(key: 'gatewayToken' | 'customGatewayToken' | 'sonioxGatewayToken') {
     const isSoniox = key === 'sonioxGatewayToken';
     const details = el('details', 'gist-initializer', el('summary', '', t('ホスティング用接続キー（任意）', 'Hosting access key (optional)')),
       field(key, isSoniox ? t('一時キー発行先の接続キー', 'Access key for the token endpoint') : t('中継ホスティングの接続キー', 'Access key for relay hosting'), '', true));
@@ -383,12 +402,12 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       panel.append(withHint(field('sonioxApiKey', t('Soniox APIキー', 'Soniox API key'), '', true), t('APIキーの保存先', 'API key storage'),
         t('本人用のキーをEvenアプリの設定と端末バックアップに保存し、Sonioxへの接続にだけ使います。Muse・Gist・中継へは送りません。端末に保存しない場合は一時キー発行サーバーを選びます。', 'Your personal key is saved in Even app settings and the device backup, and used only to connect to Soniox. It is not sent to Muse, Gist or the relay. Choose a temporary key server to keep the key off this device.')),
         externalLink(t('APIキーを取得', 'Get an API key'), 'https://console.soniox.com/'));
-    } else if (draft.relay === 'gadget' && !draft.sonioxTokenUrl.trim() && !sonioxDetailsOpen) {
+    } else if (draft.relay !== 'gist' && !draft.sonioxTokenUrl.trim() && !sonioxDetailsOpen) {
       panel.append(el('div', 'connection-route', icon('network'), t('中継から一時キーを取得', 'Temporary key from your relay')),
         button(t('別のサーバーを使う', 'Use another server'), () => { sonioxDetailsOpen = true; render(); }, { secondary: true, className: 'full-width' }));
     } else {
       panel.append(field('sonioxTokenUrl', t('一時キー発行 URL', 'Temporary key endpoint'), 'https://relay.example.com/v1/soniox-token'), field('sonioxTokenAuth', t('発行サーバーのトークン', 'Token endpoint access token'), '', true), hostingKey('sonioxGatewayToken'), originSettings());
-      if (draft.relay === 'gadget') panel.append(button(t('中継の接続設定を使う', 'Use the relay connection'), () => { for (const key of ['sonioxTokenUrl', 'sonioxTokenAuth', 'sonioxGatewayToken'] as const) changed(key, ''); sonioxDetailsOpen = false; render(); }, { secondary: true, className: 'full-width' }));
+      if (draft.relay !== 'gist') panel.append(button(t('中継の接続設定を使う', 'Use the relay connection'), () => { for (const key of ['sonioxTokenUrl', 'sonioxTokenAuth', 'sonioxGatewayToken'] as const) changed(key, ''); sonioxDetailsOpen = false; render(); }, { secondary: true, className: 'full-width' }));
     }
     if (mode === 'token-server') panel.append(hint(t('一時キー発行サーバー', 'Temporary key server'), t('発行サーバーは長期キーを保管し、一時キーを発行します。音声はアプリからSonioxへ直接送ります。', 'The server keeps the long-lived key and issues temporary keys. Audio goes directly from the app to Soniox.')));
     const ready = voiceReadiness();
@@ -454,7 +473,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     if (step > 0) actions.append(button(t('戻る', 'Back'), () => { step--; uiError = ''; render(); }, { secondary: true, icon: 'back', disabled: working }));
     if (step < 3) actions.append(button(t('次へ', 'Next'), () => {
       feedbackLocation = 'page';
-      if (step === 1 && !(draft.relay === 'gist' ? draft.gistId.trim() && draft.githubToken.trim() : draft.relayUrl.trim() && draft.relayToken.trim())) { uiError = t('接続先とトークンを入力してください。', 'Enter the endpoint and access token.'); render(); return; }
+      if (step === 1 && draft.relay === 'custom' && !draft.customRelayUrl.trim()) { uiError = t('ベースURLを入力してください。', 'Enter the base URL.'); render(); return; }
+      if (step === 1 && draft.relay !== 'custom' && !(draft.relay === 'gist' ? draft.gistId.trim() && draft.githubToken.trim() : draft.relayUrl.trim() && draft.relayToken.trim())) { uiError = t('接続先とトークンを入力してください。', 'Enter the endpoint and access token.'); render(); return; }
       if (step === 2 && draft.voice === 'soniox' && ['missing', 'invalid'].includes(voiceReadiness().kind)) { uiError = t('Sonioxを設定するか、「{method}」を選んでください。', 'Set up Soniox or choose “{method}”.', { method: voiceTitle('muse') }); render(); return; }
       step++; uiError = ''; render();
     }, { icon: 'arrow', disabled: working }));
@@ -662,7 +682,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       content.append(el('div', 'wizard-actions', next));
     } else if (spaceAddPage === 'prompt') {
       const request = spacePrompt(s.settings, spaceCreation!, s.snapshot.capabilities?.live_transcription === true);
-      content.append(el('div', 'page-toolbar', el('h3', '', spaceCreation!.name), el('span', 'muted', s.settings.relay === 'gist' ? 'GitHub Gist' : 'Muse Gadget SDK')));
+      content.append(el('div', 'page-toolbar', el('h3', '', spaceCreation!.name), el('span', 'muted', relayName(s.settings.relay))));
       const text = el('textarea', 'even-input prompt-text'); text.readOnly = true; text.value = request; text.rows = 9; text.setAttribute('aria-label', t('Museへの依頼文', 'Request for Muse')); focusKey(text, 'space-prompt');
       content.append(text, el('div', 'space-prompt-actions',
         button(t('コピー', 'Copy'), () => { void run(async () => {
@@ -931,7 +951,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const content = el('div', 'settings-content', el('h2', 'page-title', t('設定', 'Settings')));
     const storage = controller.state.persistence;
     content.append(small(storage === 'native' ? t('保存先: Evenアプリ', 'Storage: Even app') : storage === 'local' ? t('保存先: この端末のバックアップ', 'Storage: device backup') : t('設定の保存先を確認できません', 'Settings storage is unavailable')));
-    content.append(settingsGroup('connection', t('接続', 'Connection'), draft.relay === 'gist' ? 'GitHub Gist' : 'Muse Gadget SDK', relayChoice(), credentials(), checkButton(), checkSummary(), promptPanel()));
+    content.append(settingsGroup('connection', t('接続', 'Connection'), relayName(draft.relay), relayChoice(), credentials(), checkButton(), checkSummary(), promptPanel()));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');
@@ -945,7 +965,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
       select('theme', t('テーマ', 'Theme'), [['system', t('システム', 'System')], ['light', t('ライト', 'Light')], ['dark', t('ダーク', 'Dark')]], theme),
       select('language', t('表示言語', 'Language'), languageOptions()),
       select('pollSeconds', t('通常の受信間隔', 'Normal receive interval'), [[5, t('5 秒', '5 seconds')], [15, t('15 秒', '15 seconds')], [30, t('30 秒', '30 seconds')], [60, t('60 秒', '60 seconds')]]),
-      draft.relay==='gadget'?el('div','even-row',el('span','even-row-label',t('送信後の受信間隔', 'Receive interval after sending')),el('span','muted',t('自動で1秒', '1 second automatically'))):null)));
+      draft.relay!=='gist'?el('div','even-row',el('span','even-row-label',t('送信後の受信間隔', 'Receive interval after sending')),el('span','muted',t('自動で1秒', '1 second automatically'))):null)));
     const dirty = settingsDirty();
     const save = button(working && feedbackLocation === 'save' ? t('保存中…', 'Saving…') : t('設定を保存', 'Save settings'), () => {
       if (needsConnectionCheck()) {
@@ -1146,6 +1166,10 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   const unsubscribe = controller.subscribe(() => {
     const nextSettings = controller.state.settings;
     if (nextSettings !== savedSettings) {
+      if (signature(nextSettings) !== signature(savedSettings)) {
+        composer = ''; attachment = undefined; activeSpace = ''; spaceAddPage = null;
+        spaceConfirm = undefined; spaceDrafts.clear(); spaceToRemove = null; spaceCreation = null;
+      }
       const wasClean = !settingsDirty();
       // Keep edits made after this write began, or edits unrelated to a glasses-side save.
       const baseline = submittedDraft ?? savedSettings;

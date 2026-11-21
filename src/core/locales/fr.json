@@ -1,4 +1,11 @@
 {
+  "Custom relay server": "Serveur relais personnalisé",
+  "Choose how your server connects to Muse": "Choisissez comment votre serveur se connecte à Muse",
+  "Base URL": "URL de base",
+  "Phone access token (optional)": "Jeton d’accès du téléphone (facultatif)",
+  "Audio → custom relay → Muse": "Audio → relais personnalisé → Muse",
+  "View protocol": "Voir le protocole",
+  "Enter the base URL.": "Saisissez l’URL de base.",
   "Home": "Accueil",
   "Waiting for reply": "En attente de réponse",
   "Still avatar": "Avatar fixe",

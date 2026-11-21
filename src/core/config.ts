@@ -3,6 +3,7 @@ import { validLanguage } from './i18n';
 
 export const defaults: Settings = {
   relay: 'gist', gistId: '', githubToken: '', relayUrl: '', relayToken: '', gatewayToken: '',
+  customRelayUrl: '', customRelayToken: '', customGatewayToken: '',
   sonioxAuth: 'auto', sonioxApiKey: '', sonioxTokenUrl: '', sonioxTokenAuth: '', sonioxGatewayToken: '', voice: 'muse', mic: 'glasses', speakerFilter: 'all',
   theme: 'system', language: 'system',
   headWake: false, headWakeMic: false, headWakeAngle: 30, neutralPitch: 0,
@@ -26,10 +27,24 @@ export function endpoint(value: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
+export function httpsConnection(settings: Settings) {
+  if (settings.relay === 'custom') {
+    return { url: settings.customRelayUrl, token: settings.customRelayToken.trim(), gatewayToken: settings.customGatewayToken.trim() };
+  }
+  return { url: settings.relayUrl, token: settings.relayToken.trim(), gatewayToken: settings.gatewayToken.trim() };
+}
+
+// Used in memory to match reads and checks to the active connection. Never log it.
+export function connectionSignature(settings: Settings): string {
+  return JSON.stringify(settings.relay === 'gist'
+    ? ['gist', settings.gistId, settings.githubToken]
+    : [settings.relay, httpsConnection(settings)]);
+}
+
 // Preserve existing server setups; a new Gist setup needs only the owner's API key.
 export function sonioxAuthMode(settings: Settings): 'api-key' | 'token-server' {
   if (settings.sonioxAuth === 'api-key' || settings.sonioxAuth === 'token-server') return settings.sonioxAuth;
-  return settings.sonioxTokenUrl.trim() || settings.relay === 'gadget' ? 'token-server' : 'api-key';
+  return settings.sonioxTokenUrl.trim() || settings.relay !== 'gist' ? 'token-server' : 'api-key';
 }
 export type SonioxConnection = { mode: 'api-key'; apiKey: string } |
   { mode: 'token-server'; url: string; token: string; gatewayToken: string; usesRelay: boolean };
@@ -43,9 +58,10 @@ export function resolveSonioxConnection(settings: Settings): SonioxConnection {
   if (settings.sonioxTokenUrl.trim()) {
     return { mode: 'token-server', url: endpoint(settings.sonioxTokenUrl), token: settings.sonioxTokenAuth.trim(), gatewayToken: settings.sonioxGatewayToken.trim(), usesRelay: false };
   }
-  if (settings.relay !== 'gadget') throw new Error('Soniox endpoint');
+  if (settings.relay === 'gist') throw new Error('Soniox endpoint');
   // Only the relay's fixed token route inherits its credentials. Custom URLs never do.
-  return { mode: 'token-server', url: `${endpoint(settings.relayUrl)}/v1/soniox-token`, token: settings.relayToken.trim(), gatewayToken: settings.gatewayToken.trim(), usesRelay: true };
+  const relay = httpsConnection(settings);
+  return { ...relay, mode: 'token-server', url: `${endpoint(relay.url)}/v1/soniox-token`, usesRelay: true };
 }
 
 export function validateSettings(input: Settings, requireConnection=true): Settings {
@@ -56,7 +72,7 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
   if (!['auto','api-key','token-server'].includes(result.sonioxAuth)) result.sonioxAuth = 'auto';
   if (typeof result.sonioxApiKey !== 'string') result.sonioxApiKey = '';
   result.sonioxApiKey = result.sonioxApiKey.trim();
-  if (!['gist','gadget'].includes(result.relay) || !['muse','soniox'].includes(result.voice)
+  if (!['gist','gadget','custom'].includes(result.relay) || !['muse','soniox'].includes(result.voice)
     || !['glasses','phone'].includes(result.mic)
     || !['system','light','dark'].includes(result.theme)) throw new Error('Settings');
   result.pollSeconds = Math.max(5, Math.min(300, Math.round(Number(result.pollSeconds) || 15)));
@@ -69,7 +85,7 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
   if (!['exchange','single'].includes(result.chatLayout)) result.chatLayout = defaults.chatLayout;
   if (!['animation','still','off'].includes(result.homeAvatar)) result.homeAvatar = defaults.homeAvatar;
   if (!['animation','off'].includes(result.waitingAvatar)) result.waitingAvatar = defaults.waitingAvatar;
-  for (const key of ['gatewayToken','sonioxGatewayToken'] as const) {
+  for (const key of ['gatewayToken','sonioxGatewayToken','customGatewayToken','customRelayToken'] as const) {
     if (typeof result[key] !== 'string' || /[\r\n]/.test(result[key])) throw new Error('Settings');
     result[key] = result[key].trim();
   }
@@ -78,6 +94,8 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
     result.gistId = gistId(result.gistId);
     result.githubToken = result.githubToken.trim();
     if (!result.githubToken) throw new Error('GitHub token');
+  } else if (result.relay === 'custom') {
+    result.customRelayUrl = endpoint(result.customRelayUrl);
   } else {
     result.relayUrl = endpoint(result.relayUrl);
     if (!result.relayToken.trim()) throw new Error('Relay token');
