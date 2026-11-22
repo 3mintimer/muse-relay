@@ -10,14 +10,41 @@ Choose a method → ask Muse to set it up → enter and save your connection.
 |---|---|---|
 | Gist | Settings → Connection → Gist → Check connection → Save | Top status: Gist |
 | Gadget | Settings → Connection → Muse Gadget SDK → Check connection → Save | Top status: Muse Gadget |
-| Both | Chat → type a short message → Send | Muse replies to that message |
-| Both | Chat → Voice → speak → Stop and send | Muse replies to the spoken request |
-| Both | If Soniox is selected: record and send | Final input text and Muse's reply |
-| Both | Optional: open a Space, received image, or G2 home | The requested content or avatar |
-| Both | Reply → Show on glasses | The reply on physical G2 |
-| Both | Away from home: mobile data → send again | A new matching reply |
+| Custom relay server | Enter the base URL → Check connection → Save | Relay responds, then a new chat request receives its matching Muse reply |
+| All routes | Chat → type a short message → Send | Muse replies to that message |
+| All routes | Chat → Voice → speak → Stop and send | Muse replies to the spoken request |
+| All routes | If Soniox is selected: record and send | Final input text and Muse's reply |
+| All routes | Optional: open a Space, received image, or G2 home | The requested content or avatar |
+| All routes | Reply → Show on glasses | The reply on physical G2 |
+| All routes | Switch to mobile data → send again (optional) | A new matching reply |
 
 Voice uses the mode and microphone saved in **Settings → Voice & images**. Relay-side transcription appears only if returned. **Connected / Device online** alone does not verify a Muse reply.
+
+A custom relay needs only its HTTPS base URL. Enter the phone token and hosting key if your server requires them. Allow the origin shown in the app and supply your own connection to Muse. [Minimal requests, acknowledgements and replies](protocol.md#custom-relay)
+
+<a id="relay-upgrade"></a>
+
+## Update an existing relay for 0.3.30
+
+First send a short chat with location sharing off and check for the matching Muse reply. To use location, update the route you already run. [Reference source for 0.3.30](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1)
+
+For a fresh copy, run the following commands. Run the setup commands below from that directory. For an upgrade, use a separate checkout and keep your existing configuration and data.
+
+```sh
+git clone --branch v0.3.30-beta.1 --depth 1 https://github.com/3mintimer/muse-relay.git muse-relay-0.3.30
+cd muse-relay-0.3.30
+```
+
+| Your route | What to update |
+|---|---|
+| Gadget (Node / Docker) | Take `server/` and `protocol/` from the same version. Restart with the existing configuration, state file and volumes. For Docker, rebuild in the existing Compose project. [Node instructions](server.md) |
+| Gadget (Worker / Sites) | Rebuild the Worker from that version and deploy to the existing host with the same D1, R2 and secrets. Location support alone needs no database migration or ATOM firmware update. [Worker instructions](../server/cloudflare/README.md) |
+| GitHub Gist | Update the existing writer and keep its Gist and processing state. The reference watcher passes `location` to the handler on stdin. Have the handler forward it to Muse in the same turn. [Handler input and output](../adapters/gist/README.md) |
+| Custom relay | Read optional `location` in `POST /v1/requests`. Pass it to Muse in the message text or the text item accompanying audio or a photo. Accept requests that omit it. [HTTP contract](protocol.md#custom-relay) |
+
+**Check on the phone.** Turn on the composer pin or **Settings → Location**, then allow location access on the phone. Choose a refresh interval of 1, 3 or 5 minutes (default 1). Sending from G2 also uses a cached fix under five minutes old. A message goes through immediately even if background updates have paused or permission is unavailable.
+
+From a place you are comfortable sharing, ask “Which station is nearby?” Tap the pin on the sent message in the phone history to see the fix used for that turn. The reference Gadget relay includes coordinates in the Muse conversation. The G2 and Even Hub chat show the original text. Muse and Gist revisions may retain sent locations. Turn sharing off and check that the next sent message has no pin.
 
 <details>
 <summary>Prepare the relay and select settings</summary>
@@ -38,15 +65,18 @@ flowchart LR
 | Method | What you provide | What you enter in the app |
 |---|---|---|
 | GitHub Gist | Your Gist, token, and Muse-side handler | Gist ID or URL, GitHub token |
-| Muse Gadget SDK | Your HTTPS relay, SDK-compatible device, SDK token, and Muse pairing | Relay URL, phone connection key |
+| Muse Gadget SDK | HTTPS relay reachable by both phone and device, SDK-compatible ESP32 board or Linux PC, SDK token, and Muse pairing | Relay URL, phone connection key |
+| Custom relay server | A server implementing the app’s HTTPS contract and your own Muse integration | Base URL, optional phone token and hosting key |
 
-The Gadget UI names ATOM S3 as the reference device. Implement the relay for your own SDK-compatible device and hosting while preserving the [app contract](protocol.md). You do not have to use the bundled server/watcher or rebuild an EHPK for each user.
+Deploy the Gadget HTTPS relay on ChatGPT Sites or in your own Cloudflare Workers account. For Cloudflare Pages, deploy the same Worker with Pages Functions in Advanced mode. Each host needs D1, R2, and role-specific secrets. In the app, select Muse Gadget SDK and enter your relay URL and phone key. [Hosting setup](../server/cloudflare/README.md)
+
+Use firmware for your ESP32 model or a separate SDK adapter for Linux. [ATOM S3](atoms3.md) is the reference ESP32 board. Both routes use the same app build and [HTTP contract](protocol.md). The bundled server and watcher are optional.
 
 | Who handles it | Handoff |
 |---|---|
 | You, in the app | Select the relay and features, enter your credentials, save, then send the verification requests below |
 | Muse / your implementer | Supply the running handler or SDK integration, correlate replies, and export any requested Spaces/images. A copied prompt alone does not start a relay |
-| Relay owner / operator | Keep the handler or home device running; manage credentials, retention, and cleanup |
+| Relay owner / operator | Run the handler or relay device and manage credentials, retention, and cleanup |
 
 For an existing G2Muse Gist, preserve its shared history and adapt its existing writer to accept Muse Relay request files. Do not initialize the shared root again or start a second writer. Avatar export is optional on either method: prepare it only on the route where you want images, without copying it to the other relay.
 
@@ -56,7 +86,7 @@ Choose the relay, voice mode, microphone, and image setting in the app, then cop
 
 | Selection | Instructions for Muse |
 |---|---|
-| Gist / Muse Gadget SDK | Use only the selected method's input/output |
+| Gist / Muse Gadget SDK / Custom relay | Use only the selected method's input/output |
 | Muse transcription | Send WAV to Muse. Return transcription to the original input when available; a Muse reply alone does not guarantee a returned transcript. [Export rules](protocol.md#voice-transcripts-and-reply-matching) |
 | Soniox | Audio goes to Soniox; only final text goes to Muse. Do not transcribe again with Whisper |
 | G2 / phone microphone | Verify recording from the selected source |
@@ -87,7 +117,8 @@ Preparation:
 
 Input:
 - Read new requests from muse-relay-request-<id>.json.
-- Format: {protocol:"muse-relay/1",id,kind:"chat"|"space",text,created_at,space_id?,space_action?}.
+- Format: {protocol:"muse-relay/1",id,kind:"chat"|"space",text,created_at,space_id?,space_action?,location?}.
+- Chat location is optional (latitude and longitude in degrees, captured_at in Unix seconds, optional accuracy in metres). Include a valid fix in the same Muse turn, using a companion text item for audio or photos. Preserve the original You text and transcript for display. Continue normally for missing or invalid fixes. No location file or follow-up lookup is needed.
 - Resolve audio_file/audio_mime/audio_name and image_file/image_mime/image_name.
 - Referenced files contain base64. Standard audio is 16 kHz, 16-bit mono WAV.
 - Use a lightweight watcher. Invoke Muse only for new requests, rather than periodically launching an AI process.
@@ -128,22 +159,23 @@ Completion:
 ```text
 Implement a Muse Gadget SDK relay for Muse Relay in my environment.
 Keep the distributed EvenHub app unchanged and implement the app HTTP contract in the attached docs/protocol.md.
-Use the SDK-compatible device I specify. Keep it at home while my phone and G2 can be used away from home.
+Use the supported ESP32 board or Linux PC I specify. Provide matching firmware for the board, or a separate SDK adapter for Linux. Choose the installation location to suit my network and operation.
 The bundled server/ and firmware/ are optional references; adapt the implementation to my device and hosting.
 Current settings: voice=<Muse or Soniox>, microphone=<G2 or phone>, recorded speakers=<all/me/others>, images=<off or on>, Soniox authentication=<API key input/temporary-key server>.
 G2 speaker selection silences excluded and unknown audio in the app. The phone microphone records all audio. Do not infer or reconstruct excluded speech.
 Reuse existing connections where available, and implement/verify the selected settings.
 
 Preparation:
-- Provide my own HTTPS endpoint; the device must connect outbound.
-- Do not use the device's home LAN IP as the phone's relay endpoint.
+- Set up an HTTPS relay that both my phone and my device can reach. Have the device connect outbound.
+- Use that HTTPS relay URL in the app.
 - Use the official Muse Gadget SDK, SDK token, and Muse pairing.
 - Separate phone, device, and Muse-writer credentials, using secure input and storage.
 - Do not use the SDK token as the app's HTTP key.
 
 App input/output:
 - GET /v1/snapshot returns {messages,spaces,profile?,device?,capabilities?}.
-- POST /v1/requests accepts {id,kind,text,created_at,space_id?,space_action?,audio?,image?}.
+- POST /v1/requests accepts {id,kind,text,created_at,space_id?,space_action?,audio?,image?,location?}.
+- Chat location is optional (latitude and longitude in degrees, captured_at in Unix seconds, optional accuracy in metres). Include a valid fix in the same Muse turn, using a companion text item for audio or photos. Preserve the original You text and transcript for display. Continue normally for missing or invalid fixes. No location file or follow-up lookup is needed.
 - GET /v1/files/:name returns required attachments as {mime,name,data_base64}.
 - Use Authorization: Bearer and CORS matching the app's Origin.
 - Enforce attachment, text, and device-memory limits. Explicitly reject unsupported input.
@@ -156,7 +188,7 @@ Muse and device side:
 - Create or adjust Spaces only if separately requested. Prefer layout:"list", or "cards" for long reading. Do not assume an unverified Spaces API.
 - Map button, slider, choice, and microphone controls to item handlers. Do not require a keyboard, pointer, external page, or long press.
 - kind:"space" without space_action only refreshes readable data. Only act on declared space_action:{item_id,type,value?}, then republish the resulting values/content. Sliders use numbers, choices use option IDs; buttons/microphone omit value.
-- In Muse voice mode, process WAV in Muse. The reference relay updates the original You message when an ACK-matching SDK message.user contains display_text/text/content. Set the Muse reply's reply_to to the original request ID. POST /v1/messages is for Muse replies only. If the SDK provides no transcript, the input remains labeled as a voice message. Use Soniox if final text must be obtained in the app.
+- With relay transcription, use the final text directly when the relay provides live captions. For WAV input, process the recording in Muse. The reference relay updates the original You message when an ACK-matching SDK message.user contains display_text/text/content. Set the Muse reply's reply_to to the original request ID. POST /v1/messages is for Muse replies only. If the SDK provides no transcript, the input remains labeled as a voice message. Use Soniox if final text must be obtained in the app.
 - In Soniox mode, audio goes directly from the app to Soniox and Muse receives final text only. Do not transcribe again. With API-key mode, I enter the key in the app and no additional issuer is required. Temporary-key mode uses /v1/soniox-token or the selected custom issuer and its own authentication. Never put keys in instructions or Gist.
 
 Muse output when using the bundled server:
@@ -176,7 +208,18 @@ Completion:
 - Provide the HTTPS URL and instructions for setting the phone connection key.
 - First verify one text message I sent and its matching reply. Verify recording/Spaces only if requested; do not create them as a side effect of connection setup. Do not add unselected voice services.
 - Verify images only when enabled and requested.
-- Claim away-from-home access and physical G2 display only if actually verified.
+- If mobile-data access is needed, test it separately. Report it and physical G2 display as successful only if actually verified.
+```
+
+</details>
+
+<details>
+<summary>Copy for Muse: custom HTTPS relay</summary>
+
+```text
+Set up an HTTPS relay for Muse Relay on my server. Allow the Origin shown in the app. Give me the base URL and a secure way to enter any required credentials.
+Start GET /v1/snapshot with {"messages":[]}. Accept POST /v1/requests once per ID and return HTTP 202 with {"accepted":true,"id":"original-id"}. Use my Muse integration and publish its reply in snapshot.messages with reply_to set to that request ID.
+Chat location is optional (latitude and longitude in degrees, captured_at in Unix seconds, optional accuracy in metres). Include a valid fix in the same Muse turn, using a companion text item for audio or photos. Preserve the original You text and transcript for display. Continue normally for missing or invalid fixes. No location file or follow-up lookup is needed.
 ```
 
 </details>
@@ -191,6 +234,8 @@ flowchart TD
   A[Connection settings] --> B{Selected method}
   B -->|Gist| C[Gist ID / URL<br/>GitHub token]
   B -->|Gadget| D[HTTPS relay URL<br/>Phone key]
+  B -->|Custom| J[Base URL and optional credentials]
+  J --> E
   C --> E[Voice and images]
   D --> E
   E --> F[Check connection]
@@ -202,9 +247,10 @@ flowchart TD
 
 | Voice setting | Additional setup | Audio destination |
 |---|---|---|
-| Transcribe at the relay | Gist: your handler. Gadget: Muse via SDK | Upload the audio file when sending; no captions during recording |
-| Soniox: enter API key, either relay | Enter your own key in app voice settings | Audio directly to Soniox; interim text on G2, final text to Muse |
-| Soniox: temporary-key server, either relay | Issuer URL and authentication. Gadget may reuse its relay settings | Same audio path; the long-lived key stays on the issuer |
+| Transcribe via relay (WAV) | Gist uses your handler. The reference Gadget relay uses Muse via the SDK | Upload the recording on send |
+| Transcribe via relay (live captions) | An HTTPS relay advertising `capabilities.live_transcription:true` | Stream audio to the relay while recording and send final text to Muse on submit |
+| Soniox: enter API key, any route | Enter your own key in app voice settings | Audio directly to Soniox; interim text on G2, final text to Muse |
+| Soniox: temporary-key server, any route | Issuer URL and authentication. Gadget may reuse its relay settings | Same audio path; the long-lived key stays on the issuer |
 
 The Soniox connection check completes an authenticated session using one second of silence. It uses neither the microphone nor Muse. Entering a key or configuring a server alone does not count as verification. Existing temporary-key configurations remain unchanged after an update.
 
@@ -221,15 +267,15 @@ Use your saved relay and selected features. For voice tests, first save the mode
 
 | Route | In the app | Confirm |
 |---|---|---|
-| Active relay · Gist / Gadget | **Settings → Connection**: method and endpoint → **Check connection → Save settings** (initial setup: **Save and open**) | Top status names the saved **Gist / Muse Gadget** choice. Checking a draft does not switch it |
-| Text · Gist / Gadget | **Chat → Send** a new message → reply's **Show on glasses** | Matching Muse reply on phone and G2 |
+| Active relay · all routes | **Settings → Connection**: method and endpoint → **Check connection → Save settings** (initial setup: **Save and open**) | The status at the top matches the saved relay. Checking a draft does not switch it |
+| Text · all routes | **Chat → Send** a new message → reply's **Show on glasses** | Matching Muse reply on phone and G2 |
 | Relay transcription · Gist | **Chat → Voice** → speak → **Stop and send** | Spoken words in your input, plus the matching Muse reply |
 | Relay transcription · Gadget | **Chat → Voice** → speak → **Stop and send** | Muse reply to the recording; check transcript availability separately below |
 | Soniox · Gist / Gadget, if selected | Check Soniox in **Voice & images**, save → **Chat → Voice → Stop and send** | Captions/final input text, then Muse reply. A silent connection check is not this test |
 | Space · Gist / Gadget, if requested | **Spaces → Add → Add an exported space** → refresh/add → open an item | Exported content; declared actions produce updated content/value after acceptance |
 | Image · Gist / Gadget, if enabled | Ask Muse for an image → received reply → **Show on glasses** | Image on G2; separate from image input into a Gadget |
-| Avatar · either route, optional | **Settings → G2 display → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
-| Mobile data · Gist / Gadget | Keep required devices/handlers running; away from home, turn phone Wi-Fi off and use mobile data → **Chat → Send** or **Voice → Stop and send** | New matching reply on phone and G2 over mobile data |
+| Avatar · any route, optional | **Settings → Avatar & animation → Manage artwork → Ask Muse for avatar** → copy/send → **Chat → Refresh** → G2 home | Existing avatar, with images enabled. No export to the other route needed |
+| Mobile data · Gist / Gadget (optional) | Keep the device or handler running. Switch the phone to mobile data → **Chat → Send** or **Voice → Stop and send** | New matching reply on phone and G2 over mobile data |
 
 **Connected / Device online** is not a Muse round trip. Reading fails → relay operator; no reply after a successful read → Muse/handler implementer; phone reply works but G2 does not → Even/G2 connection and **Show on glasses**.
 

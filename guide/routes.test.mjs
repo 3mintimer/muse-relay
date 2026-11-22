@@ -77,15 +77,26 @@ test('all nine pages contain translated titles, actions, navigation, and languag
     assert.match(html, new RegExp(`<html lang="${code}"`));
     for (const [tag, key] of [
       ['title', 'Muse Relay — Guide & setup'],
+      ['h2', 'Choose a relay method'],
+      ['strong', 'Relay through GitHub Gist'],
+      ['strong', 'Relay through an ESP32 device'],
+      ['strong', 'Relay through a Linux computer'],
+      ['strong', 'Custom relay server'],
+      ['summary', 'Share phone location (optional)'],
+      ['a', 'Update an existing relay for 0.3.30'],
       ['h2', 'Ask Muse to set it up'],
       ['button', 'Copy instructions'],
       ['summary', 'Reply arrived, but no transcript'],
       ['a', 'Setup'],
+      ['p', 'You can install the app once it appears in the store.'],
     ]) {
       const translated = messageFor(key, code);
       if (code !== 'en') assert.notEqual(translated, key, `${code}: untranslated ${key}`);
       assertText(html, tag, translated);
     }
+    const storeLink = html.match(/<a\b[^>]*\bid="download"[^>]*>([^<]*)<\/a>/);
+    assert.ok(storeLink?.[0].includes('href="https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay"'), code);
+    assert.equal(storeLink[1], escapeHtml(messageFor('Get it on Even Hub', code)));
     for (const target of codes) {
       const tag = html.match(new RegExp(`<a\\b(?=[^>]*\\bdata-language="${target}")[^>]*>`))?.[0];
       assert.ok(tag, `${code}: missing ${target} language link`);
@@ -95,6 +106,7 @@ test('all nine pages contain translated titles, actions, navigation, and languag
     for (const anchor of ['setup', 'connection', 'voice', 'relay', 'feedback', 'g2muse']) assert.ok(html.includes(`id="${anchor}"`));
     assert.ok(html.includes('src="/app.js"') && html.includes('href="/style.css"'));
     assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md`));
+    assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#relay-upgrade`));
     assert.ok(html.includes('action="/api/feedback"'));
     assert.match(html, /<input type="checkbox" name="share">/);
   }

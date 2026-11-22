@@ -16,9 +16,11 @@ flowchart LR
   Phone <-->|Gist方式| Gist[利用者のGitHub Gist]
   Gist <-->|新規依頼だけ処理| Handler[利用者のMuse処理]
   Phone <-->|Gadget方式 / HTTPS| Relay[利用者の中継サーバー]
-  ATOM[利用者のSDK対応機器<br/>参考: 自宅 ATOM S3] -->|外向きHTTPS<br/>依頼取得・返信返却| Relay
-  ATOM <-->|Muse Gadget SDK| Muse[Muse]
+  Device[対応ESP32ボード / Linux PC] -->|外向きHTTPS<br/>依頼取得・返信返却| Relay
+  Device <-->|Muse Gadget SDK| Muse[Muse]
   Muse -->|テキスト・画像・スペースの出力| Relay
+  Phone <-->|カスタム / HTTPS| Custom[利用者のサーバー]
+  Custom <-->|利用者が設定| Muse
 ```
 
 | 役割 | アプリ | 中継 / Muse側 |
@@ -33,7 +35,7 @@ G2Museのメッセージ形式を読み取れます。機能の基準として�
 
 ## 共通データ
 
-日時はUnix秒。両方式で使う依頼IDは80文字以下の英数字・`_`・`-`を推奨します。`muse_` / `status_` で始まるIDはGadget側の出力用に予約されています。
+日時はUnix秒。各方式で使う依頼IDは80文字以下の英数字・`_`・`-`を推奨します。`muse_` / `status_` で始まるIDはGadget側の出力用に予約されています。
 
 ### アプリ → 中継
 
@@ -52,8 +54,13 @@ G2Museのメッセージ形式を読み取れます。機能の基準として�
 | `kind` | `chat` / `space` |
 | `text` | 入力テキスト。音声や画像のみなら空文字 |
 | `created_at` | 作成日時 |
+| `location` | チャットの任意項目。緯度・経度（度）を `latitude`・`longitude`、取得時刻（Unix 秒）を `captured_at`、任意の水平精度（m）を `accuracy` に格納。共有オフ・未取得・取得から5分以上の場合は項目を省略。 |
 | `space_id` | `kind:space` の場合の設定済みスペースID |
 | `audio` / `image` | Gadget方式の添付。Gistは後述の別ファイル参照 |
+
+チャット入力欄のピンと設定のスイッチは同じ共有設定を変更します（初期値はオフ）。アプリは送信時にキャッシュにある位置を使います。Gadget 中継は Muse の本文に「【現在地】」と位置の JSON を追記します。音声・写真では同じ本文をテキスト項目に入れます。Muse は電文から座標を直接読めます。Gist ハンドラーとカスタム中継にもリクエストの `location` が渡ります。 既存の中継を更新するには[経路別の手順](relay-setup.ja.md#relay-upgrade)を参照してください。
+
+Even Hub は送信が受理された時点の位置を、そのメッセージに紐づけてスマホの履歴キャッシュに保存します。送信した位置はピンをタップすると確認できます。G2 とスマホの通常表示には元の本文・文字起こしを使います。
 
 Gadgetの添付形式:
 
@@ -164,6 +171,47 @@ Gistの `muse-relay-profile.json` は次の形です。`avatar` のインライ�
 
 プロフィールはチャット履歴の件数制限とは独立して1件保持します。更新・解除で未参照になった添付はNodeでは状態から削除、Workerでは24時間の猶予と既存の上限付きGCに従って削除します。参照Gist watcherは自分の `muse-relay-avatar-*.base64` のうち参照されなくなったファイルを削除します。Gist履歴に残る過去版は別です。
 
+### ホームと返信待ちのアニメーション
+
+「設定 → アバターとアニメーション」で画像を有効にし、「素材の確認・取り込み → Museにアニメーションを依頼」の依頼文を渡します。Muse は既存のキャラクターを参照して、ホームで待機する姿と、返信待ちにパソコンを操作する姿を生成します。各16コマ、4 fps、4秒で最後のコマから最初に戻るループです。手元に連番画像がある場合は、用途ごとの「連番画像16枚を選ぶ」で、正方形の PNG・JPEG・WebP を16枚選択します。ファイル名を 01〜16 にすると番号順に並びます。手動取り込みは端末の WebView に接続先別に保存され、「Museからの画像に戻す」で中継の画像に切り替わります。
+
+転送レコードは `id:"muse_relay_avatar_motion_v1"`、`title`、更新ごとに増える Unix 秒の `updated_at`、2件の `items` を持ちます。各項目は `id`（`idle` または `working`）、`title`、空の `text`、`image:{mime:"image/png",name,data_base64}` を持ちます。用途ごとに 144 × 144 px の16コマを左から右、上から下に4列×4行で配置し、576 × 576 px・250,000バイト以下の PNG にします。
+
+- HTTPS は Muse 用キーで `PUT /v1/spaces/muse_relay_avatar_motion_v1` に送ります。既存のスペース1件分と画像2件分を使います。アプリは予約 ID を認識してスペース一覧から除外し、インライン画像または中継が返す `image_file` を読み込みます。
+- Gist は同じレコードを `muse-relay-motions.json` に書き込みます。プロフィール、チャット履歴、通常のスペースはそれぞれのファイルで管理します。
+
+既定の表示設定では、ホームは待機ループを優先し、未設定時は既存の静止画を表示します。作業ループは送信したチャットの返信待ち画面に表示し、対応する回答が届くと回答へ切り替えます。グラスへの転送に250 ms以上かかった場合は、4秒の周期に合わせて経過したコマを飛ばします。
+
+<a id="custom-relay"></a>
+
+## カスタム中継サーバー
+
+アプリの「カスタム中継サーバー」に利用者のHTTPSベースURLを入力します。たとえば `https://example.com/muse` なら、読み取り先は `https://example.com/muse/v1/snapshot` です。Museに渡す経路、認証、保存方法はサーバー管理者が選びます。開発時はループバックのHTTPも利用できます。
+
+**テキストチャットの最小構成**は次の2つです。日時はUnix秒です。
+
+```http
+GET /v1/snapshot
+200 OK
+{"messages":[]}
+
+POST /v1/requests
+{"id":"r_example","kind":"chat","text":"Hello","created_at":1795219200}
+202 Accepted
+{"accepted":true,"id":"r_example"}
+
+GET /v1/snapshot
+200 OK
+{"messages":[{"id":"muse_example","from":"Muse","type":"text","text":"Hello!","ts":1795219202,"reply_to":"r_example"}]}
+```
+
+依頼IDで重複処理を防ぎ、返信の `reply_to` に同じIDを返します。「接続を確認」はスナップショットを読むだけです。受付後に新しい返信が表示されれば、Museまでの往復を確認できます。
+
+- スマートフォン用トークンを入力すると、アプリは `Authorization: Bearer <token>` を送ります。空欄ではこのヘッダーを省略します。ホスティング用接続キーも任意で、設定した場合にだけ `OAI-Sites-Authorization: Bearer <key>` を送ります。
+- CORSにはアプリが表示するOriginを登録し、`GET`、`POST`、プリフライトの `OPTIONS` と、実際に使用する認証ヘッダーおよび `Content-Type` を許可します。アプリはJSON応答を読みます。
+- 画像やアバターはインライン、または `GET /v1/files/:name` の添付JSONで返せます。スペースは `spaces`、プロフィールは `profile` に含めます。画像入力に対応したら `capabilities.images:true` を返します。
+- 音声を受ける場合は依頼の `audio` にWAVが届きます。ライブ字幕を実装したら `capabilities.live_transcription:true` を返し、`/v1/voice/live` で後述のWebSocket仕様を使います。空のトークンではサブプロトコル候補は `muse-relay-voice` の1つです。設定済みトークンは2つ目の候補で、WebSocketのサブプロトコルに使える文字が必要です。WebSocketにはHTTP用のホスティングヘッダーが付かないため、アップグレードに対応したホストで有効にします。Sonioxの一時キーをこのサーバーで発行する場合のみ `POST /v1/soniox-token` を実装します。
+
 ## Gist方式
 
 ### ファイルと書き込み担当
@@ -258,7 +306,7 @@ secret GistはURLを知る人が閲覧できる非公開一覧であり、内容
 
 ## Muse Gadget SDK方式
 
-スマートフォンは利用者のHTTPS中継へ接続します。同梱の参考構成では、自宅のATOM S3が中継を取得し、ペアリング済みMuse Gadget SDKの接続でMuseへ渡します。利用者の対応機器や配置に合わせた実装も可能です。
+スマートフォンと対応ESP32ボードまたはLinux PCは、双方から届く同じHTTPS中継へ接続します。機器は外向きの接続で依頼を取得し、ペアリング済みMuse Gadget SDKの接続でMuseへ渡します。ボードには機種に合うファームウェア、Linuxには別途SDKアダプターが必要です。ATOM S3は参考ボードです。
 
 ### アプリのHTTP境界と参考実装の管理口
 
@@ -442,7 +490,7 @@ Gadget中継では `capabilities.live_transcription:true` を返すと有効に�
 | Gist読取ファイル | 6,000,000文字以下。参照watcherは6,000,000バイト以下 |
 | Gadget音声 | WAV 1,100,000バイト以下 |
 | Gadget画像出力 | 画像 250,000バイト以下 |
-| プロフィール | 1件。アバター250,000バイト以下、名前120文字以下（両方式） |
+| プロフィール | 1件。アバター250,000バイト以下、名前120文字以下 |
 | 参照中継のテキスト依頼 | Gist watcher 20,000文字 / Gadget 10,000文字以下 |
 | 表示用本文 | アプリ読取は20,000文字まで |
 | ATOMの返信本文 | 1返信につきUTF-8で4KiB。超過は明示エラー |

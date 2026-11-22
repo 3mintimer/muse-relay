@@ -16,9 +16,11 @@ flowchart LR
   Phone <-->|Gist| Gist[Your GitHub Gist]
   Gist <-->|Process new requests only| Handler[Your Muse handler]
   Phone <-->|Gadget / HTTPS| Relay[Your relay server]
-  ATOM[Your SDK device<br/>Reference: ATOM S3 at home] -->|Outbound HTTPS<br/>Fetch jobs and return replies| Relay
-  ATOM <-->|Muse Gadget SDK| Muse[Muse]
+  Device[Supported ESP32 board / Linux PC] -->|Outbound HTTPS<br/>Fetch jobs and return replies| Relay
+  Device <-->|Muse Gadget SDK| Muse[Muse]
   Muse -->|Text, image, and Space exports| Relay
+  Phone <-->|Custom / HTTPS| Custom[Your server]
+  Custom <-->|Your integration| Muse
 ```
 
 | Responsibility | App | Relay / Muse |
@@ -33,7 +35,7 @@ G2Muse message data is readable. It is a feature baseline, not outgoing compatib
 
 ## Common data
 
-Timestamps use Unix seconds. For IDs shared across both methods, use at most 80 letters, digits, `_`, or `-`. Gadget reserves IDs beginning with `muse_` or `status_` for output.
+Timestamps use Unix seconds. For IDs shared across the relay methods, use at most 80 letters, digits, `_`, or `-`. Gadget reserves IDs beginning with `muse_` or `status_` for output.
 
 ### App to relay
 
@@ -52,8 +54,13 @@ Timestamps use Unix seconds. For IDs shared across both methods, use at most 80 
 | `kind` | `chat` / `space` |
 | `text` | Input text; empty for audio/image-only input |
 | `created_at` | Creation time |
+| `location` | Optional for chats. Degrees in `latitude` and `longitude`, Unix seconds in `captured_at`, optional horizontal `accuracy` in metres. Omitted while sharing is off or no fix under five minutes old is available. |
 | `space_id` | Configured Space ID for `kind:space` |
 | `audio` / `image` | Gadget attachments; Gist uses separate file references below |
+
+The composer pin and Settings change the same sharing preference, initially off. Chat sends with the cached fix when available. The Gadget relay appends `【現在地】` and the location JSON to the Muse message. For audio and photos, the same message is included as a text item. Muse can use the coordinates directly. Gist handlers and custom relays receive the request’s `location` field. See the [route-specific upgrade steps](relay-setup.md#relay-upgrade) when updating an existing relay.
+
+After the relay accepts a message, Even Hub keeps its sent fix with that message in the phone’s local history cache. Tap its pin to inspect the fix. Both the G2 and the normal phone chat display the original text or transcript.
 
 Gadget attachment format:
 
@@ -164,6 +171,47 @@ Gist `muse-relay-profile.json` has the shape below; inline `avatar` is also read
 
 One profile is retained independently of chat history limits. When replaced/cleared, Node removes unreferenced attachment state; Worker uses its existing bounded GC and 24-hour grace. The Gist watcher removes its own unreferenced `muse-relay-avatar-*.base64` files. Older Gist revisions are separate.
 
+### Home and reply-wait animations
+
+In **Settings → Avatar & animation**, enable images and open **Manage artwork → Ask Muse for animations**. The prompt asks Muse to generate two looping sequences from its current character reference. Each loop has 16 square frames at 4 fps. With individual PNG, JPEG or WebP frames, choose **Choose 16 frames** for the desired loop. Number filenames 01–16. The app sorts them in numeric filename order and saves the import in this WebView for the selected connection. **Use images from Muse** restores the relay version.
+
+The transport record has ID `muse_relay_avatar_motion_v1`, a title, an increasing Unix-second `updated_at`, and two items. Each item has `id` (`idle` or `working`), `title`, empty `text`, and `image:{mime:"image/png",name,data_base64}`. Each PNG is 576 × 576 px, at most 250,000 bytes. Pack the 144 × 144 px frames in a 4 × 4 grid, reading across each row. The working motion depicts Muse using a computer. The final pose transitions into the first.
+
+- HTTPS writers send the record with the Muse credential using `PUT /v1/spaces/muse_relay_avatar_motion_v1`. This uses one space and two image slots. The app recognizes the reserved ID, omits it from the Spaces menu and reads inline images or the relay's `image_file` references. Publish a new revision when replacing artwork.
+- Gist writers put the same record in `muse-relay-motions.json`. It is independent of the profile, chat history and space exports.
+
+With images enabled and the default animation choices, Home uses the idle loop when available and falls back to the existing still avatar. An outstanding chat on the reply-wait screen uses the working loop. A matching reply replaces it. The app updates one image container on a four-second timeline and skips elapsed frames when the glasses transfer takes longer than 250 ms.
+
+<a id="custom-relay"></a>
+
+## Custom relay server
+
+Enter your HTTPS base URL under **Custom relay server**. For example, the app reads `https://example.com/muse/v1/snapshot` for the base URL `https://example.com/muse`. Choose how your server reaches Muse and handles access and storage. Loopback HTTP is supported for local development.
+
+**Text chat needs two routes.** Timestamps are Unix seconds.
+
+```http
+GET /v1/snapshot
+200 OK
+{"messages":[]}
+
+POST /v1/requests
+{"id":"r_example","kind":"chat","text":"Hello","created_at":1795219200}
+202 Accepted
+{"accepted":true,"id":"r_example"}
+
+GET /v1/snapshot
+200 OK
+{"messages":[{"id":"muse_example","from":"Muse","type":"text","text":"Hello!","ts":1795219202,"reply_to":"r_example"}]}
+```
+
+Deduplicate requests by ID and put that ID in the reply’s `reply_to`. **Check connection** reads the snapshot. Send a new message and look for its matching reply to verify the round trip to Muse.
+
+- The optional phone token sets `Authorization: Bearer <token>`. Leaving it blank omits the header. An independently configured hosting key sets `OAI-Sites-Authorization: Bearer <key>`.
+- Allow the origin displayed in the app, `GET`, `POST`, preflight `OPTIONS`, `Content-Type`, and the authentication headers you use. Return JSON bodies.
+- Return images and avatars inline or as attachment JSON at `GET /v1/files/:name`. Export Spaces in `spaces` and a profile in `profile`. Advertise `capabilities.images:true` when supporting image input.
+- For voice input, read the WAV in the request’s `audio`. For live captions advertise `capabilities.live_transcription:true` and implement the documented `/v1/voice/live` WebSocket. Without a phone token the only offered subprotocol is `muse-relay-voice`. A configured token is offered as the second subprotocol and must be a valid WebSocket protocol token. Enable this feature on hosts that accept upgrades without the HTTP hosting header. Implement `POST /v1/soniox-token` only when issuing Soniox temporary keys on this relay.
+
 ## Gist method
 
 ### Files and writers
@@ -258,7 +306,7 @@ Run one writer for the shared root. Preserve saved results after interruption in
 
 ## Muse Gadget SDK method
 
-The phone connects to your HTTPS relay. In the reference setup, ATOM S3 at home fetches requests and passes them to Muse through its paired SDK connection. You may use another supported device or hosting arrangement.
+The phone and the SDK device connect to the same HTTPS relay. The device retrieves requests and forwards them to Muse over its paired SDK connection. An ESP32 board uses firmware for its model, such as the ATOM S3 reference firmware. A Linux computer needs a separate SDK adapter.
 
 ### App HTTP boundary and reference management routes
 
@@ -442,7 +490,7 @@ These are app and bundled reference limits. Custom relays must respect the app's
 | Gist readable file | At most 6,000,000 characters; reference watcher uses 6,000,000 bytes |
 | Gadget audio | WAV up to 1,100,000 bytes |
 | Gadget image output | Up to 250,000 bytes |
-| Profile | One; avatar up to 250,000 bytes, name up to 120 characters, both methods |
+| Profile | One; avatar up to 250,000 bytes, name up to 120 characters |
 | Reference text request | Gist watcher 20,000 characters / Gadget 10,000 |
 | Display text | App reads up to 20,000 characters |
 | ATOM reply | 4 KiB UTF-8 visible text per reply; explicit overflow error |

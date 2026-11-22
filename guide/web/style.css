@@ -689,6 +689,8 @@ svg {
   gap: 12px;
 }
 
+.route-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 .route-card,
 .choice-card {
   display: flex;
