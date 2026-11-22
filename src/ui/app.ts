@@ -518,7 +518,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
           return details;
         }};
         render();
-      }, { icon: 'location', iconOnly: true, highlighted: true, className: 'location-pin' });
+      }, { icon: 'location', iconOnly: true, secondary: true, className: 'location-pin' });
       pin.setAttribute('aria-haspopup', 'dialog');
       meta.append(focusKey(pin, focus));
     }
