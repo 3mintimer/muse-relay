@@ -212,7 +212,7 @@
     "src/relay/gist.ts": "b6f0a6d7c415982bb28041235bc18477153a6c428810fbd5245169171ae02ab2",
     "src/relay/protocol.ts": "e9d4a1d781fd2c3fa865de357512b90e759ffcd931250f530e9fc9b20c1f5c0e",
     "src/style.css": "c6bb773e3a094852944afd263b9d4d136cd73c34041c4500842b163fc9f68d9d",
-    "src/ui/app.ts": "4e19fbb5cea8e5e98aafc03a83082cac4de6d2ed754dfcb3b76653ecbe7c8a20",
+    "src/ui/app.ts": "b3761abe2652e1d53c7e788902bbac703afbf84584c22a8f3efb3dafc14a28c5",
     "src/ui/dom.ts": "df4a688991f142490c1f75783e0e2625be73d659043d717fd20c2b753ab7ce41",
     "src/ui/head-angle.ts": "f9240a54d8ef728e3d6e57c64e1cea3811a561af3f847a6279d5a01945c6ad7b",
     "src/ui/prompts.ts": "c97c25a256fa1fc8873d9cdb2f01efd8181b58864d355137931bc1b00774c929",

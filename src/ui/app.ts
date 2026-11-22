@@ -142,7 +142,15 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const group = el('details', 'settings-group'); group.dataset.group = key;
     group.open = settingsGroups.has(key);
     group.append(el('summary', '', el('span', '', title), el('span', 'muted', value)), el('div', 'settings-group-body', ...nodes));
-    group.addEventListener('toggle', () => { if (!group.isConnected) return; if (group.open) settingsGroups.add(key); else settingsGroups.delete(key); }); return group;
+    // A relay refresh or first keystroke may rebuild this group before the native
+    // asynchronous toggle event. Record the user's selection during activation.
+    group.addEventListener('click', event => {
+      if (!(event.target instanceof Element) || event.target.closest('summary') !== group.firstElementChild) return;
+      event.preventDefault();
+      group.open = !group.open;
+      if (group.open) settingsGroups.add(key); else settingsGroups.delete(key);
+    });
+    return group;
   }
   function openVoiceSettings() { view = 'settings'; settingsGroups.add('voice'); render(); root.querySelector('[data-group="voice"]')?.scrollIntoView({ block: 'start' }); }
   function capabilityHelp() {
