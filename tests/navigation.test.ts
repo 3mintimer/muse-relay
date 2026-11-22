@@ -62,7 +62,8 @@ function fakeDisplay() {
     async audioControl(_open = false) { return true; },
     async shutDownPageContainer() { return true; },
   };
-  return { bridge, frames, operations, text, items, containers:()=>structuredClone(page.textObject||[]), emit: (event: unknown) => eventHandler?.(event as EvenHubEvent) };
+  const menu = ():Array<{itemID:number; itemName:string}> => page.menuObject?.menuItems || [];
+  return { bridge, frames, operations, text, items, menu, containers:()=>structuredClone(page.textObject||[]), emit: (event: unknown) => eventHandler?.(event as EvenHubEvent) };
 }
 
 function bodyGeometry(app:ReturnType<typeof fakeDisplay>){
@@ -205,7 +206,7 @@ test('registered spaces keep user order through refresh, persist removals, and c
   const app=await appFixture(t,snapshot,true);let saved='';
   app.bridge.setLocalStorage=async(_key,value)=>{saved=value;return true;};
   await app.controller.selectSpaces(['second','test-space','second']);
-  app.overlay(5);await settle();assert.deepEqual(app.items(),['Second',snapshot.spaces[0]!.title]);
+  app.emit({listEvent:{currentSelectItemIndex:1}});await settle();assert.deepEqual(app.items(),['Second',snapshot.spaces[0]!.title]);
   await app.controller.refresh();assert.deepEqual(app.items(),['Second',snapshot.spaces[0]!.title]);
   await app.controller.showSpace('second');await app.controller.selectSpaces(['test-space']);
   assert.deepEqual(app.items(),[snapshot.spaces[0]!.title]);
@@ -219,7 +220,7 @@ test('an unavailable avatar keeps the home menu usable and retries with backoff 
   const snapshot=fixture(),app=await appFixture(t,snapshot,true);
   snapshot.profile={name:'Test Muse',avatar_file:'avatar.png',mime_type:'image/png',updated_at:1};
   await app.controller.refresh();await settle();
-  assert.equal(app.controller.state.avatarStatus,'error');assert.deepEqual(app.items(),['チャット','スペース','録音を開始']);
+  assert.equal(app.controller.state.avatarStatus,'error');assert.deepEqual(app.items(),['チャット','スペース','設定']);
   const attempts=app.attachmentReads();t.mock.timers.tick(10000);await settle();assert.equal(app.attachmentReads(),attempts,'a failed job must not loop');
   t.mock.timers.tick(290000);await settle();assert.equal(app.attachmentReads(),attempts+1,'periodic refresh retries a transient download failure');
   await app.controller.refresh();await settle();assert.equal(app.attachmentReads(),attempts+2);
@@ -230,7 +231,7 @@ test('home clock rolls over at midnight without rebuilding the menu or delaying 
   const app=await appFixture(t,fixture(),new Date(2026,10,17,23,59,55).getTime());
   const header=()=>app.containers().find((c:any)=>c.containerName==='header');
   assert.match(header().content,/2026\/11\/17.*23:59/);assert.equal(header().textColor,4);
-  assert.deepEqual(app.items(),['チャット','スペース','録音を開始']);
+  assert.deepEqual(app.items(),['チャット','スペース','設定']);
   await app.controller.saveSettings({...app.controller.state.settings,autoHideSeconds:10});
   const rebuilds=app.operations.filter(op=>op==='rebuild:list').length;
   app.document.hidden=true;app.document.dispatchEvent(new Event('visibilitychange'));
@@ -280,7 +281,7 @@ test('paired chat keeps input dim, replies and UI bright, and preserves paging, 
   assert.equal(part('input').content,`あなた: ${chatStamp(3)} · 次の質問`);
   assert.equal(part('input').height,G2_LINE_HEIGHT);assert.ok(bodyGeometry(app).body.height>longInputBodyHeight);
   assert.doesNotMatch(part('footer').content,/次のページ/,'a one-page answer only shows the home gesture');
-  app.overlay(11);await settle();assert.equal(app.controller.state.settings.chatLayout,'single');assert.equal(part('input'),undefined);
+  await app.controller.saveSettings({...app.controller.state.settings,chatLayout:'single'});await settle();assert.equal(part('input'),undefined);
   app.emit({textEvent:{eventType:2}});await settle();assert.match(app.text(),/次の質問/);assert.equal(part('body').textColor,1);
   await app.controller.showSpace('test-space');assert.equal(part('body').textColor,4,'brightness must reset when a dim container is reused for UI');
   await app.controller.saveSettings({...app.controller.state.settings,chatLayout:'exchange',autoHideSeconds:5});
@@ -1172,6 +1173,7 @@ test('contextual selection and dismissal preserve navigation and in-flight reque
   const read = app.controller.refresh();
   await until(() => app.requests.length === 2, 'a refresh is in flight');
   const signal = app.requests.at(-1)!.signal!;
+  await app.controller.showMessage('test-message');
   app.overlay(5);
   await until(() => app.items().includes('テストスペース'), 'contextual Spaces should appear after the overlay closes');
   assert.equal(signal.aborted, false, 'overlay dismissal is not app backgrounding');
@@ -1317,33 +1319,12 @@ test('opening Chat with an empty saved and remote snapshot shows an explicit emp
   await until(() => app.items().includes('チャット'), 'the empty state must have a working back gesture');
 });
 
-test('contextual refresh survives native background, retries failures, and aborts only on exit', async t => {
+test('refresh survives native background and aborts only on exit', async t => {
   const app = await appFixture(t);
-  let pending = deferred<Response>();
-  app.setRead(() => pending.promise);
-  app.overlay(1);
-  await until(() => app.text().includes('更新中'), 'manual refresh should show progress on glasses');
-  pending.resolve(response(fixture()));
-  await until(() => app.items().includes('チャット'), 'successful refresh should be acknowledged');
-
-  pending = deferred<Response>();
-  app.setRead(() => pending.promise);
-  app.overlay(1);
-  await until(() => app.text().includes('更新中'), 'the next manual refresh should show progress');
-  pending.resolve(new Response('{}', { status: 503 }));
-  await until(() => /再試行|更新できません|更新に失敗|接続できません|HTTP 503/.test(app.text()), 'a failed refresh must be visible on glasses');
-  const beforeRetry = app.requests.length;
-  pending = deferred<Response>();
-  app.setRead(() => pending.promise);
-  app.emit({ sysEvent: {} });
-  await until(() => app.requests.length > beforeRetry, 'tap on the error should retry the request');
-  pending.resolve(response(fixture()));
-  await until(() => app.items().includes('チャット'), 'retry should recover without reopening the app');
-
   const holdUntilAborted = (options: RequestInit) => new Promise<Response>((_resolve, reject) => {
     options.signal!.addEventListener('abort', () => reject(new DOMException('Synthetic cancellation', 'AbortError')), { once: true });
   });
-  pending=deferred<Response>();app.setRead(()=>pending.promise);
+  const pending=deferred<Response>();app.setRead(()=>pending.promise);
   const backgroundRead = app.controller.refresh();
   await settle();
   const backgroundSignal = app.requests.at(-1)!.signal!;
@@ -1741,4 +1722,64 @@ test('hidden phone lets G2 send without a fix and attaches only fresh chat locat
   assert.equal(stops,1);
   await app.controller.sendText('off');
   assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
+});
+
+test('Home settings save chat preferences, preserve the connection and support backing out', async t => {
+  const app = await appFixture(t, fixture(), true);
+  const before = { ...app.controller.state.settings };
+  const tap = async (label: string) => {
+    const index = app.items().indexOf(label);
+    assert.ok(index >= 0, label);
+    app.emit({listEvent: {currentSelectItemIndex: index}});
+    await settle();
+  };
+  const back = async () => { app.emit({sysEvent:{eventType:3}}); await settle(); };
+  await tap('設定');
+  assert.deepEqual(app.items(), ['チャットに現在地を付ける','画像を使用','チャット表示','送信後にチャットへ戻る','自動で非表示','通常の受信間隔']);
+  await tap('チャットに現在地を付ける');
+  assert.deepEqual(app.items(), ['✓ オフ','オン']);
+  await back();
+  assert.equal(app.controller.state.settings.shareLocation, false);
+  for (const [label, choice] of [
+    ['チャットに現在地を付ける', 'オン'], ['位置の取得間隔', '3 分'], ['画像を使用', 'オフ'],
+    ['チャット表示', 'メッセージごと'], ['送信後にチャットへ戻る','オフ'], ['自動で非表示','15 秒'], ['通常の受信間隔', '30 秒'],
+  ]) {
+    await tap(label); await tap(choice);
+    assert.ok(app.items().includes('✓ ' + choice));
+    await back();
+  }
+  await back();
+  assert.deepEqual(app.items(), ['チャット','スペース','設定']);
+  await app.controller.reloadSettings();
+  assert.deepEqual(app.controller.state.settings, {...before,shareLocation:true,locationIntervalMinutes:3,images:false,
+    chatLayout:'single',returnToChatAfterSend:false,autoHideSeconds:15,pollSeconds:30});
+});
+
+test('the contextual all-read action preserves chat, hidden messages and future unread arrivals', async t => {
+  const live = fixture();
+  live.messages.push(...['own','hidden','older','latest'].map((id,i) => ({
+    id, from:id==='own'?'You':'Muse', type:'text' as const, text:id, ts:i+2,
+  })));
+  const app = await appFixture(t, live, true);
+  const menu = () => app.menu().map(item => item.itemName);
+  assert.deepEqual(menu(), ['全件既読']);
+  await app.controller.hideMessages(['hidden']);
+  await app.controller.showMessage('latest');
+  assert.deepEqual(menu(), ['全件既読','スペース']);
+  for (const retired of [1,2,4,11]) { app.overlay(retired); await settle(); }
+  assert.equal(app.controller.state.recording,false);
+  assert.deepEqual(app.controller.state.readIds,['latest']);
+  app.overlay(app.menu().find(item => item.itemName==='全件既読')!.itemID); await settle();
+  assert.deepEqual(new Set(app.controller.state.readIds), new Set(['test-message','older','latest']));
+  assert.deepEqual(app.controller.state.hiddenIds,['hidden']);
+  assert.equal(app.controller.state.selectedMessageId,'latest');
+  await app.controller.reloadSettings();
+  assert.ok(app.controller.state.readIds.includes('older'));
+  live.messages.push({id:'future',from:'Muse',type:'text',text:'new',ts:20});
+  await app.controller.refresh();
+  assert.ok(!app.controller.state.readIds.includes('future'));
+  await app.controller.showGlassesMenu();
+  app.overlay(app.menu()[0]!.itemID); await settle();
+  assert.ok(app.controller.state.readIds.includes('future'));
+  assert.deepEqual(app.items(), ['チャット','スペース','設定']);
 });

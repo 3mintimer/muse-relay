@@ -7,7 +7,9 @@ import { AvatarMotions, avatarDisplay } from './motions';
 import { connectionSignature, defaults, httpsConnection, validateSettings } from './config';
 import { GistRelay } from '../relay/gist';
 import { HttpsRelay } from '../relay/gadget';
-import { Glasses, glassBodyRows, type GlassMenuItem, type GlassTextStyle } from './glasses';
+import { Glasses, glassBodyRows, type GlassTextStyle } from './glasses';
+import { contextItem, contextItems, type ContextAction } from './context-menu';
+import { glassSettings, type GlassSettingKey } from './glass-settings';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, hasAudiblePcm, resizeImage, wav } from './media';
 import { RelayVoiceSession, SonioxStream } from './soniox';
@@ -17,7 +19,7 @@ import { ChatLocationCache, hideEchoedLocation } from './location';
 import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
-import { chatEntries, chatExchange, chatText, displayableMuseReply, type SentChat } from './chat';
+import { chatEntries, chatExchange, unreadMessageIds, chatText, displayableMuseReply, type SentChat } from './chat';
 
 const HEAD_END_GRACE_MS = 1000;
 
@@ -81,7 +83,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   const listeners=new Set<()=>void>();
   let relay:Relay|undefined,poll:ReturnType<typeof setTimeout>,saveTimer:ReturnType<typeof setTimeout>;
   let hasLiveSnapshot=false;
-  let active=true,disposed=false,screen:'home'|'message'|'spaces'|'space-list'|'space'|'space-control'='home',page=0,spaceId='',spaceItem=0,spaceListPage=0,spaceItemId='';
+  let active=true,disposed=false,screen:'home'|'settings'|'message'|'spaces'|'space-list'|'space'|'space-control'='home',page=0,spaceId='',spaceItem=0,spaceListPage=0,spaceItemId='';
+  let editingSetting: GlassSettingKey | undefined;
   const spaceLayouts=new Map<string,'list'|'cards'>();
   type ControlTarget={spaceId:string;itemId:string;title:string;control:SpaceControl};
   let spaceEditor:{target:ControlTarget;value?:number|string}|undefined,recordingSpace:ControlTarget|undefined;
@@ -244,25 +247,17 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
     emit();
   }
-  function contextualMenu():GlassMenuItem[]{
-    const item=(itemID:number,ja:string,en:string)=>({itemID,itemName:text(ja,en)});
-    if(state.displaySleeping)return [item(10,'表示を戻す','Restore display')];
-    if(state.recording)return [item(4,'録音を送信','Send recording'),item(7,'録音を中止','Cancel recording')];
-    if(voiceBusy)return voiceSending?[]:[item(7,'録音を中止','Cancel recording')];
-    if(feedback)return [item(3,'ホームへ戻る','Go home')];
-    if(screen==='home')return [item(1,'更新','Refresh')];
-    return [
-      ...(['space','space-list','space-control'].includes(screen)?[
-        item(9,'項目一覧','Space items'),
-        item(8,spaceLayout()==='list'?'カード表示':'リスト表示',spaceLayout()==='list'?'Card view':'List view'),
-      ]:[]),
-      ...(screen!=='message'?[item(6,'チャットを開く','Open chat')]:[]),
-      ...(screen!=='spaces'?[item(5,'スペースを選ぶ','Choose space')]:[]),
-      item(4,'録音を開始','Record voice'),item(1,'更新','Refresh'),
-      ...(screen==='message'?[item(11,state.settings.chatLayout==='exchange'?'1件ずつ':'入力と回答',state.settings.chatLayout==='exchange'?'One message at a time':'Input & reply')]:[]),
-      ...(screen==='message'&&state.selectedMessageId?[item(2,'このメッセージを隠す','Hide message')]:[]),
-    ];
+  function contextActions(): ContextAction[] {
+    if (state.displaySleeping) return ['wake'];
+    if (state.recording) return ['sendRecording', 'cancelRecording'];
+    if (voiceBusy) return voiceSending ? [] : ['cancelRecording'];
+    if (feedback || screen === 'settings') return ['home'];
+    if (screen === 'home') return ['markAllRead'];
+    if (screen === 'message') return ['markAllRead', 'spaces'];
+    if (screen === 'spaces') return ['chat'];
+    return ['items', spaceLayout() === 'list' ? 'cards' : 'list', 'chat', 'spaces'];
   }
+  const contextualMenu = () => contextActions().map(action => contextItem(action, state.settings.language));
   const spaceLayout=(space=state.snapshot.spaces.find(s=>s.id===spaceId))=>spaceLayouts.get(space?.id||'')||space?.layout||'list';
   const currentSpaceItem=()=>state.snapshot.spaces.find(s=>s.id===spaceId)?.items.find(i=>i.id===spaceItemId);
   function controlTarget(id:string,itemId:string):ControlTarget{
@@ -407,7 +402,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       await render().catch(error);
     }
   }
-  const refreshFromGlasses=()=>act(()=>refresh(true),text('更新中…','Refreshing…'));
   const visible=()=>state.snapshot.messages.filter(m=>!state.hiddenIds.includes(m.id)).sort((a,b)=>a.ts-b.ts);
   const chatOptions=()=>({legacy:state.settings.relay==='gist', following:followingChat, images:state.settings.images});
   function currentExchange(messages:Message[], selectedId:string) {
@@ -632,11 +626,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       await show(pages[feedback.page]!.body,pages[feedback.page]!.footer);return;
     }
     if(screen==='home'){
-      menuActions=[showChat,showSpaces,()=>api.toggleRecording()];
+      menuActions=[showChat,showSpaces,showSettings];
       const dateTime=new Date().toLocaleString(resolveLocale(state.settings.language),{
         year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
       });
-      const items=[text('チャット','Chat'),text('スペース','Spaces'),text('録音を開始','Record voice')];
+      const items=[text('チャット','Chat'),text('スペース','Spaces'),text('設定','Settings')];
       const footer=text('タップ: 開く · 2回: 終了','Tap: open · Double-tap: exit');
       const avatar=avatarDisplay(state,'idle')==='still'?state.snapshot.profile?.avatar:undefined;
       try{await glasses.list(state,items,footer,contextualMenu(),dateTime,avatar,glassMotion('idle'));}
@@ -645,6 +639,24 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         if(frame!==renderSerial)return;
         avatarFailedKey=avatarKey();state.avatarStatus='error';
         await glasses.list(state,items,footer,contextualMenu(),dateTime);emit();
+      }
+      return;
+    }
+    if (screen === 'settings') {
+      const fields = glassSettings(state.settings);
+      const field = fields.find(entry => entry.key === editingSetting);
+      const footer = text('タップ: 選択 · 2回: 戻る', 'Tap: select · Double-tap: back');
+      if (field) {
+        menuActions = field.options.map(option => async () => {
+          if (state.busy || option.selected) return;
+          await api.saveSettings({ ...state.settings, ...option.change });
+        });
+        const labels = field.options.map(option => (option.selected ? '✓ ' : '') + option.label);
+        await glasses.list(state, labels, footer, contextualMenu(), field.title);
+      } else {
+        editingSetting = undefined;
+        menuActions = fields.map(entry => async () => { editingSetting = entry.key; await render(); });
+        await glasses.list(state, fields.map(entry => entry.title), footer, contextualMenu(), text('設定', 'Settings'));
       }
       return;
     }
@@ -705,6 +717,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.recording||voiceBusy)return;
     displayInteraction();followingChat=undefined;
     screen='home';page=0;feedback=undefined;await render();
+  }
+  async function showSettings() {
+    if (state.recording || voiceBusy) return;
+    displayInteraction(); followingChat = undefined; editingSetting = undefined;
+    screen = 'settings'; page = 0; feedback = undefined; await render();
   }
   async function showChat(){
     if(state.recording||voiceBusy)return;
@@ -1055,18 +1072,26 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.persistence==='loading'&&e.menuItemClickEvent)return;
     if(e.menuItemClickEvent){
       const id=e.menuItemClickEvent.itemID;
-      const actions:Record<number,()=>Promise<void>>={
-        1:refreshFromGlasses,2:()=>act(async()=>{if(screen==='message'&&state.selectedMessageId)await api.hideMessage(state.selectedMessageId);}),
-        3:()=>act(showMenu),4:()=>act(()=>api.toggleRecording(),undefined,false),
-        5:()=>act(showSpaces),6:()=>act(showChat),7:()=>act(()=>stopRecording(true),undefined,false),
-        8:()=>act(async()=>{if(state.recording||voiceBusy||state.busy)return;spaceLayouts.set(spaceId,spaceLayout()==='list'?'cards':'list');await spaceBack();}),
-        9:()=>act(async()=>{if(!state.recording&&!voiceBusy&&!state.busy)await showSpaceItems();}),
-        10:restoreDisplay,
-        11:()=>act(async()=>{page=0;await api.saveSettings({...state.settings,chatLayout:state.settings.chatLayout==='exchange'?'single':'exchange'});}),
+      const chosen = contextActions().find(action => contextItems[action][0] === id);
+      if (!chosen || (state.busy && ['items', 'cards', 'list'].includes(chosen))) return;
+      const actions: Record<ContextAction, () => Promise<void>> = {
+        home: () => act(showMenu), spaces: () => act(showSpaces), chat: () => act(showChat),
+        sendRecording: () => act(() => stopRecording(false), undefined, false),
+        cancelRecording: () => act(() => stopRecording(true), undefined, false),
+        items: () => act(showSpaceItems),
+        cards: () => act(async () => { spaceLayouts.set(spaceId, 'cards'); await spaceBack(); }),
+        list: () => act(async () => { spaceLayouts.set(spaceId, 'list'); await spaceBack(); }),
+        wake: restoreDisplay,
+        markAllRead: () => act(async () => {
+          const ids = unreadMessageIds(visible(), state.readIds);
+          if (ids.length) await api.markRead(ids);
+          await render();
+        }),
       };
-      const action=state.displaySleeping?restoreDisplay:id===undefined?undefined:actions[id];
+      const action = actions[chosen];
       syncDisplayTimers(true);
-      if(action){if(contextualOpen)pendingMenuAction=action;else fire(action());}return;
+      if(contextualOpen)pendingMenuAction=action;else fire(action());
+      return;
     }
     // System overlay/lifecycle events take priority over container metadata.
     if(!e.sysEvent&&!e.listEvent&&!e.textEvent)return;
@@ -1083,12 +1108,13 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       else if([0,1,2,3].includes(type))fire(restoreDisplay());
       return;
     }
-    if(type===9){if(!['space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,false));return;}
+    if(type===9){if(!['settings','space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,false));return;}
     if(type===10){if(recordingMode==='hold')fire(act(()=>stopRecording(false),undefined,false));return;}
     if(type===3){
       if(state.recording||voiceBusy){fire(act(()=>stopRecording(true),undefined,false));return;}
       if(feedback){++actionSerial;const back=feedback.back;feedback=undefined;fire(act(back||render));return;}
-      if(screen==='space-control')fire(act(spaceBack));
+      if(screen==='settings' && editingSetting)fire(act(showSettings));
+      else if(screen==='space-control')fire(act(spaceBack));
       else if(screen==='space')fire(act(spaceLayout()==='list'?showSpaceItems:showSpaces));
       else if(screen==='space-list')fire(act(showSpaces));
       else if(screen==='home')fire(act(()=>glasses.exit(),undefined,false));else fire(act(showMenu));return;
@@ -1102,9 +1128,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         const retry=feedback.retry,back=feedback.back;feedback=undefined;fire(retry?retry():act(back||render));return;
       }
       if(e.listEvent){
-        if(['home','spaces','space-list','space-control'].includes(screen)){
+        if(['home','settings','spaces','space-list','space-control'].includes(screen)){
           const action=menuActions[e.listEvent.currentSelectItemIndex??0];
-          if(action)fire(act(action,undefined,!(screen==='home'&&(e.listEvent.currentSelectItemIndex??0)===2)));
+          if(action)fire(act(action));
         }return;
       }
       if(screen==='space-control'&&spaceEditor){const {target,value}=spaceEditor;
@@ -1122,7 +1148,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         const c=spaceEditor.target.control;spaceEditor.value=sliderValue(c,Number(spaceEditor.value)+(type===1?c.step:-c.step));fire(act(render));return;
       }
       if(screen==='space'){const s=state.snapshot.spaces.find(s=>s.id===spaceId);if(s?.items.length){spaceItem=(spaceItem+(type===1?-1:1)+s.items.length)%s.items.length;spaceItemId=s.items[spaceItem]!.id;}page=0;fire(act(render));return;}
-      if(['home','spaces','space-list','space-control'].includes(screen))return;
+      if(['home','settings','spaces','space-list','space-control'].includes(screen))return;
       const all=visible(),options=chatOptions(),exchange=state.settings.chatLayout==='exchange'?currentExchange(all,state.selectedMessageId||''):undefined;
       const messages=(state.settings.chatLayout==='exchange'?chatEntries(all,options):all).reverse();
       const anchor=exchange?.reply?.id||exchange?.input.id||state.selectedMessageId,index=messages.findIndex(m=>m.id===anchor);

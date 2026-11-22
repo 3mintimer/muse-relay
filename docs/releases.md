@@ -23,6 +23,8 @@ flowchart LR
 
 ### Prepare a candidate
 
+`npm run pack` checks every contextual action against its reviewed wording in each supported language, including the 32-byte SDK limit and the compact menu width. Review each changed label in its screen context before updating `tests/context-menu.test.ts`. Packing rebuilds the app from the checked source.
+
 1. Accept app changes on `beta`. Merge current documentation and other contributions from `main` before cutting a candidate. For private development checkouts, use the [allowlisted export](public-source.md). Apply its reviewed differences in an up-to-date clone of the public repository, preserving changes made by contributors.
 2. Choose an unused numeric Even Hub version. Update `app.json`, `package.json` and the root package-lock metadata. Add user-facing notes to `changelog/X.Y.Z.md`, in English with optional Japanese. Push the candidate on `beta`.
 3. Open the **Check** run for that commit. It builds the app, tests the app and guide, and keeps `muse-relay-ehpk-<commit>` as an Actions artifact. For the Hub upload, use the EHPK inside this artifact. The workflow needs no Even Hub credentials.

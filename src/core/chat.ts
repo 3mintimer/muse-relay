@@ -1,5 +1,9 @@
 import type { Message } from './types';
 
+export function unreadMessageIds(visible: readonly Message[], readIds: readonly string[]): string[] {
+  return visible.filter(message => message.from.toLowerCase() !== 'you' && !readIds.includes(message.id)).map(message => message.id);
+}
+
 export interface SentChat { id: string; previousIds: ReadonlySet<string>; needsReplyId: boolean; }
 interface ChatOptions {
   legacy?: boolean;

@@ -117,7 +117,7 @@ Chat and Space body pages omit the app name and clock. Text begins at the top an
 flowchart TD
   H[Home] --> C[Chat]
   H --> S[Space list]
-  H --> V[Record]
+  H --> P[Settings]
   S --> D[Space content]
   C -->|Double tap| H
   D -->|Double tap| S
@@ -127,19 +127,22 @@ flowchart TD
   D -. Contextual Menu .-> C
 ```
 
-The Contextual Menu shows only actions relevant to the current screen. Home offers refresh; reading screens offer switching to chat/Spaces, recording, and refresh; chat also offers hiding the current message. Exit uses the standard OS item.
+On Home or in Chat, choose **Mark all read** in the Contextual Menu to mark all visible incoming messages as read on this device. Choose **Spaces** in Chat to open the Space list.
 
 | Glasses screen | Tap | Vertical swipe | Double tap |
 |---|---|---|---|
-| Home | Open Chat, Spaces, or recording | Move selection | Exit confirmation |
+| Home | Open Chat, Spaces, or Settings | Move selection | Exit confirmation |
+| Settings | Open a setting and tap a value to save it. A check mark shows the saved value | Move selection | Go back one level |
 | Space list | Open selected Space | Move selection | Return home |
 | Space content | Next page; last wraps to first | Previous/next item | Return to Space list |
 | Chat content | Next page | Previous/next message | Return home |
 | Processing | Does not duplicate execution | No navigation | Return display; cancel if preparing to record |
-| Refresh failed | Retry | No navigation | Return to previous screen |
+| Action failed | Retry | No navigation | Return to previous screen |
 | Processing complete | Return to previous screen | No navigation | Return to previous screen |
 
-For hold-started recording, release to send. For menu-started recording, tap to send. The G2 footer shows the applicable action. G2 shows preparing, sending, complete, and failed states; empty chats/Spaces explain why and how to return. Reading Spaces does not require recording. Muse receives instructions to create short headings and self-contained readable cards.
+From Home, open Settings to change chat location sharing, location update interval, images, chat layout, auto-hide, return after sending, and receive interval. The location interval appears when sharing is on. Each selection also applies on the phone.
+
+Hold to record and release to send. The G2 footer shows the applicable action. G2 shows preparing, sending, complete, and failed states; empty chats/Spaces explain why and how to return. Reading Spaces does not require recording. Muse receives instructions to create short headings and self-contained readable cards.
 
 | When a new image arrives | Display |
 |---|---|
@@ -189,7 +192,7 @@ The wake-control practice in settings lets you try blank screen → tap → cont
 | Footer | Page count and control hints; text brightness 4 |
 | Image page | Input above, 288×144 image in the center, and a hint below to open the text |
 
-The default is input and reply together. Switch to one at a time in Settings → G2 display → Chat layout, or in chat's Contextual Menu. Long input is truncated to two lines with “…”; one-at-a-time mode lets you page through the full text. While input is shown beside its reply, swiping skips the duplicate input-only page.
+The default is input and reply together. Choose One message at a time in Settings → Chat display on the glasses or Settings → G2 display → Chat display on your phone. Long input is truncated to two lines with “…”; one-at-a-time mode lets you page through the full text. While input is shown beside its reply, swiping skips the duplicate input-only page.
 
 After sending, the glasses show your input with “Waiting for Muse”. If the display hides while waiting, a reply to that input wakes it.
 
