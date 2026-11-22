@@ -371,6 +371,8 @@ flowchart LR
   Hub -->|Select and display image| G2[Even G2]
 ```
 
+If Muse requests approval for the outbound upload, check the destination and image and approve that post. The device can time out while approval is pending. Check for the original post ID before retrying.
+
 Verify with a fresh PNG generated in the VM. On the Gadget route, check the returned `ok` and `id`, then use the phone credential to find the same ID in the snapshot and fetch its `image_file`. Decode the attachment and compare its SHA-256 to the source image in the VM. Check display on the physical G2 separately.
 
 Minimal image post. `data_base64` contains the complete encoded image, not a URL or Muse file path.
