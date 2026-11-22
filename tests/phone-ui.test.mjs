@@ -387,3 +387,41 @@ test('sent pins reveal only their own saved fix after a refresh and reload', asy
   await pin('First').waitFor();
   assert.doesNotMatch(await page.locator('body').innerText(), /12\.125|43\.625/);
 });
+
+test('three saved prompts send from the composer and Usage isolates the matching reply', async t => {
+  const snapshot = { messages: [{id:'other',from:'Muse',type:'text',text:'Unrelated conversation',ts:1}], spaces:[] };
+  const { page } = await openPhone(t,snapshot);
+  const sent = [];
+  await page.route('**/v1/requests', async route => {
+    const req = route.request().postDataJSON();
+    sent.push(req);
+    if (req.text === 'Show /subscription-status concisely.') {
+      snapshot.messages.push({id:'answer',from:'Muse',type:'text',text:'Demo plan · 20 tokens',ts:2,reply_to:req.id});
+    }
+    await route.fulfill({json:{}});
+  });
+  const nav = page.getByRole('navigation');
+  await nav.getByRole('button',{name:'Settings'}).tap();
+  await page.locator('[data-group="prompts"] summary').tap();
+  const values = ['Summarize today','First line\nSecond line','Plan tomorrow'];
+  for (const [i,value] of values.entries()) await page.getByLabel('Prompt '+(i+1), {exact:true}).fill(value);
+  await page.getByRole('button',{name:'Save settings',exact:true}).tap();
+  await page.getByText('Settings saved in this browser.',{exact:true}).waitFor();
+  await page.reload();
+  const draft = page.getByRole('textbox',{name:'Message',exact:true});
+  await draft.fill('Unsent draft');
+  const shortcuts = page.locator('.saved-prompt-buttons button');
+  assert.equal(await shortcuts.count(),3);
+  for (const [i,value] of values.entries()) {
+    const accepted = page.waitForResponse(r=>r.url().endsWith('/v1/requests'));
+    await shortcuts.nth(i).tap(); await accepted;
+    assert.equal(sent.at(-1).text,value);
+    assert.equal(await draft.inputValue(),'Unsent draft');
+  }
+  await nav.getByRole('button',{name:'Usage'}).tap();
+  await page.getByText('Demo plan · 20 tokens',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Unrelated conversation').count(),0);
+  await nav.getByRole('button',{name:'Chat'}).tap();
+  await page.getByText('Unrelated conversation',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Demo plan · 20 tokens').count(),0);
+});

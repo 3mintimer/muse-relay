@@ -474,5 +474,9 @@
   "Face forward and hold still": "Mira al frente sin moverte",
   "Recalibrate zero": "Recalibrar el punto cero",
   "Zero position set": "Punto cero ajustado",
-  "Angle unavailable": "Ángulo no disponible"
+  "Angle unavailable": "Ángulo no disponible",
+  "Usage": "Uso",
+  "Saved prompts": "Instrucciones guardadas",
+  "Prompt {n}": "Instrucción {n}",
+  "No reply yet. Check again.": "Aún no hay respuesta. Vuelve a consultar."
 }

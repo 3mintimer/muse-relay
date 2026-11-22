@@ -10,7 +10,7 @@ import { motionKinds, type MotionKind, type Language } from '../core/types';
 import { checkSonioxConnection } from '../core/soniox';
 import { sliderValue } from '../../protocol/space-controls.mjs';
 
-type View = 'chat' | 'spaces' | 'settings';
+type View = 'chat' | 'spaces' | 'settings' | 'usage';
 type FeedbackLocation = 'page' | 'connection' | 'save' | 'voice' | 'avatar';
 type SpaceAddPage = 'choose' | 'create' | 'prompt' | 'receive' | 'register';
 type SpaceExample = 'schedule' | 'focus' | 'notes';
@@ -584,6 +584,15 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     input.disabled = !s.settings.configured || s.recording;
     input.addEventListener('input', () => { composer = input.value; const send = form.querySelector<HTMLButtonElement>('[data-send]'); if (send) send.disabled = !s.settings.configured || !editable() || s.recording || (!composer.trim() && !attachment); });
     form.append(input);
+    const presets = el('div', 'saved-prompt-buttons');
+    s.settings.savedPrompts.forEach((value, slot) => {
+      if (!value) return;
+      const shortcut = button(`${slot+1}. ${value}`, () => { void run(() => controller.sendSavedPrompt(slot)); },
+        {secondary:true, className:'small-button', disabled:!s.settings.configured || !editable() || s.recording});
+      shortcut.title = value;
+      presets.append(shortcut);
+    });
+    if (presets.childElementCount) form.append(presets);
     if (attachment) form.append(el('div', 'attachment-preview', imagePreview(attachment), button(t('画像を外す', 'Remove image'), () => { attachment = undefined; render(); }, { secondary: true, icon: 'close', className: 'small-button' })));
     const controls = el('div', 'composer-actions');
     const voice = s.settings.voice === 'soniox' ? voiceReadiness(s.settings) : null;
@@ -985,6 +994,19 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         t('メッセージはすぐに送信します。5分以内に取得した座標が Muse のチャットに表示されることがあります。', 'Chat sends immediately. Coordinates from the last five minutes can appear in your Muse conversation.')),
       ...(draft.shareLocation ? [select('locationIntervalMinutes', t('位置の取得間隔', 'Location update interval'),
         ([1, 3, 5] as const).map(minutes => [minutes, t('{minutes} 分', '{minutes} min', { minutes })]))] : [])));
+    const promptFields = draft.savedPrompts.map((value, slot) => {
+      const label = el('label','field',el('span','field-label',t('プロンプト {n}','Prompt {n}',{n:slot+1})));
+      const input = el('textarea','even-input');
+      input.rows = 2; input.maxLength = 10000; input.value = value;
+      focusKey(input, `setting-prompt-${slot}`);
+      input.addEventListener('input', () => {
+        changed('savedPrompts',draft.savedPrompts.map((old,index)=>index===slot?input.value:old));
+        scheduleRender();
+      });
+      label.append(input);
+      return label;
+    });
+    content.append(settingsGroup('prompts',t('固定プロンプト','Saved prompts'),'',el('div','even-card form-card',...promptFields)));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');
@@ -1025,10 +1047,27 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(button(t('保存した接続情報を削除', 'Remove saved connection details'), () => { confirmForget = true; render(); }, { secondary: true, className: 'danger-button full-width' }));
     return content;
   }
+  function usageContent() {
+    const usage = controller.state.usage;
+    const section = el('section','',el('div','page-toolbar',el('h2','page-title',t('使用状況確認','Usage')),
+      button(t('更新','Refresh'),()=>{ void run(()=>controller.checkUsage()); },{secondary:true,icon:'refresh',className:'small-button',
+        disabled:usage?.status === 'waiting' || !editable() || controller.state.recording || !controller.state.settings.configured})));
+    if (!controller.state.settings.configured) section.append(notConfigured());
+    else {
+      const result = el('p','message-body',usage?.text || (usage?.status==='waiting'?t('Muse の返信待ち','Waiting for Muse'):''));
+      result.setAttribute('role',usage?.status==='error'?'alert':'status');
+      section.append(result);
+    }
+    return section;
+  }
   function navigation() {
     const nav = el('nav', 'even-bottom-bar app-nav'); nav.setAttribute('aria-label', t('アプリメニュー', 'App navigation'));
-    for (const [name, label, nameIcon] of [['chat', t('チャット', 'Chat'), 'chat'], ['spaces', t('スペース', 'Spaces'), 'spaces'], ['settings', t('設定', 'Settings'), 'settings']] as const) {
-      const b = button(label, () => { view = name; uiError = ''; uiNotice = ''; render(); scrollArea.scrollTop = 0; }, { secondary: true, icon: nameIcon, className: `nav-button ${name === view ? 'is-current' : ''}` });
+    for (const [name, label, nameIcon] of [['chat', t('チャット', 'Chat'), 'chat'], ['spaces', t('スペース', 'Spaces'), 'spaces'], ['settings', t('設定', 'Settings'), 'settings'], ['usage', t('使用状況確認','Usage'),'usage']] as const) {
+      const b = button(label, () => {
+        const entering = view !== name;
+        view = name; uiError = ''; uiNotice = ''; render(); scrollArea.scrollTop = 0;
+        if (entering && name === 'usage' && editable() && !controller.state.recording && controller.state.settings.configured) void run(()=>controller.checkUsage());
+      }, { secondary: true, icon: nameIcon, className: `nav-button ${name === view ? 'is-current' : ''}` });
       if (name === view) b.setAttribute('aria-current', 'page'); nav.append(b);
     }
     return nav;
@@ -1174,7 +1213,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     } else if (wizard) content.append(wizardContent());
     else {
       const page = el('main', 'page', status());
-      page.append(notifications(), view === 'chat' ? chatContent() : view === 'spaces' ? spacesContent() : settingsContent());
+      if (view === 'usage') page.append(usageContent());
+      else page.append(notifications(), view === 'chat' ? chatContent() : view === 'spaces' ? spacesContent() : settingsContent());
       content.append(page); nav = navigation();
     }
     const dialog = help ? helpDialog() : spaceConfirm ? spaceConfirmation() : spaceToRemove ? removeSpaceDialog() : tutorial ? tutorialDialog() : confirmForget ? forgetDialog() : historyOpen ? historyDialog() : null;

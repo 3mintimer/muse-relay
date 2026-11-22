@@ -8,7 +8,7 @@ import { connectionSignature, defaults, httpsConnection, validateSettings } from
 import { GistRelay } from '../relay/gist';
 import { HttpsRelay } from '../relay/gadget';
 import { Glasses, glassBodyRows, type GlassTextStyle } from './glasses';
-import { contextItem, contextItems, type ContextAction } from './context-menu';
+import { contextItem, contextItems, promptMenuItems, type ContextAction } from './context-menu';
 import { glassSettings, type GlassSettingKey } from './glass-settings';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, hasAudiblePcm, resizeImage, wav } from './media';
@@ -83,7 +83,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   const listeners=new Set<()=>void>();
   let relay:Relay|undefined,poll:ReturnType<typeof setTimeout>,saveTimer:ReturnType<typeof setTimeout>;
   let hasLiveSnapshot=false;
-  let active=true,disposed=false,screen:'home'|'settings'|'message'|'spaces'|'space-list'|'space'|'space-control'='home',page=0,spaceId='',spaceItem=0,spaceListPage=0,spaceItemId='';
+  let active=true,disposed=false,screen:'home'|'usage'|'settings'|'message'|'spaces'|'space-list'|'space'|'space-control'='home',page=0,spaceId='',spaceItem=0,spaceListPage=0,spaceItemId='';
   let editingSetting: GlassSettingKey | undefined;
   const spaceLayouts=new Map<string,'list'|'cards'>();
   type ControlTarget={spaceId:string;itemId:string;title:string;control:SpaceControl};
@@ -111,6 +111,11 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
   }
   const replyPoll=new ReplyPoll();
+  let usageTimeout: ReturnType<typeof setTimeout> | undefined;
+  const usageWaiting = () => state.usage?.status === 'waiting';
+  const usageTitle = () => text('使用状況確認', 'Usage');
+  const usagePrefix = 'r_usage_';
+  let overlayPrompts: string[] | undefined;
   let deliveryNotice:{sent:SentChat;message:string}|undefined;
   // Session-only: restored history can never arm an automatic reply wake.
   const awaitingReplies=new Map<string,Set<string>>();
@@ -251,13 +256,18 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if (state.displaySleeping) return ['wake'];
     if (state.recording) return ['sendRecording', 'cancelRecording'];
     if (voiceBusy) return voiceSending ? [] : ['cancelRecording'];
-    if (feedback || screen === 'settings') return ['home'];
+    if (feedback || screen === 'settings' || screen === 'usage') return ['home'];
     if (screen === 'home') return ['markAllRead'];
     if (screen === 'message') return ['markAllRead', 'spaces'];
     if (screen === 'spaces') return ['chat'];
     return ['items', spaceLayout() === 'list' ? 'cards' : 'list', 'chat', 'spaces'];
   }
-  const contextualMenu = () => contextActions().map(action => contextItem(action, state.settings.language));
+  const chatPromptMenu = () => screen === 'message' && !feedback && !state.displaySleeping && !state.recording && !voiceBusy
+    ? promptMenuItems(state.settings.savedPrompts) : [];
+  const contextualMenu = () => [
+    ...contextActions().map(action => contextItem(action, state.settings.language)),
+    ...chatPromptMenu().map(({itemID, itemName}) => ({itemID, itemName})),
+  ];
   const spaceLayout=(space=state.snapshot.spaces.find(s=>s.id===spaceId))=>spaceLayouts.get(space?.id||'')||space?.layout||'list';
   const currentSpaceItem=()=>state.snapshot.spaces.find(s=>s.id===spaceId)?.items.find(i=>i.id===spaceItemId);
   function controlTarget(id:string,itemId:string):ControlTarget{
@@ -427,6 +437,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   }
   function saveSoon(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>fire(save()),500);}
   async function loadSettings(){
+    resetUsage();
     locationCache.configure();
     const generation=++settingsGeneration;
     replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();
@@ -464,7 +475,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(!checked.returnToChatAfterSend&&screen!=='message')followingChat=undefined;
       displayDeadline=0;
       if(resetHistory){state.snapshot=saved.snapshot;state.readIds=saved.readIds;state.hiddenIds=saved.hiddenIds;state.selectedSpaceIds=saved.selectedSpaceIds;}
-      if(connectionChanged){followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();readJob=undefined;configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.motions;delete state.snapshot.capabilities;avatarFailedKey='';}
+      if(connectionChanged){resetUsage();followingChat=undefined;replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();foregroundAbort.abort();foregroundAbort=new AbortController();readJob=undefined;configureRelay(checked);delete state.snapshot.profile;delete state.snapshot.motions;delete state.snapshot.capabilities;avatarFailedKey='';}
       persistenceReady=true;state.persistence=mode||'unavailable';state.settingsLoadFailed=false;state.error='';
       state.notice=clear?(mode==='native'?text('接続情報を削除しました。','Connection details removed.')
         :nativeHost?text('端末の接続情報を削除しました。Even側の削除は未確認です。','Device connection details removed. Removal in Even is not confirmed.')
@@ -507,7 +518,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     relay=settings.configured?makeRelay(settings):undefined;
     hasLiveSnapshot=false;state.connected=false;
   }
-  function armPoll(delay=replyPoll.delay(state.settings.pollSeconds*1000)){clearTimeout(poll);if(active&&relay&&!disposed)poll=setTimeout(()=>fire(refresh()),delay);}
+  function armPoll(delay=replyPoll.delay(Math.min(state.settings.pollSeconds*1000, usageWaiting()?5000:Infinity))){clearTimeout(poll);if(active&&relay&&!disposed)poll=setTimeout(()=>fire(refresh()),delay);}
   function chatPage(): ChatPage {
     const messages=visible(),selected=messages.find(m=>m.id===state.selectedMessageId);
     if(!selected)return {body:text('メッセージはありません\n録音またはスマートフォンから送信','No messages yet\nRecord voice or send from your phone'),footer:text('ダブルタップ: ホーム','Double-tap: home')};
@@ -625,12 +636,19 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       const pages=feedbackPages();feedback.page=Math.min(feedback.page||0,pages.length-1);
       await show(pages[feedback.page]!.body,pages[feedback.page]!.footer);return;
     }
+    if(screen==='usage'){
+      const pages = usagePages();
+      page = Math.min(page, pages.length - 1);
+      await show(pages[page]!.body, pages[page]!.footer);
+      return;
+    }
     if(screen==='home'){
-      menuActions=[showChat,showSpaces,showSettings];
+      const prompts = promptMenuItems(state.settings.savedPrompts);
+      menuActions=[showChat,showSpaces,showSettings,openUsage,...prompts.map(({slot})=>()=>sendPreset(slot,true))];
       const dateTime=new Date().toLocaleString(resolveLocale(state.settings.language),{
         year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
       });
-      const items=[text('チャット','Chat'),text('スペース','Spaces'),text('設定','Settings')];
+      const items=[text('チャット','Chat'),text('スペース','Spaces'),text('設定','Settings'),usageTitle(),...prompts.map(p=>p.itemName)];
       const footer=text('タップ: 開く · 2回: 終了','Tap: open · Double-tap: exit');
       const avatar=avatarDisplay(state,'idle')==='still'?state.snapshot.profile?.avatar:undefined;
       try{await glasses.list(state,items,footer,contextualMenu(),dateTime,avatar,glassMotion('idle'));}
@@ -713,6 +731,62 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       await show(current.body,current.footer,image);return;
     }
   }
+  function usagePages() {
+    const body = state.usage?.text || text('Muse の返信待ち', 'Waiting for Muse');
+    return bodyPages(body, (index,total) => total > 1 ? `${index+1}/${total} · ${nextBack()}` : text('ダブルタップ: 戻る','Double-tap: back'));
+  }
+  function resetUsage() {
+    clearTimeout(usageTimeout);
+    state.usage = undefined;
+  }
+  function updateUsage(status: 'answer' | 'error', body: string) {
+    if (!state.usage || (state.usage.status === status && state.usage.text === body)) return;
+    const first = state.usage.status === 'waiting';
+    clearTimeout(usageTimeout);
+    state.usage = {id: state.usage.id, status, text: body};
+    if (screen === 'usage') {
+      if (first) displayInteraction();
+      fire(render());
+    }
+    emit();
+  }
+  async function checkUsage() {
+    if (usageWaiting()) return;
+    if (state.busy || state.recording || voiceBusy) throw new Error('Busy');
+    const current = relay;
+    const req = request('Show /subscription-status concisely.', usagePrefix);
+    state.usage = {id:req.id, status:'waiting', text:''};
+    state.busy = true;
+    emit();
+    try {
+      if (!current) throw new Error('Relay token');
+      await current.send(req, foregroundAbort.signal);
+      if (current !== relay || state.usage?.id !== req.id || disposed) return;
+      if (usageWaiting()) {
+        usageTimeout = setTimeout(() => updateUsage('error', text('返信が届いていません。もう一度確認してください。','No reply yet. Check again.')), 120000);
+      }
+      if (state.settings.relay !== 'gist') replyPoll.sent(req.id);
+      armPoll(0);
+    } catch (e) {
+      if (state.usage?.id === req.id && usageWaiting()) updateUsage('error', failureText(e));
+    } finally {
+      state.busy = false;
+      emit();
+    }
+  }
+  async function openUsage() {
+    if (state.recording || voiceBusy || (state.busy && !usageWaiting())) return;
+    displayInteraction(); followingChat = undefined; feedback = undefined; page = 0; screen = 'usage';
+    const pending = checkUsage();
+    await render();
+    await pending;
+  }
+  async function sendPreset(slot:number, fromHome=false) {
+    const value = state.settings.savedPrompts[slot];
+    if (!value || state.busy || state.recording || voiceBusy) return;
+    const sent = await send(request(value), false);
+    await returnToSentChat(sent, fromHome && screen === 'home');
+  }
   async function showMenu(){
     if(state.recording||voiceBusy)return;
     displayInteraction();followingChat=undefined;
@@ -753,6 +827,14 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(snap.profile?.avatar_file&&!snap.profile.avatar&&avatarKey(snap.profile)===previousAvatarKey)
         snap.profile.avatar=state.snapshot.profile?.avatar;
       replyPoll.observe(snap.messages);
+      if (state.usage) {
+        const id = state.usage.id;
+        const answer = snap.messages.filter(m => m.reply_to === id && displayableMuseReply(m,false)).at(-1);
+        const failure = snap.messages.find(m => m.id === 'status_'+id && m.reply_to === id && m.from === 'Relay');
+        if (answer) updateUsage('answer',chatText(answer));
+        else if (failure && usageWaiting()) updateUsage('error',failureText(new Error('Relay')));
+      }
+      snap.messages = snap.messages.filter(m => !m.id.startsWith(usagePrefix) && !m.reply_to?.startsWith(usagePrefix));
       // The saved history can be incomplete. Only compare live snapshots for new arrivals.
       const before=hasLiveSnapshot?new Set(state.snapshot.messages.map(m=>m.id)):undefined;
       const previousMessages=state.snapshot.messages;
@@ -785,7 +867,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       if(spaceItemId&&selectedSpace){const index=selectedSpace.items.findIndex(i=>i.id===spaceItemId);spaceItem=Math.max(0,index);}
       clearAnsweredNotice(snap.messages);
       const arrivedReplies=takeReplies(snap.messages,previousMessages);
-      const wakeReplies=state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
+      const wakeReplies=screen!=='usage'&&state.displaySleeping&&state.settings.autoHideSeconds&&!state.recording&&!voiceBusy
         &&!state.busy&&!contextualOpen&&!feedback
         ?arrivedReplies.filter(message=>autoHiddenReplies.has(message.reply_to!)):[];
       const wakeReply=wakeReplies.filter(m=>!followingChat||m.reply_to===followingChat.id).at(-1);
@@ -816,7 +898,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const turn=chatExchange(messages,sent.id,{...chatOptions(),following:sent});
     if(turn?.reply){state.notice='';deliveryNotice=undefined;}
   }
-  async function send(request:RelayRequest){
+  async function send(request:RelayRequest, shareLocation=true){
     if(!relay)throw new Error('Relay token');
     if(state.busy)throw new Error('Busy');
     if(request.image&&state.settings.relay!=='gist'&&state.snapshot.capabilities?.images!==true)throw new Error('Image sending unavailable');
@@ -825,7 +907,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const priorTurn=state.settings.relay==='gist'?visible().filter(m=>m.from!=='Relay'&&!m.id.startsWith('status_')).at(-1):undefined;
     const needsReplyId=priorTurn?.from==='You';
     state.busy=true;state.error='';emit();
-    const location = request.kind === 'chat' && state.settings.shareLocation ? locationCache.current() : undefined;
+    const location = shareLocation && request.kind === 'chat' && state.settings.shareLocation ? locationCache.current() : undefined;
     try{await relay.send(location ? {...request, location} : request,foregroundAbort.signal);
       if (current !== relay) return;
       const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,
@@ -846,7 +928,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       return turn;
     }finally{state.busy=false;emit();}
   }
-  const request=(textValue:string):RelayRequest=>({id:`r_${crypto.randomUUID()}`,kind:'chat',text:textValue,created_at:Math.floor(Date.now()/1000)});
+  const request=(textValue:string, prefix='r_'):RelayRequest=>({id:prefix+crypto.randomUUID(),kind:'chat',text:textValue,created_at:Math.floor(Date.now()/1000)});
   async function openMessage(id:string,interaction=true){
     if(!state.snapshot.messages.some(m=>m.id===id))return;
     if(interaction){displayInteraction();followingChat=undefined;}
@@ -858,8 +940,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     emit();saveSoon();
   }
   const shouldShowSentChat=()=>screen==='message'||state.settings.returnToChatAfterSend;
-  async function returnToSentChat(sent:SentChat | undefined){
-    if(!sent||!shouldShowSentChat()||!active||disposed)return;
+  async function returnToSentChat(sent:SentChat | undefined, force=false){
+    if(!sent||(!force&&!shouldShowSentChat())||!active||disposed)return;
     displayInteraction();followingChat={...sent,targetId:sent.id};
     // Resolve from the full snapshot: a transcript or reply can precede the acknowledgement.
     followingChat.targetId=followedMessage()?.id??sent.id;
@@ -1072,6 +1154,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(state.persistence==='loading'&&e.menuItemClickEvent)return;
     if(e.menuItemClickEvent){
       const id=e.menuItemClickEvent.itemID;
+      const preset = chatPromptMenu().find(item => item.itemID === id);
+      if (preset) {
+        if (state.busy) return;
+        const value = (overlayPrompts ?? state.settings.savedPrompts)[preset.slot];
+        const action = () => value === state.settings.savedPrompts[preset.slot] && screen === 'message'
+          ? act(()=>sendPreset(preset.slot),undefined,false) : render();
+        if (contextualOpen) pendingMenuAction = action; else fire(action());
+        return;
+      }
       const chosen = contextActions().find(action => contextItems[action][0] === id);
       if (!chosen || (state.busy && ['items', 'cards', 'list'].includes(chosen))) return;
       const actions: Record<ContextAction, () => Promise<void>> = {
@@ -1098,9 +1189,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const type=e.sysEvent?.eventType??e.listEvent?.eventType??e.textEvent?.eventType??0;
     if(state.persistence==='loading'&&![4,5,6,7].includes(type))return;
     // 4 -> menu selection -> 5 is the OS contextual overlay, not app teardown.
-    if(type===4){raise.reset();calibration?.cancel();contextualOpen=true;++renderSerial;glasses.invalidateRender();syncDisplayTimers();return;}
-    if(type===5){contextualOpen=false;const action=pendingMenuAction;pendingMenuAction=undefined;syncDisplayTimers(true);if(active)fire(action?action():state.displaySleeping?restoreDisplay():render());return;}
-    if(type===6||type===7){active=false;disposed=true;locationCache.configure();calibration?.cancel();fire(syncImu());replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
+    if(type===4){overlayPrompts=state.settings.savedPrompts;raise.reset();calibration?.cancel();contextualOpen=true;++renderSerial;glasses.invalidateRender();syncDisplayTimers();return;}
+    if(type===5){overlayPrompts=undefined;contextualOpen=false;const action=pendingMenuAction;pendingMenuAction=undefined;syncDisplayTimers(true);if(active)fire(action?action():state.displaySleeping?restoreDisplay():render());return;}
+    if(type===6||type===7){active=false;disposed=true;resetUsage();locationCache.configure();calibration?.cancel();fire(syncImu());replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();contextualOpen=false;pendingMenuAction=undefined;++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());glasses.disconnect();return;}
     if(contextualOpen||!active)return;
     if([0,1,2,3,9,10].includes(type))syncDisplayTimers(true);
     if(state.displaySleeping){
@@ -1108,7 +1199,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       else if([0,1,2,3].includes(type))fire(restoreDisplay());
       return;
     }
-    if(type===9){if(!['settings','space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,false));return;}
+    if(type===9){if(!['settings','usage','space','space-list','space-control'].includes(screen))fire(act(()=>startRecording('hold'),undefined,false));return;}
     if(type===10){if(recordingMode==='hold')fire(act(()=>stopRecording(false),undefined,false));return;}
     if(type===3){
       if(state.recording||voiceBusy){fire(act(()=>stopRecording(true),undefined,false));return;}
@@ -1140,10 +1231,12 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         if(page<controlPages(currentSpaceItem()!).length-1){page++;fire(act(render));return;}
         fire(act(()=>activateSpaceItem(spaceId,spaceItemId),undefined,false));return;
       }
+      if(screen==='usage'){page=(page+1)%usagePages().length;fire(render());return;}
       if(screen==='message'||screen==='space'){page++;fire(act(render));}return;
     }
     if(type===1||type===2){if(state.recording||voiceBusy)return;
       if(feedback)return;
+      if(screen==='usage'){page=Math.max(0,Math.min(usagePages().length-1,page+(type===1?-1:1)));fire(render());return;}
       if(screen==='space-control'&&spaceEditor?.target.control.type==='slider'){
         const c=spaceEditor.target.control;spaceEditor.value=sliderValue(c,Number(spaceEditor.value)+(type===1?c.step:-c.step));fire(act(render));return;
       }
@@ -1161,6 +1254,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     reloadSettings:()=>guarded(loadSettings),
     async checkConnection(settings=state.settings){return guarded(async()=>makeRelay(validateSettings({...settings,voice:'muse'})).read());},
     refresh:()=>guarded(()=>refresh(true)),
+    sendSavedPrompt:slot=>guarded(()=>sendPreset(slot)),
+    checkUsage,
     async sendText(value,image){await guarded(async()=>{const textValue=value.trim();if(!textValue&&!image)return;
       if(textValue.length>10000)throw new Error('Message too long');const req=request(textValue);if(image)req.image=image;await returnToSentChat(await send(req));});},
     toggleRecording:()=>guarded(()=>state.recording?stopRecording(false):startRecording()),
@@ -1262,6 +1357,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     if(document.hidden){active=false;contextualOpen=false;pendingMenuAction=undefined;++actionSerial;++renderSerial;glasses.invalidateRender();clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());}
     else{active=true;contextualOpen=false;foregroundAbort=new AbortController();if(feedback?.kind==='busy')feedback=undefined;fire(render());armPoll(0);}
   });
-  window.addEventListener('pagehide',()=>{active=false;disposed=true;locationCache.configure();calibration?.cancel();fire(syncImu());++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
+  window.addEventListener('pagehide',()=>{active=false;disposed=true;resetUsage();locationCache.configure();calibration?.cancel();fire(syncImu());++renderSerial;glasses.invalidateRender();replyPoll.clear();awaitingReplies.clear();autoHiddenReplies.clear();++actionSerial;clearTimeout(poll);syncDisplayTimers();foregroundAbort.abort();fire(stopRecording(true));fire(save());});
   return api;
 }

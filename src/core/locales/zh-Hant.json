@@ -474,5 +474,9 @@
   "Face forward and hold still": "面向正前方並保持靜止",
   "Recalibrate zero": "重新校準零點",
   "Zero position set": "已設定零點",
-  "Angle unavailable": "無法取得角度"
+  "Angle unavailable": "無法取得角度",
+  "Usage": "使用狀況",
+  "Saved prompts": "固定提示詞",
+  "Prompt {n}": "提示詞 {n}",
+  "No reply yet. Check again.": "尚未收到回覆，請重新查詢。"
 }

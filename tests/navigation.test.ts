@@ -220,7 +220,7 @@ test('an unavailable avatar keeps the home menu usable and retries with backoff 
   const snapshot=fixture(),app=await appFixture(t,snapshot,true);
   snapshot.profile={name:'Test Muse',avatar_file:'avatar.png',mime_type:'image/png',updated_at:1};
   await app.controller.refresh();await settle();
-  assert.equal(app.controller.state.avatarStatus,'error');assert.deepEqual(app.items(),['チャット','スペース','設定']);
+  assert.equal(app.controller.state.avatarStatus,'error');assert.deepEqual(app.items(),['チャット','スペース','設定','使用状況確認']);
   const attempts=app.attachmentReads();t.mock.timers.tick(10000);await settle();assert.equal(app.attachmentReads(),attempts,'a failed job must not loop');
   t.mock.timers.tick(290000);await settle();assert.equal(app.attachmentReads(),attempts+1,'periodic refresh retries a transient download failure');
   await app.controller.refresh();await settle();assert.equal(app.attachmentReads(),attempts+2);
@@ -231,7 +231,7 @@ test('home clock rolls over at midnight without rebuilding the menu or delaying 
   const app=await appFixture(t,fixture(),new Date(2026,10,17,23,59,55).getTime());
   const header=()=>app.containers().find((c:any)=>c.containerName==='header');
   assert.match(header().content,/2026\/11\/17.*23:59/);assert.equal(header().textColor,4);
-  assert.deepEqual(app.items(),['チャット','スペース','設定']);
+  assert.deepEqual(app.items(),['チャット','スペース','設定','使用状況確認']);
   await app.controller.saveSettings({...app.controller.state.settings,autoHideSeconds:10});
   const rebuilds=app.operations.filter(op=>op==='rebuild:list').length;
   app.document.hidden=true;app.document.dispatchEvent(new Event('visibilitychange'));
@@ -1749,7 +1749,7 @@ test('Home settings save chat preferences, preserve the connection and support b
     await back();
   }
   await back();
-  assert.deepEqual(app.items(), ['チャット','スペース','設定']);
+  assert.deepEqual(app.items(), ['チャット','スペース','設定','使用状況確認']);
   await app.controller.reloadSettings();
   assert.deepEqual(app.controller.state.settings, {...before,shareLocation:true,locationIntervalMinutes:3,images:false,
     chatLayout:'single',returnToChatAfterSend:false,autoHideSeconds:15,pollSeconds:30});
@@ -1781,5 +1781,62 @@ test('the contextual all-read action preserves chat, hidden messages and future 
   await app.controller.showGlassesMenu();
   app.overlay(app.menu()[0]!.itemID); await settle();
   assert.ok(app.controller.state.readIds.includes('future'));
-  assert.deepEqual(app.items(), ['チャット','スペース','設定']);
+  assert.deepEqual(app.items(), ['チャット','スペース','設定','使用状況確認']);
 });
+
+test('saved prompts retain their slots and send the full selected text from Chat and Home', async t => {
+  const savedPrompts = ['  日程をまとめてください。\n箇条書きで。', '', 'Ask about tomorrow'];
+  const app = await appFixture(t, fixture(), true, {savedPrompts, returnToChatAfterSend:false});
+  assert.equal(app.items().length, 6);
+  app.emit({listEvent:{currentSelectItemIndex:0}});
+  await settle();
+  const prompts = app.menu().filter(item => item.itemID >= 13);
+  assert.deepEqual(prompts.map(item => item.itemID), [13,15]);
+  for (const {itemName} of prompts) {
+    assert.ok(Buffer.byteLength(itemName) <= 32 && getTextWidth(itemName) <= 160);
+    assert.doesNotMatch(itemName, /\n/);
+  }
+  app.overlay(13); await settle();
+  assert.equal(app.sent.length,1);
+  assert.equal(app.sent[0]?.text,savedPrompts[0]);
+  await app.controller.showGlassesMenu();
+  app.emit({listEvent:{currentSelectItemIndex:5}});
+  await settle();
+  assert.equal(app.sent[1]?.text,savedPrompts[2]);
+  assert.equal(app.controller.state.selectedMessageId,app.sent[1]?.id);
+});
+
+for (const relay of ['gadget','gist'] as const) {
+  test(`usage on ${relay} accepts only its matching answer and keeps it out of Chat`, async t => {
+    const live = fixture();
+    const app = await appFixture(t,live,true,{relay,gistId:'0123456789abcdef0123456789abcdef',githubToken:'synthetic'});
+    app.emit({listEvent:{currentSelectItemIndex:3}});
+    await settle();
+    assert.match(app.text(),/Muse の返信待ち/);
+    await app.controller.checkUsage();
+    assert.equal(app.sent.length,1);
+    const req = app.sent[0]!;
+    assert.equal(req.text,'Show /subscription-status concisely.');
+    assert.equal(req.kind,'chat');
+    assert.equal(req.location,undefined);
+    live.messages.push({id:'unrelated',from:'Muse',type:'text',text:'different chat',ts:2},
+      {id:req.id,from:'You',type:'text',text:req.text,ts:3});
+    await app.controller.refresh();
+    for (const type of [0,1,2]) app.emit({textEvent:{eventType:type}});
+    await settle();
+    assert.match(app.text(),/Muse の返信待ち/);
+    assert.doesNotMatch(app.text(),/different chat|subscription-status/);
+    live.messages.push({id:'usage-reply',from:'Muse',type:'text',text:'Test plan · 450 tokens',ts:4,reply_to:req.id});
+    await app.controller.refresh(); await settle();
+    assert.match(app.text(),/450 tokens/);
+    assert.doesNotMatch(app.text(),/different chat|subscription-status/);
+    assert.ok(app.controller.state.snapshot.messages.every(m=>m.id!==req.id&&m.reply_to!==req.id));
+    app.emit({textEvent:{eventType:3}}); await settle();
+    app.emit({listEvent:{currentSelectItemIndex:3}}); await settle();
+    assert.equal(app.sent.length,2);
+    await app.controller.refresh(); await settle();
+    assert.doesNotMatch(app.text(),/450 tokens/);
+    t.mock.timers.tick(120000); await settle();
+    assert.match(app.text(),/もう一度確認/);
+  });
+}

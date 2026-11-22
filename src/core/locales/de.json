@@ -474,5 +474,9 @@
   "Face forward and hold still": "Geradeaus schauen und stillhalten",
   "Recalibrate zero": "Nullpunkt kalibrieren",
   "Zero position set": "Nullpunkt eingestellt",
-  "Angle unavailable": "Winkel nicht verfügbar"
+  "Angle unavailable": "Winkel nicht verfügbar",
+  "Usage": "Nutzung",
+  "Saved prompts": "Gespeicherte Prompts",
+  "Prompt {n}": "Prompt {n}",
+  "No reply yet. Check again.": "Noch keine Antwort. Erneut prüfen."
 }

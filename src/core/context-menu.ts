@@ -1,3 +1,4 @@
+import { getTextWidth } from '@evenrealities/pretext';
 import { translate } from './i18n';
 import type { Language } from './types';
 
@@ -20,4 +21,22 @@ export type ContextAction = keyof typeof contextItems;
 export function contextItem(action: ContextAction, language: Language) {
   const [itemID, ja, en] = contextItems[action];
   return { itemID, itemName: translate(language, ja, en) };
+}
+
+export function promptMenuItems(prompts: string[]) {
+  const encoder = new TextEncoder();
+  return prompts.flatMap((prompt, slot) => {
+    const label = prompt.trim().replace(/\s+/gu, ' ');
+    if (!label) return [];
+    let itemName = `${slot + 1}. `;
+    for (const char of label) {
+      const next = itemName + char;
+      if (encoder.encode(next + '…').length > 32 || getTextWidth(next + '…') > 160) {
+        itemName += '…';
+        break;
+      }
+      itemName = next;
+    }
+    return [{ itemID: 13 + slot, itemName, slot }];
+  });
 }

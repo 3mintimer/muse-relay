@@ -4,6 +4,7 @@ export type Locale = 'en' | 'zh-Hans' | 'zh-Hant' | 'ja' | 'es' | 'fr' | 'de' | 
 export type Language = 'system' | Locale;
 export type VoiceMode = 'muse' | 'soniox';
 export interface Settings {
+  savedPrompts: string[];
   relay: RelayMode;
   gistId: string;
   githubToken: string;
@@ -115,6 +116,7 @@ export interface AppState {
   selectedSpaceIds: string[];
   motions: Record<MotionKind, MotionState>;
   avatarStatus?: 'none'|'loading'|'ready'|'error';
+  usage?: { id: string; status: 'waiting' | 'answer' | 'error'; text: string };
   selectedMessageId?: string;
   spaceAction?: {spaceId:string;itemId:string;status:'sending'|'sent'|'error'|'recording';message:string};
 }
@@ -128,6 +130,8 @@ export interface AppController {
   reloadSettings(): Promise<void>;
   checkConnection(settings?: Settings): Promise<Snapshot>;
   refresh(): Promise<void>;
+  sendSavedPrompt(slot: number): Promise<void>;
+  checkUsage(): Promise<void>;
   sendText(text: string, image?: Attachment): Promise<void>;
   toggleRecording(): Promise<void>;
   cancelRecording(): Promise<void>;

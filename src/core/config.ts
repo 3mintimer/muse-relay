@@ -2,6 +2,7 @@ import type { Settings } from './types';
 import { validLanguage } from './i18n';
 
 export const defaults: Settings = {
+  savedPrompts: ['', '', ''],
   relay: 'gist', gistId: '', githubToken: '', relayUrl: '', relayToken: '', gatewayToken: '',
   customRelayUrl: '', customRelayToken: '', customGatewayToken: '',
   sonioxAuth: 'auto', sonioxApiKey: '', sonioxTokenUrl: '', sonioxTokenAuth: '', sonioxGatewayToken: '', voice: 'muse', mic: 'glasses', speakerFilter: 'all',
@@ -66,6 +67,10 @@ export function resolveSonioxConnection(settings: Settings): SonioxConnection {
 
 export function validateSettings(input: Settings, requireConnection=true): Settings {
   const result = { ...defaults, ...input };
+  result.savedPrompts = defaults.savedPrompts.map((_, index) => {
+    const value = Array.isArray(input.savedPrompts) && input.savedPrompts[index];
+    return typeof value === 'string' && value.trim() ? value.slice(0, 10000) : '';
+  });
   // A stale locale must not make otherwise valid connection settings unreadable.
   if(!validLanguage(result.language))result.language='system';
   if (!['all','self','other'].includes(result.speakerFilter)) result.speakerFilter = defaults.speakerFilter;

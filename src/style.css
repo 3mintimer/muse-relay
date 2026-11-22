@@ -144,6 +144,9 @@ textarea.even-input { resize: vertical; line-height: 1.6; }
 .attachment-preview .attachment-image { max-width: 84px; max-height: 84px; }
 .composer { padding: 14px; background: var(--even-surface); border-radius: 8px; scroll-margin: 12px; }
 .composer-input { font-size: 16px; min-height: 80px; max-height: 240px; max-height: min(240px, 40dvh); overflow-y: auto; }
+.saved-prompt-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.saved-prompt-buttons button { max-width: 100%; min-width: 0; }
+.saved-prompt-buttons span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .composer-actions > .even-button { padding: 10px 12px; }
 .composer-actions .send-button { margin-left: auto; }
@@ -222,7 +225,7 @@ img.avatar-preview { width: 48px; height: 48px; margin: 0; }
 .space-item h3 { margin: 0; }
 .settings-save { margin: 0 0 24px; }
 .danger-button { color: var(--even-danger) !important; }
-.app-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; z-index: 5; background: var(--even-bg); border: 0; box-shadow: none; }
+.app-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; z-index: 5; background: var(--even-bg); border: 0; box-shadow: none; }
 .app-nav .nav-button { border: 0; display: flex; flex-direction: column; gap: 5px; padding: 8px 4px; font-size: 11px; border-radius: 6px; background: transparent; }
 .app-nav .nav-button .icon { width: 21px; height: 21px; }
 .app-nav .nav-button.is-current { background: var(--even-surface); color: var(--even-text); }
