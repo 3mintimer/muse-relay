@@ -269,6 +269,9 @@ function renderPrompt() {
   $('#space-preset-field').hidden = state.topic !== 'space';
   $('#prompt-context').textContent = state.topic === 'reuse' ? t("G2Muse Gist · Keep existing settings") : t("{0} · {1} · Images {2}", [route.name, voiceName(), state.images ? t("On") : t("Off")]);
   const parts = [t("For Muse Relay, please {0}. Public protocol: {1}", [state.topic === 'connection' ? t("set up the relay in my environment") : state.topic === 'reuse' ? t("extend my existing G2Muse setup") : state.topic === 'voice' ? t("check and implement voice settings") : state.topic === 'space' ? t("create a Space") : state.topic === 'history' ? t("review history and cleanup") : t("retrieve the configured avatar"), state.route === 'custom' ? customContractLink() : contractLink]), safeConfiguration()];
+  if (['connection', 'reuse', 'space', 'avatar'].includes(state.topic)) {
+    parts.push(t("Run chat and image processing in the Muse VM by default. Generate or read the image there and publish it directly to the connection used by the app. Keep its writer credential in the VM. A separate relay is optional when the VM can serve the app’s HTTPS protocol."));
+  }
   if (state.topic === 'connection') parts.push(transportPrompt(), voicePrompt(), imagesPrompt(), t("Persist claims and results by request ID to avoid duplicate execution. Never blindly resend a request whose outcome is unknown. Use lightweight polling and call Muse only for new requests. Do not create Spaces or an avatar during connection setup; wait for a separate request."));
   else if (state.topic === 'reuse') parts.push(reusePrompt());
   else if (state.topic === 'voice') parts.push(t("The current relay is {0}. Preserve existing chat and credential separation.", [route.name]), voicePrompt(), state.voice === 'muse'

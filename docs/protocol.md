@@ -6,6 +6,8 @@ The EvenHub app and EHPK are shared by all users. Each user configures their end
 
 Preserve this app input/output contract and you can change relay internals or hosting without rebuilding the app. The bundled `server/`, `adapters/gist/`, and `firmware/` are optional references. There is no common operated relay or personal endpoint/token embedded in the distribution.
 
+Run chat and image processing in the Muse VM by default. Generate or read the image there and publish it directly to the connection used by the app. Keep its writer credential in the VM. A separate relay is optional when the VM can serve the app’s HTTPS protocol.
+
 [Setup tutorial and instructions for Muse](relay-setup.md)
 
 ## Connection methods
@@ -359,13 +361,17 @@ The reserved pattern applies only to `http://127.0.0.1` with a valid port. It do
 
 ### Images from Muse through EvenHub to G2
 
+For Gadget image replies, the publisher inside the VM prepares the image, reads the writer credential from the VM’s secret store or an owner-only file, and posts directly to the configured HTTPS relay. This works with the home computer offline. For Gist, publish the image and its reply from the VM using the existing Gist writer. For a custom connection, a phone-reachable HTTPS endpoint on the VM can return the image inline or by attachment reference.
+
 ```mermaid
 flowchart LR
-  File["Muse local/generated image"] --> Read["Read complete image\nMIME + base64"]
+  File["Image in the Muse VM"] --> Read["Read complete image\nMIME + base64"]
   Read -->|"POST /v1/messages\nMuse key"| Relay[Your relay]
   Relay -->|snapshot + image_file| Hub[EvenHub Muse Relay]
   Hub -->|Select and display image| G2[Even G2]
 ```
+
+Verify with a fresh PNG generated in the VM. On the Gadget route, check the returned `ok` and `id`, then use the phone credential to find the same ID in the snapshot and fetch its `image_file`. Decode the attachment and compare its SHA-256 to the source image in the VM. Check display on the physical G2 separately.
 
 Minimal image post. `data_base64` contains the complete encoded image, not a URL or Muse file path.
 

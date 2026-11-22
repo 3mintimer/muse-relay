@@ -4,6 +4,8 @@
 
 [画面で進める設定ガイドを開く](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/)
 
+チャットや画像は原則として Muse の VM 内で処理します。画像は VM 内で生成・読み込みし、VM に保存した投稿用の鍵でアプリの接続先へ直接送ります。VM がアプリの HTTPS 仕様を提供できる場合、別の中継サーバーは任意です。
+
 方式を選ぶ → Museに構築を頼む → 接続先を入力して保存します。
 
 | 方式 | 操作 | 成功の目印 |
@@ -134,7 +136,7 @@ G2の話者選択はアプリ側で対象外と不明の音声を無音化しま
 
 出口:
 - g2muse-relay.jsonへ{messages:[{id,from,type,text,ts,reply_to?}]}を書き出します。tsはUnix秒です。
-- 画像オンの場合だけ、画像返信にimage_fileとmime_type、またはimage:{mime,name,data_base64}を使います。画像の説明文は任意です。オフならテキストだけを書き出してください。
+- 画像オンの場合だけ、Muse の VM 内の既存の Gist 書き込み処理から画像を出力します。画像返信にimage_fileとmime_type、またはimage:{mime,name,data_base64}を使います。画像の説明文は任意です。オフならテキストだけを書き出してください。
 - muse-relay-spaces.jsonへ{spaces:[{id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}]}を書き出します。
 - 画像オンで、アバターを別途依頼した場合だけ、ホーム用にMuseで設定済みの自分のアバター画像を特定して読み込み、muse-relay-profile.jsonへ{profile:{name?,avatar:{mime,name?,data_base64},updated_at?}}を書き出してください。同じGist内のbase64ファイルを指すavatar_file+mime_typeでも構いません。PNG/JPEG/WebP、デコード後250000バイト以下です。見つからなければ未設定とし、別のアバターで代用しないでください。参考watcherはハンドラーのprofileを同形式で受け取り、別ファイルへ保存します。
 - profileを省略した通常の返信は既存プロフィールを変更しません。解除する場合だけ{profile:{}}を書き出してください。
@@ -193,7 +195,7 @@ Muse・機器側:
 
 同梱サーバーを採用する場合のMuse出力:
 - POST /v1/messagesをMuse用キーで呼び、{id:"muse_export_<unique-id>",type:"text"|"image",text?,ts?,reply_to?,image?}を送ります。textはテキスト投稿で必須、画像投稿では省略できます。
-- 画像オンの場合だけ、ローカル写真や生成画像を読み込み、image:{mime,name,data_base64}にします。PNG/JPEG/WebP、デコード後250000バイト以下です。同じidで更新できます。URLやファイルパスだけを返さないでください。画像オフならテキストだけを書き出してください。
+- 画像オンの場合だけ、Muse の VM 内で写真や生成画像を読み込み、VM から直接投稿します。添付は image:{mime,name,data_base64} です。PNG/JPEG/WebP、デコード後250000バイト以下です。同じidで更新できます。URLやファイルパスだけを返さないでください。画像オフならテキストだけを書き出してください。
 - G2への画像は「画像を読込→POST /v1/messages→EvenHubアプリ→G2」で送ります。SDKのdisplay.draw_file / display.draw_urlはSDK機器の画面向けであり、G2の描画には使いません。
 - capabilities.imagesはアプリからMuseへの画像入力可否です。falseでもMuseからの画像出力はできます。
 - 現在の書き出しは、Muse用キーでGET /v1/spacesを呼ぶと{spaces:[...]}で取得できます。

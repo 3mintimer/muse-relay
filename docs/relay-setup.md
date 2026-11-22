@@ -4,6 +4,8 @@
 
 [Open the setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/)
 
+Run chat and image processing in the Muse VM by default. Generate or read the image there and publish it directly to the connection used by the app. Keep its writer credential in the VM. A separate relay is optional when the VM can serve the app’s HTTPS protocol.
+
 Choose a method → ask Muse to set it up → enter and save your connection.
 
 | Method | Action | Success looks like |
@@ -134,7 +136,7 @@ Processing:
 
 Output:
 - Write {messages:[{id,from,type,text,ts,reply_to?}]} to g2muse-relay.json. ts is Unix seconds.
-- Only when images are on, use image_file plus mime_type, or image:{mime,name,data_base64}, for image replies. Captions are optional. Otherwise export text only.
+- Only when images are on, publish from the existing Gist writer in the Muse VM. Use image_file plus mime_type, or image:{mime,name,data_base64}, for image replies. Captions are optional. Otherwise export text only.
 - Write {spaces:[{id,title,layout:"list"|"cards",updated_at,items:[{id,title,text,control?,ts?}]}]} to muse-relay-spaces.json.
 - Only with images on and a separate avatar request, locate and read Muse's existing configured avatar. Export {profile:{name?,avatar:{mime,name?,data_base64},updated_at?}} to muse-relay-profile.json, or use avatar_file plus mime_type for a base64 file in the same Gist. Use PNG/JPEG/WebP, at most 250000 decoded bytes. If unavailable, leave it unset; do not substitute another avatar. The reference watcher accepts handler.profile in this format and stores a separate image file.
 - Omitting profile in an ordinary reply preserves the existing profile. Write {profile:{}} only to clear it.
@@ -193,7 +195,7 @@ Muse and device side:
 
 Muse output when using the bundled server:
 - POST /v1/messages with the Muse key and {id:"muse_export_<unique-id>",type:"text"|"image",text?,ts?,reply_to?,image?}. Text posts require text; image posts may omit it.
-- Only with images on, read a local photo or generated image into image:{mime,name,data_base64}. PNG/JPEG/WebP, at most 250000 decoded bytes. Reuse the same id for updates. Do not return only a URL or file path. With images off, export text only.
+- Only with images on, read the photo or generated image in the Muse VM and publish directly from there using image:{mime,name,data_base64}. PNG/JPEG/WebP, at most 250000 decoded bytes. Reuse the same id for updates. Do not return only a URL or file path. With images off, export text only.
 - G2 images follow: read image → POST /v1/messages → EvenHub app → G2. SDK display.draw_file/display.draw_url target the SDK device display, not G2.
 - capabilities.images describes image input from the app to Muse. Muse image output works even when it is false.
 - Read current exports using the Muse key with GET /v1/spaces, returning {spaces:[...]}.
