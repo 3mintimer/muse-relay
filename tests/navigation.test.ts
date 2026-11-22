@@ -41,8 +41,17 @@ function fakeDisplay() {
   let eventHandler: ((event: EvenHubEvent) => void) | undefined;
   const frames: string[] = [], operations: string[] = [];
   const text = () => (page.textObject || []).map((item: any) => item.content || '').join('\n');
-  const columns = () => (page.textObject || []).filter((c:any)=>c.containerName.startsWith('home-'));
-  const items = () => columns().length ? columns().flatMap((c:any)=>c.content.split('\n').filter(Boolean).map((line:string)=>line.replace(/^[ >]+/,''))) : (page.listObject || []).flatMap((item: any) => item.itemContainer?.itemName || []);
+  const items = () => {
+    const fields = page.textObject || [];
+    if (!fields.some((c:any)=>c.containerName==='rows-left')) {
+      return (page.listObject || []).flatMap((item:any)=>item.itemContainer?.itemName || []);
+    }
+    return ['left','right'].flatMap(side=>{
+      const lines=(prefix:string)=>fields.find((c:any)=>c.containerName===prefix+side).content.split('\n');
+      const bright=lines('focus-');
+      return lines('rows-').map((value:string,row:number)=>value.trim() || bright[row]?.replace(/ <$/,'').trim()).filter(Boolean);
+    });
+  };
   const recordFrame = () => frames.push(text());
   const bridge = {
     onEvenHubEvent(callback: (event: EvenHubEvent) => void) { eventHandler = callback; return () => { eventHandler = undefined; }; },
@@ -1731,7 +1740,7 @@ test('Home settings save chat preferences, preserve the connection and support b
   const tap = async (label: string) => {
     const index = app.items().indexOf(label);
     assert.ok(index >= 0, label);
-    if (app.containers().some((c:any)=>c.containerName === 'home-left')) {
+    if (app.containers().some((c:any)=>c.containerName === 'rows-left')) {
       for (let i=0;i<index;i++) app.emit({textEvent:{eventType:2}});
       app.emit({textEvent:{containerID:14}});
     } else app.emit({listEvent: {currentSelectItemIndex: index}});
@@ -1807,9 +1816,10 @@ test('saved prompts retain their slots and send the full selected text from Chat
   // From Chat go up past Usage to slot 3. Slot 2 is empty and skipped.
   app.emit({textEvent:{eventType:1}}); app.emit({textEvent:{eventType:1}});
   app.emit({textEvent:{eventType:1}}); await settle();
-  assert.match(app.text(),/> 1\./);
+  const rightFocus = () => app.containers().find((c:any)=>c.containerName==='focus-right').content;
+  assert.match(rightFocus(),/^1\..* <$/);
   app.emit({textEvent:{eventType:2}}); await settle();
-  assert.match(app.text(),/> 3\./);
+  assert.match(rightFocus(),/^\n\n\n\n3\..* <$/);
   app.emit({textEvent:{containerID:14}});
   await settle();
   assert.equal(app.sent[1]?.text,savedPrompts[2]);
