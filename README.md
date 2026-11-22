@@ -15,7 +15,9 @@ Send a message from your phone or Even G2 and read Muse’s reply on your glasse
 | Soniox live transcription | Your own Soniox API key or a server that issues temporary keys |
 | Spaces and avatar | Ask Muse to export the existing content and image |
 
-Users supply their own relay, accounts, and keys. The developer does not operate a shared relay for everyone. ATOM S3 is the reference Gadget kept at home; the Gist method does not need it.
+Run chat and image processing in the Muse VM by default. Generate or read the image there and publish it directly to the connection used by the app. Keep its writer credential in the VM. A separate relay is optional when the VM can serve the app’s HTTPS protocol.
+
+Each user supplies the accounts and credentials for their selected connection. The developer does not operate a shared relay for everyone. ATOM S3 is the reference Gadget kept at home; the Gist method does not need it.
 
 ```mermaid
 flowchart LR
