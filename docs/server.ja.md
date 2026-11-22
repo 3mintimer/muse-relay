@@ -9,7 +9,7 @@
 | 配置先 | 参考実装 |
 |---|---|
 | Node.js を常時起動する自分のサーバー | この文書の Node + HTTPS 構成 |
-| Cloudflare Worker / Sites | [Worker + D1 + R2](../server/cloudflare/README.ja.md) |
+| ChatGPT Sites / Cloudflare Workers / Cloudflare Pages Functions | [Worker + D1 + R2](../server/cloudflare/README.ja.md) |
 
 どちらも同じアプリ側の入出力と役割別認証を使用します。
 
@@ -27,6 +27,8 @@ flowchart LR
 ```
 
 自宅ルーターへのポート開放は不要です。ATOM は外向きに通信します。スマートフォンに自宅の LAN IP を設定しても外出先からは利用できません。
+
+位置共有を利用する場合は、[0.3.30 のソース](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1)から同じ版の `server/` と `protocol/` を使用します。既存環境では同じ設定・状態ファイルを指定して中継を再起動します。新しく受け付けたチャットの位置は音声や写真と一緒でも Muse の本文に入ります。[更新手順と確認方法](relay-setup.ja.md#relay-upgrade)
 
 ## 1. 参考実装の設定画面を開く
 
@@ -133,7 +135,7 @@ Muse に設定する内容:
 
 カードはタップで開く・ページ送り、上下スワイプで項目切替、ダブルタップで一覧へ戻る操作だけで読める内容にします。画像設定がオフでも本文だけで内容が分かるようにし、外部リンクや音声入力を必須にしません。画像を使う場合はアプリでもオンにし、カードの `image:{mime,name,data_base64}` を加えます。参考Workerでは全スペースの画像を合計8枚まで保存できます。
 
-Muse方式の音声で文字起こしも表示したい場合は、Muse返信内に文字起こしであることを明記します。`POST /v1/messages` の送信者はサーバーが `Muse` に固定するため、同APIで `You` の文字起こしを追加することはできません。Soniox方式ではアプリから確定テキストが送られ、Muse側の再文字起こしは不要です。
+Muse が WAV を処理し、ACK に対応する SDK の `message.user` に文字起こしが含まれると、中継は元の依頼 ID の `You` 発言を更新します。`POST /v1/messages` の送信者はサーバーが `Muse` に固定するため、同APIで `You` の文字起こしを追加することはできません。Soniox方式ではアプリから確定テキストが送られ、Muse側の再文字起こしは不要です。
 
 ## 参考実装の通信仕様
 
@@ -142,7 +144,7 @@ Muse方式の音声で文字起こしも表示したい場合は、Muse返信内
 | 呼び出し元 | 方法・パス | 用途 |
 |---|---|---|
 | スマートフォン | `GET /v1/snapshot` | メッセージ・スペース・ATOMの接続状態 |
-| スマートフォン | `POST /v1/requests` | テキスト・WAV・スペース更新要求 |
+| スマートフォン | `POST /v1/requests` | チャット（任意の位置・WAV・対応時の画像）、スペースの更新・操作 |
 | スマートフォン | `GET /v1/files/:name` | 添付データ |
 | スマートフォン | `POST /v1/soniox-token` | Sonioxの一時キー発行 |
 | Muse | `POST /v1/messages` | テキスト・画像返信の追加または同じIDの更新 |

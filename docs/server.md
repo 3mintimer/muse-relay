@@ -9,7 +9,7 @@ Start with the [setup tutorial](relay-setup.md), then the [app input/output cont
 | Hosting | Reference |
 |---|---|
 | Your always-on Node.js server | Node + HTTPS in this guide |
-| Cloudflare Worker / Sites | [Worker + D1 + R2](../server/cloudflare/README.md) |
+| ChatGPT Sites / Cloudflare Workers / Cloudflare Pages Functions | [Worker + D1 + R2](../server/cloudflare/README.md) |
 
 Both use the same app contract and role-specific authentication.
 
@@ -27,6 +27,8 @@ flowchart LR
 ```
 
 ATOM initiates outbound connections; no home-router port forwarding is needed. A home LAN IP entered on the phone will not work away from home.
+
+For location sharing, use `server/` and `protocol/` from the same [0.3.30 source](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1). For an existing relay, restart it with the same configuration and state file. Newly accepted chats carry the location in the Muse message, including when sending audio or a photo. [Upgrade and verification](relay-setup.md#relay-upgrade)
 
 ## 1. Open the reference setup UI
 
@@ -133,7 +135,7 @@ Limits are 20 Spaces and 50 cards each. Updating one preserves the others. To in
 
 Cards must be readable with taps to open/page, vertical swipes to change items, and a double tap to return to the list. Keep text useful with images off; do not require external links or voice input. For images, enable them in the app and add `image:{mime,name,data_base64}` to a card. The reference Worker stores at most eight images across all Spaces.
 
-To show a transcript produced by Muse processing, label it as a transcript in Muse's reply. `POST /v1/messages` fixes the sender to `Muse`, so that route cannot add a `You` transcript. Soniox sends final text from the app and does not need Muse to transcribe it again.
+When Muse processes a WAV, the relay updates the original `You` row with the transcript from the ACK-matched SDK `message.user` event, if available. `POST /v1/messages` fixes the sender to `Muse`, so that route cannot add a `You` transcript. Soniox sends final text from the app and does not need Muse to transcribe it again.
 
 ## Reference transport
 
@@ -142,7 +144,7 @@ See the [public protocol](protocol.md#app-http-boundary-and-reference-management
 | Caller | Method / path | Purpose |
 |---|---|---|
 | Phone | `GET /v1/snapshot` | Messages, Spaces, and ATOM connection state |
-| Phone | `POST /v1/requests` | Text, WAV, and Space refresh requests |
+| Phone | `POST /v1/requests` | Chat with optional location, WAV or supported image input, and Space refreshes or actions |
 | Phone | `GET /v1/files/:name` | Attachment data |
 | Phone | `POST /v1/soniox-token` | Issue a temporary Soniox key |
 | Muse | `POST /v1/messages` | Add text/image replies or update the same ID |

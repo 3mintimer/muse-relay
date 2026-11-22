@@ -36,7 +36,7 @@ The reference relay retains up to 100 messages and attachments that remain refer
 
 The setup guide opens in a browser. Its links carry only the selected help section. If you choose to send feedback, the guide stores your message, category, sharing choice, receipt number and submission time in its own database. The form accepts submissions without an account. Sharing an anonymized summary in a public issue is opt-in. The guide removes submissions older than 90 days when it next processes feedback or the maintainer runs cleanup. Keep your receipt for removal requests. [Feedback handling](docs/feedback.md)
 
-The app requests network access, the selected G2 or phone microphone, and photo/camera access for explicit image operations. The location permission supports optional sharing with chat. The exact permissions are in [app.json](app.json).
+The app requests network access, the selected G2 or phone microphone, and photo/camera access for explicit image operations. The location permission supports optional sharing with chat. See the [0.3.30 permission manifest](https://github.com/3mintimer/muse-relay/blob/v0.3.30-beta.1/app.json).
 
 The app contains no advertising or analytics reporting code and no automatic report upload to the app developer. Operational logs from your relay, SDK, device console or hosting provider are separate. Even and the other services you use may process data under their own terms. Do not include credentials, private messages or raw device logs in public reports.
 

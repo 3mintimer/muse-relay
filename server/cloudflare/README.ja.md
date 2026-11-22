@@ -15,7 +15,7 @@ flowchart LR
   Worker <--> R2["R2: 音声・画像"]
 ```
 
-アプリが使う入口・出口は [protocol.md](../../docs/protocol.ja.md)、設定手順は [relay-setup.md](../../docs/relay-setup.ja.md) を参照してください。Worker と Node 版は `server/core.mjs` の検証・キュー・Muse 応答照合を共有します。操作部品の検証は `protocol/space-controls.mjs` も使用するため、配備用の別リポジトリへコピーする際はこのファイルも含めます。
+アプリが使う入口・出口は [protocol.md](../../docs/protocol.ja.md)、設定手順は [relay-setup.md](../../docs/relay-setup.ja.md) を参照してください。Worker と Node 版は `server/core.mjs` の検証・キュー・Muse 応答照合を共有します。位置共有に対応する [0.3.30 のソース](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1) からビルドしてください。配備専用リポジトリでビルドする場合は、同じ版の `server/` と `protocol/` を、ルート直下の兄弟ディレクトリとして配置します。これには `protocol/chat-location.mjs` と `protocol/space-controls.mjs` が含まれます。 別リポジトリでも下記のテストを実行する場合は、`tests/maintenance-contract.mjs` も同じ位置にコピーします。
 
 ## ビルド
 
@@ -41,6 +41,8 @@ node server/cloudflare/build.mjs --outdir /path/to/hosting-project/dist
 
 この操作はビルドのみです。Site 作成、鍵登録、デプロイ、公開範囲の変更は行いません。ルートの EvenHub 用 `dist` は既定では使いません。
 
+既存の Worker では、同じ D1・R2・ロール別キーを使って更新版を配備します。位置対応では新しいバインディングやシークレットを追加しません。確認には配備後に新しく送ったチャットを使います。更新前のキューにある依頼は、受け付けたときの形式で処理されます。[送信と位置の確認](../../docs/relay-setup.ja.md#relay-upgrade)
+
 ## ホスト側の設定
 
 | 種別 | 名前 | 値 |
@@ -60,7 +62,9 @@ Origin は完全一致で照合します。Even iPhone のポートが起動ご�
 
 `null` Origin は使用する EvenHub WebView がそれを送る場合だけ別途追加します。Origin の許可や OPTIONS の通過は認証を置き換えません。Origin がない ATOM/Muse クライアントを含め、データ用の HTTP API で役割別 Bearer 認証が必要です。
 
-Sites を使う場合、個人の作業ディレクトリにある `.openai/hosting.json` の binding は `hosting.example.json` と同じ `"d1":"DB","r2":"BUCKET"` です。個人の Site ID はその作業ディレクトリだけに設定します。Sites の packaging helper 用に `server/cloudflare/drizzle/` を作業ディレクトリの `drizzle/` にコピーしてください。Sites が migration を適用してから Worker をアップロードします。通常の Cloudflare 環境でも、最初の起動前に同じ SQL を D1 へ適用します。リクエスト処理中にテーブルを作成・変更しません。
+### ChatGPT Sites
+
+サーバー機能付き Site としてデプロイします。作業ディレクトリの `.openai/hosting.json` に Site ID と `hosting.example.json` と同じ `"d1":"DB","r2":"BUCKET"` を設定します。Sites の packaging helper 用に `server/cloudflare/drizzle/` を作業ディレクトリの `drizzle/` にコピーしてください。Sites が migration を適用してから Worker をアップロードします。
 
 Sites の所有者限定ゲートウェイを使う場合:
 
@@ -70,6 +74,18 @@ OAI-Sites-Authorization: Bearer <本人のゲートウェイキー>
 ```
 
 2 つのヘッダーを併用します。後者はホスト側で検証され、Worker の役割別認証を置き換えません。アプリ・ATOM・Muse に設定する値は各ユーザーのローカル設定です。CORS preflight は両ヘッダーを許可しますが、ホスト側の preflight 通過も確認が必要です。
+
+### Cloudflare Workers
+
+1. 自分の Cloudflare アカウントで D1 データベースと R2 バケットを作ります。プロジェクトルートの Wrangler 設定に Worker 名と `compatibility_date` を指定し、`main` を `server/cloudflare/dist/server/index.js` にします。D1 を `DB`、R2 を `BUCKET` に割り当て、D1 の `migrations_dir` は `server/cloudflare/drizzle` にします。[Wrangler の設定項目](https://developers.cloudflare.com/workers/wrangler/configuration/)
+2. 対象の D1 に `npx wrangler d1 migrations apply DATABASE_NAME --remote` を実行します。`DATABASE_NAME` は自分のデータベース名に置き換えます。上の表の変数を設定し、`npx wrangler deploy` で配備します。用途別キーは Cloudflare ダッシュボードまたは `wrangler secret put` でシークレットに登録します。[D1 マイグレーション](https://developers.cloudflare.com/d1/reference/migrations/) · [Workers のシークレット](https://developers.cloudflare.com/workers/configuration/secrets/)
+
+### Cloudflare Pages Functions
+
+1. [Advanced mode](https://developers.cloudflare.com/pages/functions/advanced-mode/) を使い、`server/cloudflare/dist/server/index.js` のコピーを Pages の出力ディレクトリ直下に `_worker.js` として置きます。中継専用の Pages プロジェクトなら、このファイルが API の入口です。
+2. Pages のデプロイ先環境に `DB` と `BUCKET` のバインディング、用途別シークレット、`ALLOWED_ORIGINS` を設定します。同じ D1 マイグレーションを先に適用し、Git 連携または `wrangler pages deploy` で配備します。[Pages のバインディング](https://developers.cloudflare.com/pages/functions/bindings/) · [Wrangler でのアップロード](https://developers.cloudflare.com/pages/get-started/direct-upload/#wrangler-cli)
+
+デプロイ後は自分の HTTPS URL の `/health` で起動を確認し、アプリの「接続を確認」で認証付き `/v1/snapshot` の読み取りも確認します。アプリと ATOM には同じ中継 URL を設定し、用途別のキーを入力します。
 
 ## 中継側のリアルタイム文字起こし
 

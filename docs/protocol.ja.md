@@ -16,8 +16,8 @@ flowchart LR
   Phone <-->|Gist方式| Gist[利用者のGitHub Gist]
   Gist <-->|新規依頼だけ処理| Handler[利用者のMuse処理]
   Phone <-->|Gadget方式 / HTTPS| Relay[利用者の中継サーバー]
-  ATOM[利用者のSDK対応機器<br/>参考: 自宅 ATOM S3] -->|外向きHTTPS<br/>依頼取得・返信返却| Relay
-  ATOM <-->|Muse Gadget SDK| Muse[Muse]
+  Device[対応ESP32ボード / Linux PC] -->|外向きHTTPS<br/>依頼取得・返信返却| Relay
+  Device <-->|Muse Gadget SDK| Muse[Muse]
   Muse -->|テキスト・画像・スペースの出力| Relay
   Phone <-->|カスタム / HTTPS| Custom[利用者のサーバー]
   Custom <-->|利用者が設定| Muse
@@ -58,7 +58,7 @@ G2Museのメッセージ形式を読み取れます。機能の基準として�
 | `space_id` | `kind:space` の場合の設定済みスペースID |
 | `audio` / `image` | Gadget方式の添付。Gistは後述の別ファイル参照 |
 
-チャット入力欄のピンと設定のスイッチは同じ共有設定を変更します（初期値はオフ）。アプリは送信時にキャッシュにある位置を使います。Gadget 中継は Muse の本文に「【現在地】」と位置の JSON を追記します。音声・写真では同じ本文をテキスト項目に入れます。Muse は電文から座標を直接読めます。Gist ハンドラーとカスタム中継にもリクエストの `location` が渡ります。
+チャット入力欄のピンと設定のスイッチは同じ共有設定を変更します（初期値はオフ）。アプリは送信時にキャッシュにある位置を使います。Gadget 中継は Muse の本文に「【現在地】」と位置の JSON を追記します。音声・写真では同じ本文をテキスト項目に入れます。Muse は電文から座標を直接読めます。Gist ハンドラーとカスタム中継にもリクエストの `location` が渡ります。 既存の中継を更新するには[経路別の手順](relay-setup.ja.md#relay-upgrade)を参照してください。
 
 Even Hub は送信が受理された時点の位置を、そのメッセージに紐づけてスマホの履歴キャッシュに保存します。送信した位置はピンをタップすると確認できます。G2 とスマホの通常表示には元の本文・文字起こしを使います。
 
@@ -306,7 +306,7 @@ secret GistはURLを知る人が閲覧できる非公開一覧であり、内容
 
 ## Muse Gadget SDK方式
 
-スマートフォンは利用者のHTTPS中継へ接続します。同梱の参考構成では、自宅のATOM S3が中継を取得し、ペアリング済みMuse Gadget SDKの接続でMuseへ渡します。利用者の対応機器や配置に合わせた実装も可能です。
+スマートフォンと対応ESP32ボードまたはLinux PCは、双方から届く同じHTTPS中継へ接続します。機器は外向きの接続で依頼を取得し、ペアリング済みMuse Gadget SDKの接続でMuseへ渡します。ボードには機種に合うファームウェア、Linuxには別途SDKアダプターが必要です。ATOM S3は参考ボードです。
 
 ### アプリのHTTP境界と参考実装の管理口
 

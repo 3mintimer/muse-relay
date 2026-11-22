@@ -16,8 +16,8 @@ flowchart LR
   Phone <-->|Gist| Gist[Your GitHub Gist]
   Gist <-->|Process new requests only| Handler[Your Muse handler]
   Phone <-->|Gadget / HTTPS| Relay[Your relay server]
-  ATOM[Your SDK device<br/>Reference: ATOM S3 at home] -->|Outbound HTTPS<br/>Fetch jobs and return replies| Relay
-  ATOM <-->|Muse Gadget SDK| Muse[Muse]
+  Device[Supported ESP32 board / Linux PC] -->|Outbound HTTPS<br/>Fetch jobs and return replies| Relay
+  Device <-->|Muse Gadget SDK| Muse[Muse]
   Muse -->|Text, image, and Space exports| Relay
   Phone <-->|Custom / HTTPS| Custom[Your server]
   Custom <-->|Your integration| Muse
@@ -58,7 +58,7 @@ Timestamps use Unix seconds. For IDs shared across the relay methods, use at mos
 | `space_id` | Configured Space ID for `kind:space` |
 | `audio` / `image` | Gadget attachments; Gist uses separate file references below |
 
-The composer pin and Settings change the same sharing preference, initially off. Chat sends with the cached fix when available. The Gadget relay appends `【現在地】` and the location JSON to the Muse message. For audio and photos, the same message is included as a text item. Muse can use the coordinates directly. Gist handlers and custom relays receive the request’s `location` field.
+The composer pin and Settings change the same sharing preference, initially off. Chat sends with the cached fix when available. The Gadget relay appends `【現在地】` and the location JSON to the Muse message. For audio and photos, the same message is included as a text item. Muse can use the coordinates directly. Gist handlers and custom relays receive the request’s `location` field. See the [route-specific upgrade steps](relay-setup.md#relay-upgrade) when updating an existing relay.
 
 After the relay accepts a message, Even Hub keeps its sent fix with that message in the phone’s local history cache. Tap its pin to inspect the fix. Both the G2 and the normal phone chat display the original text or transcript.
 
@@ -306,7 +306,7 @@ Run one writer for the shared root. Preserve saved results after interruption in
 
 ## Muse Gadget SDK method
 
-The phone connects to your HTTPS relay. In the reference setup, ATOM S3 at home fetches requests and passes them to Muse through its paired SDK connection. You may use another supported device or hosting arrangement.
+The phone and the SDK device connect to the same HTTPS relay. The device retrieves requests and forwards them to Muse over its paired SDK connection. An ESP32 board uses firmware for its model, such as the ATOM S3 reference firmware. A Linux computer needs a separate SDK adapter.
 
 ### App HTTP boundary and reference management routes
 

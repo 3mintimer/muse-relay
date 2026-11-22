@@ -5,6 +5,7 @@ import { languages, languageFromUrl, languageHref } from './language.js';
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const repo = 'https://github.com/3mintimer/muse-relay';
+const relaySource = repo + '/tree/v0.3.30-beta.1';
 const sdk = 'https://github.com/facebookincubator/muse-gadget-sdk';
 const state = { route: 'gist', voice: 'muse', images: false, step: 0, topic: 'connection', preset: 'schedule' };
 const el = (tag, text, className) => {
@@ -34,7 +35,7 @@ const routes = () => ({
   },
   custom: {
     name: t("Custom relay server"), app: t("Custom relay server"), medium: t("HTTPS relay"), device: t("Handler"),
-    supplies: [t("HTTPS relay"), t("Choose how your server connects to Muse")],
+    supplies: [t("Your HTTPS relay URL"), t("Choose how your server connects to Muse")],
     note: t("Enter the base URL. Add a phone token or hosting key only if your server requires it."),
     flow: [['G2', t("Display · voice")], [t("Phone"), 'Muse Relay'], [t("Custom relay server"), 'HTTPS'], ['Muse', t("Process · reply")]],
     fields: [[t("Base URL"), 'https://example.com/muse'], [t("Phone access token (optional)"), 'Bearer'], [t("Hosting access key (optional)"), 'OAI-Sites-Authorization']],
@@ -42,22 +43,22 @@ const routes = () => ({
     inputDetail: t("Process each request ID once and return HTTP 202 with JSON."),
     outputDetail: t("Return the matching reply in messages with reply_to set to the request ID."),
   },
-  atom: {
-    name: t("ATOM S3 at home"), app: 'Muse Gadget SDK', medium: t("HTTPS relay"), device: 'ATOM S3',
-    supplies: [t("An HTTPS relay reachable away from home, with separate access keys for each role"), t("ATOM S3, USB power, and 2.4 GHz Wi-Fi"), t("A Muse Gadget SDK token and pairing with Muse")],
-    note: t("ATOM connects outward from home to your relay. Do not enter its LAN IP on your phone. No port forwarding to ATOM is needed."),
-    flow: [['G2', t("Display · voice")], [t("Phone"), 'Muse Relay'], ['HTTPS', t("Your relay")], ['ATOM S3', t("Home · outbound")], ['Muse', t("Via SDK")]],
-    fields: [[t("Relay server URL"), t("HTTPS reachable away from home")], [t("Phone access token"), t("App access key")]],
+  esp32: {
+    name: t("ESP32 device"), app: 'Muse Gadget SDK', medium: t("HTTPS relay"), device: 'ESP32',
+    supplies: [t("An HTTPS relay that both the phone and device can reach, with separate access keys"), t("An ESP32 board supported by the Muse Gadget SDK and firmware for that board"), t("A Muse Gadget SDK token and pairing with Muse")],
+    note: t("The ESP32 connects to your HTTPS relay. Enter the relay URL on the phone."),
+    flow: [['G2', t("Display · voice")], [t("Phone"), 'Muse Relay'], ['HTTPS', t("Your relay")], ['ESP32', t("Outbound")], ['Muse', t("Via SDK")]],
+    fields: [[t("Relay server URL"), t("Your HTTPS relay URL")], [t("Phone access token"), t("App access key")]],
     input: 'POST /v1/requests',
     output: 'GET /v1/snapshot\nGET /v1/files/:name',
-    inputDetail: t("Send with the phone key. ATOM retrieves requests using its separate device key."),
+    inputDetail: t("The phone sends the request with its key. The ESP32 retrieves it using its device key."),
     outputDetail: t("The app reads here. Muse publishes additional output with its writer key to /v1/messages, /v1/spaces/:id, and /v1/profile."),
   },
   linux: {
-    name: 'Linux / Raspberry Pi', app: 'Muse Gadget SDK', medium: t("HTTPS relay"), device: 'Linux',
+    name: t("Linux computer"), app: 'Muse Gadget SDK', medium: t("HTTPS relay"), device: 'Linux',
     supplies: [t("A Linux machine and pairing environment supported by the official Linux SDK"), t("Muse Gadget SDK token"), t("An HTTPS relay and an adapter connecting it to SDK chat input and output")],
     note: t("The official SDK supports Linux. A Muse Relay Linux adapter is not bundled, and this integration has not been tested on hardware."),
-    flow: [['G2', t("Display · voice")], [t("Phone"), 'Muse Relay'], ['HTTPS', t("Your relay")], ['Linux', t("Home · outbound")], ['Muse', t("Via SDK")]],
+    flow: [['G2', t("Display · voice")], [t("Phone"), 'Muse Relay'], ['HTTPS', t("Your relay")], ['Linux', t("Outbound")], ['Muse', t("Via SDK")]],
     fields: [[t("Relay server URL"), t("Your implemented HTTPS interface")], [t("Phone access token"), t("App access key")]],
     input: 'POST /v1/requests',
     output: 'GET /v1/snapshot\nGET /v1/files/:name',
@@ -193,18 +194,18 @@ function renderImplementation() {
     steps.append(item(route.input, route.inputDetail), item(route.output, route.outputDetail));
     body.append(steps, el('p', route.note));
     links.append(link(t("App HTTP contract ↗"), customContractLink()));
-  } else if (state.route === 'atom') {
-    steps.append(item(t("1. HTTPS relay"), t("Use the reference server's local setup UI to set the public HTTPS URL and allowed origins. Keep phone, device, and Muse keys separate.")), item('2. ATOM S3', t("Flash the reference firmware. Save the relay URL, device key, and SDK token in USB setup, then pair in Muse.")), item(t("3. Leave it at home"), t("Keep USB power and Wi-Fi on. Your phone connects to the relay while you are away; ATOM connects to the same relay from home.")));
+  } else if (state.route === 'esp32') {
+    steps.append(item(t("1. HTTPS relay"), t("Use the reference server's local setup UI to set the public HTTPS URL and allowed origins. Keep phone, device, and Muse keys separate.")), item(t("2. Set up the board"), t("Use firmware for your board. Set the relay URL and device key, then pair the board in Muse.")), item(t("3. Keep the device online"), t("Keep the board powered and connected while relaying. For example, you can leave it at home and use your phone on mobile data.")));
     body.append(steps, codeBlock('node server/setup.mjs'), el('p', t("Run from the project root and open http://127.0.0.1:8788. This is a setup page; deploy your HTTPS hosting separately."), 'small muted'));
-    links.append(link(t("Server setup and HTTPS deployment ↗"), `${repo}/blob/main/docs/server.md`), link(t("ATOM flashing and USB setup ↗"), `${repo}/blob/main/docs/atoms3.md`), link(t("Reproduction steps and verification scope ↗"), `${repo}/blob/main/docs/public-source.md`));
+    links.append(link('Muse Gadget SDK · ESP32 ↗', `${sdk}/tree/main/esp32`), link(t("Server setup and HTTPS deployment ↗"), `${repo}/blob/main/docs/server.md`), link(t("ATOM flashing and USB setup ↗"), `${repo}/blob/main/docs/atoms3.md`), link(t("Reproduction steps and verification scope ↗"), `${repo}/blob/main/docs/public-source.md`));
     body.append(el('p', t("Verified reference setup: a physical ATOM S3 exchanged text and received matching replies to synthetic WAV input from Muse. This does not verify the G2's physical microphone or every user's environment."), 'small muted'));
   } else {
     steps.append(item(t("1. Check an SDK round trip"), t("Follow the official BLE pairing steps. Run the command below with a fresh dedicated conversation ID and check its matching reply.")), item(t("2. Connect HTTP input and output"), t("Implement an adapter that forwards POST /v1/requests to the SDK, then saves the reply with reply_to set to the original request ID.")), item(t("3. Acceptance check"), t("GET /v1/snapshot must return the matching Muse reply and the app must display it. Do not mix replies from other conversations or requests.")));
-    const pairing = el('div', undefined, 'voice-diagram'); pairing.setAttribute('aria-label', t("Initial BLE pairing from the Muse app to the Linux machine at home"));
-    pairing.append(el('b', t("Initial setup")), el('span', t("Muse app")), el('b', 'BLE →'), el('span', t("Home Linux")));
-    const away = el('div', undefined, 'voice-diagram'); away.setAttribute('aria-label', t("The phone away from home and Linux at home connect to the HTTPS relay; Linux connects to Muse"));
-    away.append(el('b', t("Away from home")), el('span', t("Phone")), el('b', '→'), el('span', t("HTTPS relay")), el('b', '←'), el('span', t("Home Linux")), el('b', '→'), el('span', 'Muse'));
-    body.append(steps, pairing, away, el('p', t("After initial pairing, Linux makes outbound connections from home. Your phone does not need to stay within its BLE range."), 'small muted'),
+    const pairing = el('div', undefined, 'voice-diagram'); pairing.setAttribute('aria-label', t("Initial BLE pairing between the Muse app and the Linux computer"));
+    pairing.append(el('b', t("Initial setup")), el('span', t("Muse app")), el('b', 'BLE →'), el('span', t("Linux computer")));
+    const relayFlow = el('div', undefined, 'voice-diagram'); relayFlow.setAttribute('aria-label', t("The phone and Linux computer connect to the HTTPS relay. The computer also connects to Muse."));
+    relayFlow.append(el('b', t("After pairing")), el('span', t("Phone")), el('b', '→'), el('span', t("HTTPS relay")), el('b', '←'), el('span', t("Linux computer")), el('b', '→'), el('span', 'Muse'));
+    body.append(steps, pairing, relayFlow, el('p', t("After pairing, the Linux computer connects over the network. The phone can move out of Bluetooth range."), 'small muted'),
       codeBlock(t("musegadget send-user-msg --session-id \"<NEW_UUID>\" --wait 60 \"test\"")),
       el('p', t("Replace <NEW_UUID> with a freshly generated test UUID. This sends to Muse and waits up to 60 seconds. After the CLI reply succeeds, send a new test request through the HTTP interface too."), 'small muted'));
     links.append(link(t("Official CLI documentation ↗"), `${sdk}/blob/main/linux/README.md#hack-and-extend-it`), link(t("Official bridge example ↗"), `${sdk}/blob/main/linux/examples/pebble_ring_bridge.py`), link(t("App HTTP contract ↗"), `${repo}/blob/main/docs/protocol.md`));
@@ -214,17 +215,17 @@ function renderImplementation() {
 
 const contractLink = `${repo}/blob/main/docs/protocol.md`;
 const safeConfiguration = () => t("Read endpoints and credentials through secure setup or secret configuration. Do not put tokens in chat, public code, logs, or Gist content. Keep personal endpoints out of the shared EvenHub app; do not change the app.");
-const customContractLink = () => `${repo}/blob/beta/docs/protocol${getLocale() === 'ja' ? '.ja' : ''}.md#custom-relay`;
+const customContractLink = () => docHref(contractLink + '#custom-relay');
 function transportPrompt() {
   if (state.route === 'custom') {
     const route = routes().custom;
     return [route.name, route.note, t("Allow the origin shown in the app in your server’s CORS settings."),
       route.input, route.inputDetail, route.output, route.outputDetail, t("Choose how your server connects to Muse")].join('\n');
   }
-  if (state.route === 'gist') return t("Use GitHub Gist. Only for a new Gist, initialize g2muse-relay.json with {\"messages\":[]}; preserve existing files.\nInput: muse-relay-request-<id>.json containing {protocol:\"muse-relay/1\",id,kind:\"chat\"|\"space\",text,created_at,space_id?,space_action?}. audio_file/audio_mime/audio_name or image_file/image_mime/image_name reference separate files containing base64 bytes.\nOutput: g2muse-relay.json as {messages:[{id,from:\"Muse\",type:\"text\",text,ts,reply_to}]}. ts is Unix seconds; reply_to is the original request ID. Use one writer. Preserve existing G2Muse and other foreign records. Apply the latest-50 limit only to rows created by this watcher. Adapt the old G2Muse watcher to this separate outbox instead of using it unchanged.\nThe optional reference {0}/tree/main/adapters/gist only watches requests. Implement Muse connectivity and processing in the handler.", [repo]);
-  const linux = state.route === 'linux' ? t("Use the official Linux SDK at {0}/blob/main/linux/README.md. Implement a Muse Relay adapter separately. After initial BLE pairing, Linux at home connects outward to the relay and Muse. Test a dedicated conversation with musegadget send-user-msg --session-id \"<NEW_UUID>\" --wait 60 \"test\". Generate a fresh test UUID for <NEW_UUID>. The official {1}/blob/main/linux/examples/pebble_ring_bridge.py shows how to use the existing SDK connection. Acceptance: preserve the POST /v1/requests id as the Muse reply's reply_to, read that reply through GET /v1/snapshot, and display it in the app. Do not invent APIs; report only what you actually tested.", [sdk, sdk])
-    : t("The reference device is an ATOM S3 left at home. Use the firmware and USB setup in {0}/blob/main/docs/atoms3.md. Keep power and Wi-Fi on; the device connects outward to the HTTPS relay. Do not ask for its LAN IP as the phone endpoint or require port forwarding to ATOM.", [repo]);
-  return t("Use Muse Gadget SDK. {0}\nApp input: POST /v1/requests with the phone key. Output: GET /v1/snapshot and GET /v1/files/:name. Return the public {messages,spaces?,profile?,device?,capabilities?} format.\nWith the optional reference server at {1}/tree/main/server, the device reads /device/jobs with a separate device key and returns ACKs, matching Muse conversation events, and heartbeats to /device/events. Correlate the dedicated conversation ID with the request and exclude other conversations.\nAdditional Muse output uses a separate MUSE_TOKEN: POST /v1/messages {id:\"muse_export_<unique-id>\",type:\"text\",text,reply_to?}. The sender is Muse. Do not create You messages through /v1/messages. Separate phone, device, and Muse writer keys.\nProvide the phone configuration JSON {relay:\"gadget\",relayUrl,relayToken} through secure setup. Send any hosting credential only to its relay origin. Allow the origin shown inside the Even app; use the reference setup's explicit local-origin option for variable http://127.0.0.1 ports.", [linux, repo]);
+  if (state.route === 'gist') return t("Use GitHub Gist. Only for a new Gist, initialize g2muse-relay.json with {\"messages\":[]}; preserve existing files.\nInput: muse-relay-request-<id>.json containing {protocol:\"muse-relay/1\",id,kind:\"chat\"|\"space\",text,created_at,space_id?,space_action?,location?}. audio_file/audio_mime/audio_name or image_file/image_mime/image_name reference separate files containing base64 bytes.\nOutput: g2muse-relay.json as {messages:[{id,from:\"Muse\",type:\"text\",text,ts,reply_to}]}. ts is Unix seconds; reply_to is the original request ID. Use one writer. Preserve existing G2Muse and other foreign records. Apply the latest-50 limit only to rows created by this watcher. Adapt the old G2Muse watcher to this separate outbox instead of using it unchanged.\nThe optional reference {0} only watches requests. Implement Muse connectivity and processing in the handler.", [relaySource + '/adapters/gist']);
+  const deviceInstructions = state.route === 'linux' ? t("Use the official Linux SDK at {0}/blob/main/linux/README.md. Implement a Muse Relay adapter separately. After initial BLE pairing, the Linux computer connects outward to the relay and Muse. Test a dedicated conversation with musegadget send-user-msg --session-id \"<NEW_UUID>\" --wait 60 \"test\". Generate a fresh test UUID for <NEW_UUID>. The official {1}/blob/main/linux/examples/pebble_ring_bridge.py shows how to use the existing SDK connection. Acceptance: preserve the POST /v1/requests id as the Muse reply's reply_to, read that reply through GET /v1/snapshot, and display it in the app. Do not invent APIs; report only what you actually tested.", [sdk, sdk])
+    : t("Use the ESP32 board I specify. If the model is missing, ask which board I have. Use firmware for that model and connect outward to my HTTPS relay. For an ATOM S3, the reference firmware and USB setup are at {0}/blob/main/docs/atoms3.md.", [repo]);
+  return t("Use Muse Gadget SDK. {0}\nApp input: POST /v1/requests with the phone key. Output: GET /v1/snapshot and GET /v1/files/:name. Return the public {messages,spaces?,profile?,device?,capabilities?} format.\nWith the optional reference server at {1}, the device reads /device/jobs with a separate device key and returns ACKs, matching Muse conversation events, and heartbeats to /device/events. Correlate the dedicated conversation ID with the request and exclude other conversations.\nAdditional Muse output uses a separate MUSE_TOKEN: POST /v1/messages {id:\"muse_export_<unique-id>\",type:\"text\",text,reply_to?}. The sender is Muse. Do not create You messages through /v1/messages. Separate phone, device, and Muse writer keys.\nProvide the phone configuration JSON {relay:\"gadget\",relayUrl,relayToken} through secure setup. Send any hosting credential only to its relay origin. Allow the origin shown inside the Even app; use the reference setup's explicit local-origin option for variable http://127.0.0.1 ports.", [deviceInstructions, relaySource + '/server']);
 }
 function voicePrompt() {
   if (state.voice === 'soniox-key') return t("Voice uses Soniox (direct from app) and Enter API key. I enter my own key in Soniox API key inside the app. Do not build a temporary-key server or send this key to Muse or the relay. The app streams audio directly to Soniox, shows interim words on G2 and the phone, and sends only final text to {0} on submit. Use that text directly; do not transcribe it again with Whisper or another model.", [routes()[state.route].medium]);
@@ -276,6 +277,9 @@ function renderPrompt() {
   else if (state.topic === 'space') parts.push(spacePrompt());
   else if (state.topic === 'history') parts.push(historyPrompt());
   else parts.push(avatarPrompt());
+  if (state.topic === 'connection' || state.topic === 'reuse') {
+    parts.push(t("For chat requests, accept optional location {0}. Pass a valid fix to Muse in the same turn, including the text item with audio or photos. Keep the original You text and transcript for display. Process missing or invalid fixes normally, without a location attachment or a separate lookup.", ['{latitude,longitude,captured_at,accuracy?}']));
+  }
   if (state.topic === 'connection' && state.route === 'gist') parts.push(t("If G2Muse already uses this Gist, keep g2muse-relay.json and all existing files. Extend its one existing watcher/writer to recognize Muse Relay request files; do not run another writer beside it. Gist profile/avatar export is optional and is not required for migration or text/audio checks."));
   if (state.topic === 'voice' && state.route !== 'custom') parts.push(t("If a Muse reply arrives but my input transcript is missing, inspect the original request ID and the saved transcription mode. For Gist, return transcript from the handler and update You.id equal to the request ID; use that ID in Muse.reply_to. For Gadget, check the matching acknowledged conversation's message.user display_text, text, or content. POST /v1/messages is for Muse output, not for creating You messages. If the SDK does not provide a transcript, report that limit instead of fabricating one. Verify a short recording and its matching reply separately from endpoint access; use synthetic or consented test content and keep recordings and credentials out of logs."));
   if (state.route === 'linux' && state.topic !== 'connection') parts.push(t("If no Linux adapter exists, implement it first and verify that a request through the HTTP interface produces its matching reply."));

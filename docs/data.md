@@ -92,6 +92,6 @@ Avatars come from the user's relay. Personal images are not included in the shar
 | Relay tokens | Reference relays separate phone, device, and Muse-writer credentials. Knowing the URL alone does not authorize writing |
 | Long-term Soniox key | API-key mode stores it in Even settings and the device backup and sends it only to Soniox. Server mode stores it on your server. The reference server requests a single-use temporary key that must start within 60 seconds and allows a session of at most 150 seconds |
 
-See [app.json](../app.json) for requested permissions and [config.ts](../src/core/config.ts) and transport adapters for key destinations.
+See [the 0.3.30 app manifest](https://github.com/3mintimer/muse-relay/blob/v0.3.30-beta.1/app.json) for requested permissions and [config.ts](../src/core/config.ts) and transport adapters for key destinations.
 
 The app sends no usage analytics. Reference servers log startup information and fixed failure classifications. The Gist watcher logs counts/errors without forwarding handler stderr verbatim. Review SDK, USB-console, reverse-proxy, and hosting logs separately. Do not paste raw logs or connection settings into public Issues.

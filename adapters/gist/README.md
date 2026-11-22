@@ -20,6 +20,8 @@ flowchart LR
 
 ## Use this reference
 
+Use the [0.3.30 reference source](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1) for location support. If you copy it elsewhere, keep `adapters/gist/` and `protocol/` in their original layout. When replacing a running watcher, use the existing state file and handler.
+
 | Requirement | Setting |
 |---|---|
 | New Gist | Create `g2muse-relay.json` with `{"messages":[]}` only if it does not exist |
@@ -45,9 +47,12 @@ The handler receives one JSON object on stdin without a shell:
   "kind": "chat",
   "text": "Tell me about this",
   "created_at": 1794880000,
+  "location": {"latitude":0,"longitude":0,"captured_at":1794879990,"accuracy":20},
   "audio": {"mime":"audio/wav","name":"voice.wav","data_base64":"..."}
 }
 ```
+
+The example coordinates are synthetic. The watcher passes optional chat `location` to the handler on stdin. Have the handler include a valid fix in the same Muse message and keep the displayed input and `transcript` limited to the original words. Process a request normally when the field is absent. Sent coordinates can remain in Gist revisions after the current request file is removed.
 
 `audio` / `image` appear only on relevant requests. Space refresh uses `kind:"space"` and `space_id`. Write only JSON to stdout and exit with code 0:
 

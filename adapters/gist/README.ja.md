@@ -20,6 +20,8 @@ flowchart LR
 
 ## この参考実装を使う場合
 
+位置共有に対応する [0.3.30 の参考コード](https://github.com/3mintimer/muse-relay/tree/v0.3.30-beta.1) を取得します。別の場所で起動する場合も `adapters/gist/` と `protocol/` のディレクトリ構成を保ってください。既存の watcher を置き換えるときは、同じ状態ファイルとハンドラーを指定します。
+
 | 準備 | 設定 |
 |---|---|
 | 新しいGist | `g2muse-relay.json` が存在しない場合だけ `{"messages":[]}` で作成 |
@@ -45,9 +47,12 @@ Node.js 22 以降。追加のnpm依存はありません。GitHubのトークン
   "kind": "chat",
   "text": "内容を教えて",
   "created_at": 1794880000,
+  "location": {"latitude":0,"longitude":0,"captured_at":1794879990,"accuracy":20},
   "audio": {"mime":"audio/wav","name":"voice.wav","data_base64":"..."}
 }
 ```
+
+上の座標は架空の例です。`location` はチャットの任意項目です。watcher は位置をハンドラーの標準入力に渡します。ハンドラーは有効な位置を同じ Muse メッセージに含め、`transcript` と表示用の本文は元の発言だけにします。位置がなくても通常どおり処理します。Gist の現行ファイルを整理した後も、送信した座標が過去の版に残る場合があります。
 
 `audio` / `image` は該当する依頼だけにあります。スペース更新は `kind:"space"` と `space_id`。返信は標準出力へJSONだけを書き、終了コード0で終了します。
 
