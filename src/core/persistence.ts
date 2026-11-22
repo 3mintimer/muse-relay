@@ -28,7 +28,7 @@ export function decodeSavedState(raw: string): SavedState | undefined {
       catch { settings.configured = false; } // Keep entered values available for repair.
     }
     let snapshot: Snapshot = { messages: [], spaces: [] };
-    try { if (value.snapshot) snapshot = parseSnapshot(value.snapshot); } catch { /* Cache is optional. */ }
+    try { if (value.snapshot) snapshot = parseSnapshot(value.snapshot, 'cache'); } catch { /* Cache is optional. */ }
     const ids = (key: string, limit: number) => Array.isArray(value[key]) ? value[key].filter((id: unknown) => typeof id === 'string').slice(-limit) : [];
     return { settings, snapshot, readIds: ids('readIds', 300), hiddenIds: ids('hiddenIds', 300), selectedSpaceIds: [...new Set(ids('selectedSpaceIds', 15))],
       savedAt: Number.isSafeInteger(value.savedAt) && value.savedAt > 0 ? value.savedAt : 0 };

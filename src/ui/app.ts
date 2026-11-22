@@ -503,7 +503,26 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     const unread = !controller.state.readIds.includes(message.id) && received;
     const article = el('article', `message-card ${unread ? 'is-unread' : ''}`);
     const time = el('time', '', date(message.ts)); time.dateTime = new Date(message.ts * 1000).toISOString();
-    article.append(el('div', 'message-meta', el('span', 'sender', message.from), time, received ? el('span', unread ? 'unread-mark' : 'read-mark', unread ? t('未読', 'Unread') : t('既読', 'Read')) : null));
+    const meta = el('div', 'message-meta', el('span', 'sender', message.from), time, received ? el('span', unread ? 'unread-mark' : 'read-mark', unread ? t('未読', 'Unread') : t('既読', 'Read')) : null);
+    const fix = message.sentLocation;
+    if (!received && fix) {
+      const title = t('送信した位置', 'Sent location');
+      const focus = `sent-location-${message.id}`;
+      const pin = button(title, () => {
+        help = { title, focus, content: () => {
+          const details = el('dl', 'location-details',
+            el('dt', '', t('緯度', 'Latitude')), el('dd', '', String(fix.latitude)),
+            el('dt', '', t('経度', 'Longitude')), el('dd', '', String(fix.longitude)),
+            el('dt', '', t('取得時刻', 'Captured at')), el('dd', '', new Date(fix.captured_at * 1000).toLocaleString(resolveLocale(draft.language))));
+          if (fix.accuracy !== undefined) details.append(el('dt', '', t('測位精度', 'Location accuracy')), el('dd', '', `±${fix.accuracy} m`));
+          return details;
+        }};
+        render();
+      }, { icon: 'location', iconOnly: true, highlighted: true, className: 'location-pin' });
+      pin.setAttribute('aria-haspopup', 'dialog');
+      meta.append(focusKey(pin, focus));
+    }
+    article.append(meta);
     article.append(el('p', 'message-body', message.text || (message.type === 'voice-note' ? t('音声メモ', 'Voice note') : t('画像', 'Image'))));
     if (!controller.state.settings.images && (message.image || message.image_file)) article.append(enableImages());
     if (controller.state.settings.images && message.image) article.append(imagePreview(message.image));
@@ -576,7 +595,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     }
     const location = button(t('現在地', 'Location'), () => {
       void run(() => controller.saveSettings({ ...controller.state.settings, shareLocation: !controller.state.settings.shareLocation }));
-    }, { icon: 'location', secondary: !s.settings.shareLocation, highlighted: s.settings.shareLocation, disabled: !editable() || !s.settings.configured || s.recording });
+    }, { icon: 'location', iconOnly: true, className: 'location-pin', secondary: !s.settings.shareLocation, highlighted: s.settings.shareLocation, disabled: !editable() || !s.settings.configured || s.recording });
     location.setAttribute('aria-pressed', String(s.settings.shareLocation));
     location.title = t('現在地を中継先と共有', 'Share location with relay');
     controls.append(location);
@@ -962,7 +981,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(settingsGroup('connection', t('接続', 'Connection'), relayName(draft.relay), relayChoice(), credentials(), checkButton(), checkSummary(), promptPanel()));
     content.append(settingsGroup('location', t('現在地', 'Location'), draft.shareLocation ? t('オン', 'On') : t('オフ', 'Off'),
       toggle(t('現在地を中継先と共有', 'Share location with relay'), draft.shareLocation, value => { changed('shareLocation', value); render(); },
-        t('チャット送信時に、スマートフォンで5分以内に取得した位置を添えます。位置がなくてもメッセージはすぐに送ります。', 'Chats include your phone’s location from the last five minutes when available. Messages send immediately either way.')),
+        t('メッセージはすぐに送信します。5分以内に取得した座標が Muse のチャットに表示されることがあります。', 'Chat sends immediately. Coordinates from the last five minutes can appear in your Muse conversation.')),
       ...(draft.shareLocation ? [select('locationIntervalMinutes', t('位置の取得間隔', 'Location update interval'),
         ([1, 3, 5] as const).map(minutes => [minutes, t('{minutes} 分', '{minutes} min', { minutes })]))] : [])));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));

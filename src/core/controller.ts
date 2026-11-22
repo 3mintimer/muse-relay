@@ -13,7 +13,7 @@ import { base64, hasAudiblePcm, resizeImage, wav } from './media';
 import { RelayVoiceSession, SonioxStream } from './soniox';
 import { LOCAL_STATE_KEY, StateStorage, type SavedState } from './persistence';
 import { resolveLocale, translate } from './i18n';
-import { ChatLocationCache } from './location';
+import { ChatLocationCache, hideEchoedLocation } from './location';
 import { HeadRaise, headPitch } from './head-wake';
 import { ReplyPoll } from './reply-poll';
 import { matchesSpaceAction, sliderValue } from '../../protocol/space-controls.mjs';
@@ -101,6 +101,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const echo=messages.find(message=>message.id===sent.id);
     if(!echo)messages.push({...sent});
     else if(echo.from==='You'){
+      if(sent.sentLocation)echo.sentLocation=sent.sentLocation;
       // Keep the latest known transcript across empty echoes and snapshots missing this row.
       if(sent.type==='voice-note'&&chatText(echo).trim())sent.text=echo.text;
       else if(chatText(sent).trim())echo.text=sent.text;
@@ -743,8 +744,15 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       // Otherwise every poll flashes a loading page and needlessly retransmits the image.
       for(const message of snap.messages){
         const previous=state.snapshot.messages.find(m=>m.id===message.id);
+        if(message.from==='You' && previous?.sentLocation && previous.ts===message.ts)
+          message.sentLocation=previous.sentLocation;
         if(!message.image&&message.image_file&&previous?.image&&previous.image_file===message.image_file
           &&previous.ts===message.ts&&previous.mime_type===message.mime_type)message.image=previous.image;
+      }
+      for(const reply of snap.messages){
+        if(reply.from !== 'Muse' || !reply.reply_to)continue;
+        const fix=snap.messages.find(m=>m.id===reply.reply_to && m.from==='You')?.sentLocation;
+        if(fix)reply.text=hideEchoedLocation(reply.text,fix,text('現在地','Location'));
       }
       for(const space of snap.spaces){
         const previousSpace=state.snapshot.spaces.find(s=>s.id===space.id);
@@ -802,7 +810,9 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     state.busy=true;state.error='';emit();
     const location = request.kind === 'chat' && state.settings.shareLocation ? locationCache.current() : undefined;
     try{await relay.send(location ? {...request, location} : request,foregroundAbort.signal);
-      const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,...(request.image?{image:request.image}:{})};
+      if (current !== relay) return;
+      const sent:Message={id:request.id,from:'You',type:request.audio?'voice-note':request.image?'image':'text',text:request.text,ts:request.created_at,
+        ...(location ? {sentLocation:location} : {}), ...(request.image?{image:request.image}:{})};
       mergeSentInput(state.snapshot.messages,sent);
       localSent.push(sent);if(localSent.length>50)localSent.shift();
       if(request.kind==='chat'&&current===relay&&active&&!disposed){
@@ -831,8 +841,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     emit();saveSoon();
   }
   const shouldShowSentChat=()=>screen==='message'||state.settings.returnToChatAfterSend;
-  async function returnToSentChat(sent:SentChat){
-    if(!shouldShowSentChat()||!active||disposed)return;
+  async function returnToSentChat(sent:SentChat | undefined){
+    if(!sent||!shouldShowSentChat()||!active||disposed)return;
     displayInteraction();followingChat={...sent,targetId:sent.id};
     // Resolve from the full snapshot: a transcript or reply can precede the acknowledgement.
     followingChat.targetId=followedMessage()?.id??sent.id;

@@ -49,6 +49,7 @@ export interface Message {
   type: 'text' | 'voice-note' | 'image';
   text: string;
   ts: number;
+  sentLocation?: ChatLocation;
   audio_file?: string;
   image_file?: string;
   mime_type?: string;

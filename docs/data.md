@@ -86,7 +86,7 @@ Avatars come from the user's relay. Personal images are not included in the shar
 | --- | --- |
 | `network` | Connects to the selected relay and, when used, Soniox and the temporary-key issuer |
 | `g2-microphone` / `phone-microphone` | Uses the selected microphone on touch or on head raise when Record on wake is enabled. Head motion stays on device |
-| `location` | Opt-in phone position for chat through the selected relay. The latest fix lives in memory, is usable for five minutes, and is cleared on opt-out. The destination and Gist revisions may retain previously sent locations. |
+| `location` | Opt-in phone position for chat through the selected relay. The latest fix lives in memory, is usable for five minutes, and is cleared on opt-out. Sent fixes are kept with recent messages in the phone cache and can appear in the Muse conversation. The destination and Gist revisions may retain them. |
 | `album` / `camera` | Opens photo selection/capture at the user's request when images are enabled |
 | GitHub token | Reads/writes the Gist API; never attached to raw-file URLs. A classic PAT's `gist` scope is not limited to one Gist. [GitHub scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) |
 | Relay tokens | Reference relays separate phone, device, and Muse-writer credentials. Knowing the URL alone does not authorize writing |

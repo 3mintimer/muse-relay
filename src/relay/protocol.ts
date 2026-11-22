@@ -1,6 +1,7 @@
 import type { Message, Snapshot, Space, Attachment } from '../core/types';
 import { MOTION_SPACE_ID, motionKinds } from '../core/types';
 import { parseSpaceControl } from '../../protocol/space-controls.mjs';
+import { chatLocation } from '../../protocol/chat-location.mjs';
 
 export function record(v: unknown): Record<string, unknown> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('Invalid relay data');
@@ -31,7 +32,7 @@ export function parseMotionRecord(value:unknown):Snapshot['motions'] {
   return motions;
 }
 
-export function parseSnapshot(value: unknown): Snapshot {
+export function parseSnapshot(value: unknown, source: 'relay' | 'cache' = 'relay'): Snapshot {
   const v = record(value);
   if (!Array.isArray(v.messages)) throw new Error('Relay messages missing');
   const messages: Message[] = [];
@@ -40,7 +41,9 @@ export function parseSnapshot(value: unknown): Snapshot {
     const m = record(raw);
     if (typeof m.id !== 'string' || ids.has(m.id) || !Number.isFinite(m.ts)) continue;
     ids.add(m.id);
+    const sentLocation = source === 'cache' && m.from === 'You' && chatLocation({kind:'chat', location:m.sentLocation});
     messages.push({id:string(m.id,128), from:string(m.from,100),
+      ...(sentLocation ? {sentLocation} : {}),
       type:m.type === 'voice-note' ? 'voice-note' : m.type === 'image' ? 'image' : 'text',
       text:string(m.text), ts:Number(m.ts), audio_file:string(m.audio_file,256) || undefined,
       image_file:string(m.image_file,256) || undefined, mime_type:string(m.mime_type,100) || undefined,

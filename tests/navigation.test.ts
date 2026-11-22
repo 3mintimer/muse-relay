@@ -1723,12 +1723,17 @@ test('hidden phone lets G2 send without a fix and attaches only fresh chat locat
   update({latitude:12.125,longitude:-34.5,timestamp});
   assert.deepEqual((await sendFromGlasses()).location, {latitude:12.125,longitude:-34.5,captured_at:timestamp/1000});
   assert.equal(stops,0,'hiding the phone must keep native updates running');
-  assert.doesNotMatch(JSON.stringify(app.controller.state.snapshot.messages), /latitude|12\.125/);
+  const input = app.controller.state.snapshot.messages.find(m => m.id === app.sent.at(-1)!.id)!;
+  assert.deepEqual(input.sentLocation, app.sent.at(-1)!.location);
+  assert.doesNotMatch(input.text, /latitude|12\.125/);
+  await app.controller.showMessage(input.id);
+  assert.doesNotMatch(app.frames.join('\n'), /latitude|12\.125/);
   await app.controller.requestSpace('test-space');
   assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
   t.mock.timers.setTime(timestamp + 300_000);
   await app.controller.sendText('stale');
   assert.equal(Object.hasOwn(app.sent.at(-1)!, 'location'), false);
+  assert.equal(app.controller.state.snapshot.messages.find(m => m.id === app.sent.at(-1)!.id)?.sentLocation, undefined);
   await app.controller.saveSettings({...app.controller.state.settings,shareLocation:false});
   update({latitude:12.125,longitude:-34.5,timestamp:Date.now()});
   pending.resolve(null);

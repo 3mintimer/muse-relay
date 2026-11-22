@@ -99,7 +99,7 @@ export function museSetupPrompt(settings: Settings, relayLiveVoice = false): str
   const gist = settings.relay === 'gist';
   const soniox = settings.voice === 'soniox';
   const live = !gist && !soniox && relayLiveVoice;
-  const location = 'Chat requests may include location {latitude,longitude,captured_at,accuracy?} when sharing is enabled. Use it as optional context, keep coordinates out of displayed chat text, and always accept requests without it.';
+  const location = 'Chat requests may include location {latitude,longitude,captured_at,accuracy?} when sharing is enabled. Read this fix directly from the request. The Gadget relay includes it in the Muse message after 【現在地】. Use it when relevant and answer with the place name. Keep the location metadata out of relay display text and voice transcripts. Always accept requests without it.';
   const language = languageName(settings.language);
   const microphone = settings.mic === 'phone' ? 'phone microphone' : 'G2 glasses microphone';
   if (settings.relay === 'custom') {

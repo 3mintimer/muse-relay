@@ -371,41 +371,58 @@ test('Worker diagnostics and recovery commands use R2 without taking jobs', asyn
   await checkMaintenance(call,config,ms=>{clock+=ms});
 });
 
-test('marked chats carry their fix separately from text and media; older leases retain their byte counts', async () => {
+test('new chats include the fix in Muse text and media; earlier leases keep their original format', async () => {
   const location = { latitude: 12.125, longitude: -34.5, captured_at: 100, accuracy: 20 };
   const input = { id: 'loc1', kind: 'chat', created_at: 101, text: 'Where am I?' };
   const plain = validateRequest(input, false);
   const request = validateRequest({ ...input, location: { ...location, private_note: 'drop' } }, false);
   const prepared = prepareMuseRequest(request);
+  const line = '【現在地】' + JSON.stringify(location);
   const packet = buildMuseRequest(prepared);
-  assert.deepEqual(Object.keys(packet).sort(), ['hidden_prompt', 'message', 'output_modality']);
-  assert.equal(packet.message, input.text + '\n\n現在地');
-  assert.ok(packet.hidden_prompt.includes(JSON.stringify(location)));
-  assert.doesNotMatch(packet.hidden_prompt, /private_note/);
+  assert.deepEqual(packet, { message: input.text + '\n\n' + line, output_modality: 'text' });
   for (const [kind, mime] of [['audio', 'audio/wav'], ['image', 'image/png']]) {
     const asset = { mime, name: 'sample', data_base64: 'AA==' };
     const media = buildMuseRequest({ ...prepared, text: '', [kind]: asset });
-    assert.equal(media.hidden_prompt, packet.hidden_prompt);
-    assert.deepEqual(media.items, [{ type: 'text', text: '現在地' }, { type: 'file', mime_type: mime, filename: 'sample', data_base64: 'AA==' }]);
+    assert.equal(media.message, line);
+    assert.deepEqual(media.items, [{ type: 'text', text: line }, { type: 'file', mime_type: mime, filename: 'sample', data_base64: 'AA==' }]);
   }
-  assert.equal(validateRequest({ ...input, hidden_prompt: 'caller text', locationMarker: true }, false).locationMarker, undefined);
+  assert.equal(validateRequest({ ...input, locationInMessage: true }, false).locationInMessage, undefined);
   assert.deepEqual(buildMuseRequest(plain), { message: input.text, output_modality: 'text' });
   assert.deepEqual(validateRequest({ ...input, location: { ...location, latitude: 91 } }, false), plain);
   assert.equal(validateRequest({ ...input, kind: 'space', space_id: 'test', location }, false).location, undefined);
-  for (const queued of [request, { ...request, inlineLocation: true }, prepared]) {
+  for (const queued of [request, { ...request, inlineLocation: true }, { ...request, locationMarker: true }, prepared]) {
     const machine = createMachine(emptyState(), { now: () => 101000 });
     machine.addRequest({ ...queued }, await fingerprint(request));
     const job = machine.leaseNext();
     const leased = buildMuseRequest(machine.takeRequest(job.request.id));
     assert.equal(job.requestBytes, Buffer.byteLength(JSON.stringify(leased)));
-    assert.equal(leased.message, queued.locationMarker ? packet.message : input.text);
-    if (!queued.locationMarker && !queued.inlineLocation) assert.equal(leased.items.at(-1).filename, 'phone-location.json');
+    const expected = queued.locationInMessage ? packet.message : queued.locationMarker ? input.text + '\n\n現在地' : input.text;
+    assert.equal(leased.message, expected);
+    if (!queued.locationMarker && !queued.inlineLocation && !queued.locationInMessage) assert.equal(leased.items.at(-1).filename, 'phone-location.json');
     else assert.equal(leased.items, undefined);
+    assert.equal(!!leased.hidden_prompt, !!(queued.locationMarker || queued.inlineLocation));
+    assert.deepEqual(machine.readChatLocation(null).location, queued.locationMarker ? location : null);
     assert.doesNotMatch(JSON.stringify(machine.snapshot(false)), /latitude|12\.125|現在地/);
   }
 });
 
-test('Muse reads only a delivered, active and recent location on the authenticated route', async t => {
+test('voice transcripts omit the sent fix even when ATOM cuts off the coordinate line', () => {
+  const machine = createMachine(emptyState());
+  const location = { latitude: 12.125, longitude: -34.5, captured_at: 100 };
+  const request = prepareMuseRequest({ id: 'voice', kind: 'chat', created_at: 100, text: '', location,
+    audio: { mime: 'audio/wav', name: 'voice.wav', data_base64: 'AA==' } });
+  machine.addRequest(request, 'voice-hash');
+  const job = machine.leaseNext();
+  const line = buildMuseRequest(machine.takeRequest('voice')).message;
+  const event = (event_id, type, body) => machine.handleDeviceEvent({ event_id, type, body, job_id: 'voice', session_id: job.request.session_id });
+  event('ack', 'muse_ack', { session_id: job.request.session_id, is_thread: true, message_id: 'user-audio' });
+  for (const [index, text] of [line + '\nWhich station?', 'Which station?\n' + line.slice(0, 26)].entries()) {
+    event('echo-' + index, 'muse_event', { type: 'event', event_name: 'message.user', payload: { message_id: 'user-audio', text } });
+    assert.equal(machine.snapshot(false).messages[0].text, 'Which station?');
+  }
+});
+
+test('new chats deliver the fix directly and keep it off the legacy lookup route', async t => {
   const DB = new TestD1();
   t.after(() => DB.sqlite.close());
   await applyMigrations(DB);
@@ -427,12 +444,11 @@ test('Muse reads only a delivered, active and recent location on the authenticat
   assert.deepEqual(await get(), { location: null });
   const packet = await call('/device/jobs/here/request', env.DEVICE_TOKEN);
   assert.equal(Number(packet.headers.get('content-length')), job.request_bytes);
-  assert.equal((await packet.json()).message, 'Nearest station?\n\n現在地');
+  assert.equal((await packet.json()).message, 'Nearest station?\n\n【現在地】' + JSON.stringify(location));
   const event = (event_id, type, body) => call('/device/events', env.DEVICE_TOKEN, { job_id: input.id, session_id: job.session_id, event_id, type, body });
   assert.equal((await event('ack', 'muse_ack', { session_id: job.session_id, is_thread: true, message_id: 'turn-id' })).status, 200);
-  const found = { location, request_id: input.id, text: input.text, created_at: input.created_at };
-  assert.deepEqual(await get(), found);
-  assert.deepEqual(await get('?message_id=turn-id'), found);
+  assert.deepEqual(await get(), { location: null });
+  assert.deepEqual(await get('?message_id=turn-id'), { location: null });
   assert.deepEqual(await get('?message_id=different-turn'), { location: null });
   now = 1_170_000;
   assert.equal((await event('hb', 'heartbeat', {})).status, 200);

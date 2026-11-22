@@ -4,7 +4,20 @@ import type { ChatLocation, Settings } from './types';
 const maxAgeMs = 5 * 60_000;
 type LocationBridge = Pick<EvenAppBridge, 'startAppLocationUpdates' | 'stopAppLocationUpdates' | 'onAppLocationChanged' | 'getAppLocation'>;
 
-// Coordinates live only in this instance. Native location work never uses the glasses command queue.
+/** Keep a verbatim echo of this turn's shared fix out of the phone and glasses reply. */
+export function hideEchoedLocation(reply: string, fix: ChatLocation, label: string): string {
+  const decimal = (value: number) => String(value).replace(/[.+]/g, '\\$&');
+  const pair = new RegExp(`(^|[^\\d.+-])(?:(?:緯度|latitude)\\s*[:：]?\\s*)?${decimal(fix.latitude)}\\s*[,，、]\\s*(?:経度|longitude)?\\s*[:：]?\\s*${decimal(fix.longitude)}(?!\\d|\\.\\d)`, 'gi');
+  return reply.replace(/(?:【現在地】\s*)?\{\s*"latitude"[^{}]*\}/gu, block => {
+    try {
+      const value = JSON.parse(block.slice(block.indexOf('{')));
+      if (value.latitude === fix.latitude && value.longitude === fix.longitude) return label;
+    } catch { /* Preserve ordinary reply text. */ }
+    return block;
+  }).replace(pair, (_, prefix: string) => prefix + label);
+}
+
+// Unsent fixes live only in this instance. Native location work never uses the glasses command queue.
 export class ChatLocationCache {
   private bridge?: LocationBridge;
   private generation = 0;

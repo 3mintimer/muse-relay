@@ -9,7 +9,7 @@ import { wav } from '../src/core/media.ts';
 import { Glasses } from '../src/core/glasses.ts';
 import { decodeSavedState, LOCAL_STATE_KEY, StateStorage, type SavedState } from '../src/core/persistence.ts';
 import { resolveLocale, speechLanguage } from '../src/core/i18n.ts';
-import { ChatLocationCache } from '../src/core/location.ts';
+import { ChatLocationCache, hideEchoedLocation } from '../src/core/location.ts';
 import { ReplyPoll } from '../src/core/reply-poll.ts';
 import {parseSpaceControl} from '../protocol/space-controls.mjs';
 import { chatEntries, chatExchange, chatText, displayableMuseReply } from '../src/core/chat.ts';
@@ -526,5 +526,15 @@ test('location follows the saved 1, 3 or 5 minute cadence, including while nativ
   assert.equal(cache.current(), undefined);
   for (const value of [undefined, 0, 2, '3']) {
     assert.equal(validateSettings({ ...defaults, locationIntervalMinutes: value } as Settings, false).locationIntervalMinutes, 1);
+  }
+});
+
+test('display hides a verbatim reply echo of the sent fix and preserves other coordinates', () => {
+  const fix = {latitude:12.125, longitude:-34.5, captured_at:100};
+  for (const echo of [JSON.stringify(fix), '【現在地】' + JSON.stringify(fix), '12.125, -34.5', '緯度：12.125、経度：-34.5']) {
+    assert.equal(hideEchoedLocation('At ' + echo + '.', fix, 'Location'), 'At Location.');
+  }
+  for (const other of ['-12.125, -34.5', '12.125, -34.55', 'Station 12.125']) {
+    assert.equal(hideEchoedLocation(other, fix, 'Location'), other);
   }
 });

@@ -10,7 +10,7 @@ Muse Relay is an EvenHub app that connects your phone and Even G2 to a relay you
 | --- | --- |
 | Message text, request identifiers and timestamps | Send requests and display replies through your GitHub Gist or HTTPS relay and Muse |
 | Microphone audio | Start by touch or by raising your head if you enable Record on wake. Head angle is processed locally. With Muse transcription, send the recording through your relay. With Soniox, stream audio directly to Soniox and send the resulting text through your relay |
-| Optional phone location | When you enable sharing in Chat or Settings, the app holds a recent fix in memory and sends its coordinates, time and available accuracy with chat requests to your configured Gist or HTTPS relay for Muse. The app clears its cached fix when you turn sharing off. Copies already sent follow the retention rules below. |
+| Optional phone location | When you enable sharing in Chat or Settings, the app holds a recent fix in memory and sends its coordinates, time and available accuracy with chat requests to your configured Gist or HTTPS relay for Muse. The Gadget relay includes coordinates in the Muse conversation. Turning sharing off clears the current fix. Copies already sent follow the retention rules below. |
 | Selected photos | Resize and send the image you select or capture, when images are enabled |
 | Replies, exported Spaces, optional display name and avatar | Read from your configured relay and display in the app; show images when enabled |
 | Space controls | Send the selected action and value; a microphone control uses the chosen voice path |
@@ -22,7 +22,7 @@ Creating instructions for Muse or adding them to a draft does not itself send th
 
 | Location | What remains and how to remove it |
 | --- | --- |
-| Even app storage and WebView/browser storage | Settings, credentials, selected Spaces, and reading preferences. A separate local cache contains recent text, exported content, and profile metadata; retrieved image bytes are excluded. Use **Remove saved connection details** to clear connection data and cached content. The app distinguishes an unconfirmed Even-storage update from a successful one |
+| Even app storage and WebView/browser storage | Settings, credentials, selected Spaces, and reading preferences. A separate local cache contains recent messages and their sent locations, exported content, and profile metadata; retrieved image bytes are excluded. Use **Remove saved connection details** to clear connection data and cached content. The app distinguishes an unconfirmed Even-storage update from a successful one |
 | Your Gist and watcher | Requests, replies, media, exported content and processing records. Manage these on your own service. Removing current Gist files does not erase Git history or copies |
 | Your HTTPS relay | Requests, replies, exported content and attachments. The supplied Node implementation uses a state file; the Cloudflare implementation uses D1 and R2. Stop processing and remove the associated state, objects and backups in that environment |
 | Your gadget | Wi-Fi, pairing and relay credentials in device storage. Replacing only the application firmware does not erase those settings |

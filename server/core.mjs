@@ -105,7 +105,7 @@ export function validateRequest(value, imagesEnabled) {
 // Keep queued jobs on their original prompt: ATOM requires the leased byte count to match exactly.
 // This server-owned flag is assigned after hashing the client request so retries across upgrades still match.
 export function prepareMuseRequest(request) {
-  if (request.location) return { ...request, locationMarker: true };
+  if (request.location) return { ...request, locationInMessage: true };
   return request.kind === 'space' ? { ...request, spaceExportUpsert: true } : request;
 }
 export function buildMuseRequest(request) {
@@ -124,7 +124,9 @@ export function buildMuseRequest(request) {
   if (request.locationMarker && request.location) {
     body.message = [body.message, '現在地'].filter(Boolean).join('\n\n');
   }
-  if ((request.locationMarker || request.inlineLocation) && request.location) {
+  if (request.locationInMessage && request.location) {
+    body.message = [body.message, `【現在地】${JSON.stringify(request.location)}`].filter(Boolean).join('\n\n');
+  } else if ((request.locationMarker || request.inlineLocation) && request.location) {
     // Muse sends hidden_prompt beside message or items for context scoped to one turn.
     body.hidden_prompt = `Phone location for this turn (WGS84, captured_at in Unix seconds, accuracy in metres): ${JSON.stringify(request.location)}. Use it if relevant. Give place names unless coordinates are requested.`;
   } else if (request.location) {
@@ -351,9 +353,14 @@ export function createMachine(state, {now = Date.now} = {}) {
       const text = bounded(payload.display_text || payload.text || payload.content, 10_000);
       if (text && job.request.audio) {
         const source = state.messages.find(m => m.id === job.request.id);
-        if (source) source.text = job.request.locationMarker
-          ? text.replace(/(?:^|\n)現在地(?=\n|$)/u, '').trim()
-          : text;
+        if (source) {
+          if (job.request.locationInMessage) {
+            // The transcript can precede or follow the generated line. ATOM can truncate it mid-JSON.
+            source.text = text.replace(/【現在地】\s*\{[^}]*?(?:\}|$)/u, '').trim();
+          } else {
+            source.text = job.request.locationMarker ? text.replace(/(?:^|\n)現在地(?=\n|$)/u, '').trim() : text;
+          }
+        }
       }
       return;
     }

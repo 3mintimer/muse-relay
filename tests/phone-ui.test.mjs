@@ -351,3 +351,39 @@ test('chat and settings share one persisted location switch and preserve a typed
   await page.locator('.composer').waitFor();
   assert.equal(await location.getAttribute('aria-pressed'), 'false');
 });
+
+test('sent pins reveal only their own saved fix after a refresh and reload', async t => {
+  const messages = ['First', 'Second', 'No fix'].map((text, i) => ({id: 'sent-' + i, from: 'You', type: 'text', text, ts: 600 + i}));
+  const fixes = [{latitude:12.125, longitude:-34.875, captured_at:560, accuracy:18}, {latitude:43.625, longitude:0, captured_at:590}];
+  const echo = {id:'reply',reply_to:'sent-0',from:'Muse',type:'text',text:'At 12.125, -34.875.',ts:604};
+  const {page} = await openPhone(t, {messages:[...messages,echo], spaces:[]}, {theme:'dark'});
+  await page.addInitScript(({messages, fixes}) => {
+    if (sessionStorage.getItem('seeded-fixes')) return;
+    sessionStorage.setItem('seeded-fixes', '1');
+    const state = JSON.parse(localStorage.getItem('muse-relay-state-v1'));
+    localStorage.setItem('muse-relay-cache-v1', JSON.stringify({savedAt:state.savedAt || 0, snapshot:{
+      messages:messages.map((m, i) => ({...m, sentLocation:fixes[i]})), spaces:[]
+    }}));
+  }, {messages, fixes});
+  await page.reload();
+  const pin = (name) => page.getByRole('article').filter({hasText:name}).getByRole('button', {name:'Sent location',exact:true});
+  await pin('First').waitFor();
+  await page.getByRole('button',{name:'Refresh',exact:true}).tap();
+  await page.getByText('At Location.', {exact:true}).waitFor();
+  for (const [i, name] of ['First','Second'].entries()) {
+    assert.doesNotMatch(await page.locator('body').innerText(), /12\.125|43\.625/);
+    assert.equal(await pin(name).innerText(), '');
+    await pin(name).tap();
+    const dialog = page.getByRole('dialog',{name:'Sent location'});
+    await dialog.getByText(String(fixes[i].latitude),{exact:true}).waitFor();
+    assert.equal(await dialog.getByText(String(fixes[i].longitude),{exact:true}).count(), 1);
+    assert.equal(await dialog.getByText('Location accuracy',{exact:true}).count(), i === 0 ? 1 : 0);
+    await dialog.getByRole('button',{name:'Close'}).tap();
+    assert.equal(await pin(name).evaluate(el=>el===document.activeElement),true);
+  }
+  assert.equal(await pin('No fix').count(),0);
+  assert.equal(await page.getByRole('button',{name:'Location',exact:true}).innerText(),'');
+  await page.reload();
+  await pin('First').waitFor();
+  assert.doesNotMatch(await page.locator('body').innerText(), /12\.125|43\.625/);
+});
