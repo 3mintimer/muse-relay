@@ -10,8 +10,8 @@ import { motionKinds, type MotionKind, type Language } from '../core/types';
 import { checkSonioxConnection } from '../core/soniox';
 import { sliderValue } from '../../protocol/space-controls.mjs';
 
-type View = 'chat' | 'spaces' | 'settings' | 'usage';
-type FeedbackLocation = 'page' | 'connection' | 'save' | 'voice' | 'avatar';
+type View = 'chat' | 'spaces' | 'settings' | 'shortcuts';
+type FeedbackLocation = 'page' | 'connection' | 'save' | 'prompts' | 'voice' | 'avatar';
 type SpaceAddPage = 'choose' | 'create' | 'prompt' | 'receive' | 'register';
 type SpaceExample = 'schedule' | 'focus' | 'notes';
 
@@ -82,7 +82,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   const relayLiveVoice = () => draft.relay !== 'gist' && (connectionChecked() ? testResult
     : signature() === signature(controller.state.settings) ? controller.state.snapshot : null)?.capabilities?.live_transcription === true;
   const needsConnectionCheck = () => signature() !== signature(controller.state.settings) && !connectionChecked();
-  const settingsDirty = () => settingKeys.some(key => draft[key] !== savedSettings[key]);
+  const settingsDirty = () => settingKeys.some(key => key !== 'savedPrompts' && draft[key] !== savedSettings[key]);
+  const promptsDirty = () => draft.savedPrompts.some((value, slot) => value !== savedSettings.savedPrompts[slot]);
   const editable = () => !working && !controller.state.busy;
 
   function changed<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -93,8 +94,8 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     if (key === 'sonioxApiKey' && String(value).trim() && draft.sonioxAuth === 'auto') draft.sonioxAuth = 'api-key';
     uiError = ''; uiNotice = '';
   }
-  async function saveDraft(configured: boolean) {
-    submittedDraft = { ...draft };
+  async function saveDraft(configured: boolean, values = { ...draft, savedPrompts: savedSettings.savedPrompts }) {
+    submittedDraft = values;
     try { await controller.saveSettings({ ...submittedDraft, configured }); }
     finally { submittedDraft = undefined; }
   }
@@ -205,7 +206,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     input.addEventListener('change', () => action(input.checked)); row.append(input); return row;
   }
   function header() {
-    return el('header', 'app-header', el('h1', '', 'Muse Relay'), !wizard && settingsDirty() ? el('span', 'muted', t('未保存の変更', 'Unsaved changes')) : null);
+    return el('header', 'app-header', el('h1', '', 'Muse Relay'), !wizard && (view === 'shortcuts' ? promptsDirty() : settingsDirty()) ? el('span', 'muted', t('未保存の変更', 'Unsaved changes')) : null);
   }
   function relayName(mode: Settings['relay']) {
     if (mode === 'gist') return 'GitHub Gist';
@@ -265,7 +266,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     if (error) { const p = el('p', 'feedback error', error); p.setAttribute('role', 'alert'); box.append(p); }
     const savedNotice = controller.state.notice;
     const browserNotice = ['グラスと音声は Even アプリから利用できます。', 'Open in the Even app for glasses and voice.'].includes(savedNotice);
-    const notice = location === 'save' ? (!settingsDirty() ? uiNotice : '')
+    const notice = location === 'prompts' ? uiNotice : location === 'save' ? (!settingsDirty() ? uiNotice : '')
       : uiNotice || (browserNotice ? t('グラスと音声は Even アプリから利用できます。', 'Glasses and voice are available in the Even app.') : savedNotice);
     if (notice && !error) { const p = el('p', 'feedback', notice); p.setAttribute('role', 'status'); box.append(p); }
     return box;
@@ -1002,19 +1003,6 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
         t('メッセージはすぐに送信します。5分以内に取得した座標が Muse のチャットに表示されることがあります。', 'Chat sends immediately. Coordinates from the last five minutes can appear in your Muse conversation.')),
       ...(draft.shareLocation ? [select('locationIntervalMinutes', t('位置の取得間隔', 'Location update interval'),
         ([1, 3, 5] as const).map(minutes => [minutes, t('{minutes} 分', '{minutes} min', { minutes })]))] : [])));
-    const promptFields = draft.savedPrompts.map((value, slot) => {
-      const label = el('label','field',el('span','field-label',t('プロンプト {n}','Prompt {n}',{n:slot+1})));
-      const input = el('textarea','even-input');
-      input.rows = 2; input.maxLength = 10000; input.value = value;
-      focusKey(input, `setting-prompt-${slot}`);
-      input.addEventListener('input', () => {
-        changed('savedPrompts',draft.savedPrompts.map((old,index)=>index===slot?input.value:old));
-        scheduleRender();
-      });
-      label.append(input);
-      return label;
-    });
-    content.append(settingsGroup('prompts',t('固定プロンプト','Saved prompts'),'',el('div','even-card form-card',...promptFields)));
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');
@@ -1055,14 +1043,35 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(button(t('保存した接続情報を削除', 'Remove saved connection details'), () => { confirmForget = true; render(); }, { secondary: true, className: 'danger-button full-width' }));
     return content;
   }
+  function shortcutsContent() {
+    const title = t('固定プロンプト','Saved prompts');
+    const promptFields = draft.savedPrompts.map((value, slot) => {
+      const label = el('label','field',el('span','field-label',t('プロンプト {n}','Prompt {n}',{n:slot+1})));
+      const input = el('textarea','even-input');
+      input.rows = 2; input.maxLength = 10000; input.value = value;
+      focusKey(input, `setting-prompt-${slot}`);
+      input.addEventListener('input', () => {
+        changed('savedPrompts',draft.savedPrompts.map((old,index)=>index===slot?input.value:old));
+        scheduleRender();
+      });
+      label.append(input);
+      return label;
+    });
+    const save = button(t('プロンプトを保存','Save prompts'), () => { void run(async () => {
+      await saveDraft(savedSettings.configured, {...savedSettings, savedPrompts:draft.savedPrompts});
+      uiNotice = controller.state.notice;
+    }, 'prompts'); }, {icon:'check', disabled:!editable() || !promptsDirty(), highlighted:promptsDirty()});
+    return el('div','settings-content', el('h2','page-title',t('ショートカット','Shortcuts')),usageContent(),
+      el('section','even-card form-card',el('h3','section-title',title),...promptFields,save,notifications('prompts')));
+  }
   function usageContent() {
     const usage = controller.state.usage;
-    const section = el('section','',el('div','page-toolbar',el('h2','page-title',t('使用状況確認','Usage')),
-      button(t('更新','Refresh'),()=>{ void run(()=>controller.checkUsage()); },{secondary:true,icon:'refresh',className:'small-button',
+    const section = el('section','even-card form-card',el('div','page-toolbar',el('h3','section-title',t('使用状況確認','Usage')),
+      button(usage ? t('更新','Refresh') : t('確認する','Check usage'),()=>{ void run(()=>controller.checkUsage()); },{secondary:true,icon:'refresh',className:'small-button',
         disabled:usage?.status === 'waiting' || !editable() || controller.state.recording || !controller.state.settings.configured})));
     if (!controller.state.settings.configured) section.append(notConfigured());
-    else {
-      const result = el('p','message-body',usage?.text || (usage?.status==='waiting'?t('Muse の返信待ち','Waiting for Muse'):''));
+    else if (usage) {
+      const result = el('p','message-body',usage.text || t('Muse の返信待ち','Waiting for Muse'));
       result.setAttribute('role',usage?.status==='error'?'alert':'status');
       section.append(result);
     }
@@ -1070,11 +1079,9 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
   }
   function navigation() {
     const nav = el('nav', 'even-bottom-bar app-nav'); nav.setAttribute('aria-label', t('アプリメニュー', 'App navigation'));
-    for (const [name, label, nameIcon] of [['chat', t('チャット', 'Chat'), 'chat'], ['spaces', t('スペース', 'Spaces'), 'spaces'], ['settings', t('設定', 'Settings'), 'settings'], ['usage', t('使用状況確認','Usage'),'usage']] as const) {
+    for (const [name, label, nameIcon] of [['chat', t('チャット', 'Chat'), 'chat'], ['spaces', t('スペース', 'Spaces'), 'spaces'], ['shortcuts', t('ショートカット','Shortcuts'),'shortcuts'], ['settings', t('設定', 'Settings'), 'settings']] as const) {
       const b = button(label, () => {
-        const entering = view !== name;
         view = name; uiError = ''; uiNotice = ''; render(); scrollArea.scrollTop = 0;
-        if (entering && name === 'usage' && editable() && !controller.state.recording && controller.state.settings.configured) void run(()=>controller.checkUsage());
       }, { secondary: true, icon: nameIcon, className: `nav-button ${name === view ? 'is-current' : ''}` });
       if (name === view) b.setAttribute('aria-current', 'page'); nav.append(b);
     }
@@ -1221,7 +1228,7 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     } else if (wizard) content.append(wizardContent());
     else {
       const page = el('main', 'page', status());
-      if (view === 'usage') page.append(usageContent());
+      if (view === 'shortcuts') page.append(shortcutsContent());
       else page.append(notifications(), view === 'chat' ? chatContent() : view === 'spaces' ? spacesContent() : settingsContent());
       content.append(page); nav = navigation();
     }

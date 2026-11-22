@@ -401,12 +401,14 @@ test('three saved prompts send from the composer and Usage isolates the matching
     await route.fulfill({json:{}});
   });
   const nav = page.getByRole('navigation');
-  await nav.getByRole('button',{name:'Settings'}).tap();
-  await page.locator('[data-group="prompts"] summary').tap();
+  await nav.waitFor();
+  assert.deepEqual(await nav.getByRole('button').allTextContents(), ['Chat','Spaces','Shortcuts','Settings']);
+  await nav.getByRole('button',{name:'Shortcuts'}).tap();
   const values = ['Summarize today','First line\nSecond line','Plan tomorrow'];
   for (const [i,value] of values.entries()) await page.getByLabel('Prompt '+(i+1), {exact:true}).fill(value);
-  await page.getByRole('button',{name:'Save settings',exact:true}).tap();
+  await page.getByRole('button',{name:'Save prompts',exact:true}).tap();
   await page.getByText('Settings saved in this browser.',{exact:true}).waitFor();
+  assert.equal(sent.length,0,'editing prompts must not send a usage request');
   await page.reload();
   const draft = page.getByRole('textbox',{name:'Message',exact:true});
   await draft.fill('Unsent draft');
@@ -418,7 +420,8 @@ test('three saved prompts send from the composer and Usage isolates the matching
     assert.equal(sent.at(-1).text,value);
     assert.equal(await draft.inputValue(),'Unsent draft');
   }
-  await nav.getByRole('button',{name:'Usage'}).tap();
+  await nav.getByRole('button',{name:'Shortcuts'}).tap();
+  await page.getByRole('button',{name:'Check usage',exact:true}).tap();
   await page.getByText('Demo plan · 20 tokens',{exact:true}).waitFor();
   assert.equal(await page.getByText('Unrelated conversation').count(),0);
   await nav.getByRole('button',{name:'Chat'}).tap();

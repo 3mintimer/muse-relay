@@ -478,5 +478,8 @@
   "Usage": "Utilisation",
   "Saved prompts": "Requêtes enregistrées",
   "Prompt {n}": "Requête {n}",
-  "No reply yet. Check again.": "Aucune réponse pour le moment. Réessayez."
+  "No reply yet. Check again.": "Aucune réponse pour le moment. Réessayez.",
+  "Shortcuts": "Raccourcis",
+  "Save prompts": "Enregistrer les requêtes",
+  "Check usage": "Vérifier l’utilisation"
 }

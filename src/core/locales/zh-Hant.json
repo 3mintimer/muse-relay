@@ -478,5 +478,8 @@
   "Usage": "使用狀況",
   "Saved prompts": "固定提示詞",
   "Prompt {n}": "提示詞 {n}",
-  "No reply yet. Check again.": "尚未收到回覆，請重新查詢。"
+  "No reply yet. Check again.": "尚未收到回覆，請重新查詢。",
+  "Shortcuts": "捷徑",
+  "Save prompts": "儲存提示詞",
+  "Check usage": "查詢用量"
 }

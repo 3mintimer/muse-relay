@@ -478,5 +478,8 @@
   "Usage": "使用情况",
   "Saved prompts": "固定提示词",
   "Prompt {n}": "提示词 {n}",
-  "No reply yet. Check again.": "尚未收到回复，请重新查询。"
+  "No reply yet. Check again.": "尚未收到回复，请重新查询。",
+  "Shortcuts": "快捷方式",
+  "Save prompts": "保存提示词",
+  "Check usage": "查询用量"
 }

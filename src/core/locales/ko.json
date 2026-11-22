@@ -478,5 +478,8 @@
   "Usage": "사용량",
   "Saved prompts": "저장된 프롬프트",
   "Prompt {n}": "프롬프트 {n}",
-  "No reply yet. Check again.": "아직 답변이 없습니다. 다시 확인하세요."
+  "No reply yet. Check again.": "아직 답변이 없습니다. 다시 확인하세요.",
+  "Shortcuts": "바로가기",
+  "Save prompts": "프롬프트 저장",
+  "Check usage": "사용량 확인"
 }

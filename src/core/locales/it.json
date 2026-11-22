@@ -478,5 +478,8 @@
   "Usage": "Utilizzo",
   "Saved prompts": "Prompt salvati",
   "Prompt {n}": "Prompt {n}",
-  "No reply yet. Check again.": "Nessuna risposta. Riprova."
+  "No reply yet. Check again.": "Nessuna risposta. Riprova.",
+  "Shortcuts": "Scorciatoie",
+  "Save prompts": "Salva prompt",
+  "Check usage": "Verifica utilizzo"
 }

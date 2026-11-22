@@ -162,20 +162,40 @@ export class Glasses {
     await this.paint(renderId, state, menuItems, text, [], bitmaps, messageId);
   }
 
-  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment, motion?:GlassMotion): Promise<void> {
+  async home(state: AppState, left: string[], right: string[], selected: number, footer: string,
+    menuItems: GlassMenuItem[], header: string, avatar?: Attachment, motion?: GlassMotion): Promise<void> {
     if (!this.ready) return;
     const renderId = ++this.serial;
+    const {first, last, bodyHeight} = bands(footer, header);
+    const available = avatar || motion ? avatarBounds.x : WIDTH;
+    const split = Math.floor(available * 0.42);
+    // Leave a blank line between rows when the translated header and footer allow it.
+    const separator = lineBudget(bodyHeight) >= 7 ? '\n\n' : '\n';
+    const column = (names: string[], offset: number, x: number, width: number, id: number, name: string) => {
+      const content = names.map((value, row) => {
+        const marker = selected === offset + row ? '> ' : '  ';
+        return marker + excerpt(value, 1, width - 28);
+      }).join(separator);
+      return {...label(id,name,first.height,bodyHeight,content,offset === 0), xPosition:x, width};
+    };
+    const text = [label(13,'header',0,first.height,first.content),
+      column(left,0,0,split,14,'home-left'), column(right,left.length,split,available-split,15,'home-right'),
+      label(11,'footer',HEIGHT-last.height,last.height,last.content)];
+    const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
+      ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
+    await this.paint(renderId,state,menuItems,text,[],bitmaps,undefined,motion);
+  }
+
+  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string): Promise<void> {
+    if (!this.ready) return;
     const { first, last, bodyHeight } = bands(footer, header);
     const text: ReturnType<typeof label>[] = [];
     if (first.height) text.push(label(13, 'header', 0, first.height, first.content));
     if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content));
-    const width = avatar || motion ? avatarBounds.x : WIDTH;
-    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
+    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width: WIDTH, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
       itemContainer: { itemCount: items.length, itemWidth: 0, isItemSelectBorderEn: 1,
-        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24)) } });
-    const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
-      ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
-    await this.paint(renderId, state, menuItems, text, [list], bitmaps, undefined, motion);
+        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, WIDTH - 24)) } });
+    await this.paint(++this.serial, state, menuItems, text, [list], []);
   }
 
   async waiting(state:AppState, status:string, footer:string, menuItems:GlassMenuItem[], messageId:string, motion:GlassMotion) {

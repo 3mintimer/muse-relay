@@ -68,20 +68,23 @@ function fixture(results: ImageRawDataUpdateResult[] = []) {
   return { glasses, wire, rebuilds, textUpdates, page:()=>page,body: () => page.textObject?.find((item: any) => item.containerName === 'body')?.content };
 }
 
-test('home avatar uses a right-side square and clock updates preserve its pixels and the native list',async()=>{
+test('home avatar uses a right-side square and clock updates preserve its pixels and both columns',async()=>{
   const app=fixture(),items=['Chat','Spaces','Record voice'];
-  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:00',image);
-  const page=app.page();assert.equal(page.containerTotalNum,4);
+  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:00',image);
+  const page=app.page();assert.equal(page.containerTotalNum,5);
   assert.deepEqual(page.imageObject.map((c:any)=>[c.xPosition,c.yPosition,c.width,c.height]),[[432,72,144,144]]);
-  assert.equal(page.listObject[0].width,432);assert.equal(page.listObject[0].isEventCapture,1);
-  assert.ok(page.textObject.every((c:any)=>c.isEventCapture===0));
+  const [left,right]=page.textObject.filter((c:any)=>c.containerName.startsWith('home-'));
+  assert.equal(left.xPosition+left.width,right.xPosition);
+  assert.equal(right.xPosition+right.width,432);
+  assert.equal(left.isEventCapture,1);
+  assert.equal(page.textObject.filter((c:any)=>c.isEventCapture).length,1);
   assert.equal(app.wire.length,1);assert.equal(app.wire[0]!.containerName,'avatar');
-  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:01',{...image});
+  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:01',{...image});
   assert.equal(app.wire.length,1);assert.equal(app.rebuilds.length,1);
   await app.glasses.show(state,'Chat');
-  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:02',image);assert.equal(app.wire.length,2);
-  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:03');
-  assert.equal(app.page().imageObject.length,0);assert.equal(app.page().listObject[0].width,576);
+  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:02',image);assert.equal(app.wire.length,2);
+  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:03');
+  assert.equal(app.page().imageObject.length,0);const wide=app.page().textObject.find((c:any)=>c.containerName==='home-right');assert.equal(wide.xPosition+wide.width,576);
 });
 
 test('photo tiles fill the space above the gesture footer and are sent once per native layout', async () => {
@@ -168,7 +171,7 @@ test('updating the Home clock between two motion frames preserves the four-secon
   t.mock.method(performance,'now',()=>Date.now());
   const app=fixture(),motion={frames:Array.from({length:16},(_,i)=>Uint8Array.of(i)),failed:assert.fail};
   const settle=()=>new Promise<void>(r=>setImmediate(r));
-  const home=(time:string)=>app.glasses.list(state,['Chat','Spaces'],'Open',[],time,undefined,motion);
+  const home=(time:string)=>app.glasses.home(state,['Chat','Spaces','Settings'],['1. —','2. —','3. —','Usage'],0,'Open',[],time,undefined,motion);
   await home('11:59');await settle();
   for(let i=1;i<=7;i++){t.mock.timers.tick(250);await settle();}
   t.mock.timers.tick(100);await home('12:00');await settle();

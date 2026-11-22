@@ -478,5 +478,8 @@
   "Usage": "Uso",
   "Saved prompts": "Instrucciones guardadas",
   "Prompt {n}": "Instrucción {n}",
-  "No reply yet. Check again.": "Aún no hay respuesta. Vuelve a consultar."
+  "No reply yet. Check again.": "Aún no hay respuesta. Vuelve a consultar.",
+  "Shortcuts": "Atajos",
+  "Save prompts": "Guardar instrucciones",
+  "Check usage": "Consultar uso"
 }

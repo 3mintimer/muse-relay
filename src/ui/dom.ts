@@ -8,7 +8,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ''
 }
 
 const paths = {
-  usage: 'M3 3v18h18 M7 17v-4 M12 17V9 M17 17V5',
+  shortcuts: 'M6 3h12v18l-6-4-6 4z M14 6l-4 5h4l-3 4',
   chat: 'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3V6a2 2 0 0 1 2-2 M8 9h8 M8 13h5',
   spaces: 'M3 4h7v7H3z M14 4h7v7h-7z M3 15h7v6H3z M14 15h7v6h-7z',
   settings: 'M4 7h16 M4 17h16 M8 4v6 M16 14v6',
