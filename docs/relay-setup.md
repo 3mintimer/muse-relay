@@ -6,6 +6,8 @@
 
 Run chat and image processing in the Muse VM by default. Generate or read the image there and publish it directly to the connection used by the app. Keep its writer credential in the VM. A separate relay is optional when the VM can serve the app’s HTTPS protocol.
 
+If Muse asks for approval on the first upload, check your destination and the image in the approval details. If the device times out, check the app for the image before retrying.
+
 Choose a method → ask Muse to set it up → enter and save your connection.
 
 | Method | Action | Success looks like |
