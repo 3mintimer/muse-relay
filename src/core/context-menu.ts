@@ -23,12 +23,18 @@ export function contextItem(action: ContextAction, language: Language) {
   return { itemID, itemName: translate(language, ja, en) };
 }
 
+export function glassPromptLabel(prompt: string, slot: number): string | undefined {
+  if (!prompt.trim()) return undefined;
+  const firstLine = prompt.split(/[\r\n\u2028\u2029]/u, 1)[0]!.trim().replace(/\s+/gu, ' ');
+  return firstLine ? `${slot + 1}. ${firstLine}` : `${slot + 1}.`;
+}
+
 export function promptMenuItems(prompts: string[]) {
   const encoder = new TextEncoder();
   return prompts.flatMap((prompt, slot) => {
-    const label = prompt.trim().replace(/\s+/gu, ' ');
+    const label = glassPromptLabel(prompt, slot);
     if (!label) return [];
-    let itemName = `${slot + 1}. `;
+    let itemName = '';
     for (const char of label) {
       const next = itemName + char;
       if (encoder.encode(next + '…').length > 32 || getTextWidth(next + '…') > 160) {

@@ -8,7 +8,7 @@ import { connectionSignature, defaults, httpsConnection, validateSettings } from
 import { GistRelay } from '../relay/gist';
 import { HttpsRelay } from '../relay/gadget';
 import { Glasses, glassBodyRows, type GlassTextStyle } from './glasses';
-import { contextItem, contextItems, promptMenuItems, type ContextAction } from './context-menu';
+import { contextItem, contextItems, glassPromptLabel, promptMenuItems, type ContextAction } from './context-menu';
 import { glassSettings, type GlassSettingKey } from './glass-settings';
 import { excerpt, G2_TEXT_LIMIT, paginate, wrapLines } from './glass-text';
 import { base64, hasAudiblePcm, resizeImage, wav } from './media';
@@ -647,8 +647,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         {label:text('チャット','Chat'), open:showChat},
         {label:text('スペース','Spaces'), open:showSpaces},
         ...state.settings.savedPrompts.flatMap((prompt,slot) => {
-          const preview = prompt.trim().replace(/\s+/gu,' ');
-          return preview ? [{label:`${slot+1}. ${preview}`, open:()=>sendPreset(slot,true)}] : [];
+          const label = glassPromptLabel(prompt, slot);
+          return label ? [{label, open:()=>sendPreset(slot,true)}] : [];
         }),
         {label:usageTitle(), open:openUsage},
         {label:text('設定','Settings'), open:showSettings},

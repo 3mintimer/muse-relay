@@ -1784,17 +1784,17 @@ test('the contextual all-read action preserves chat, hidden messages and future 
   assert.deepEqual(app.items(), ['チャット','スペース','使用状況確認','設定']);
 });
 
-test('saved prompts retain their slots and send the full selected text from Chat and Home', async t => {
-  const savedPrompts = ['  日程をまとめてください。\n箇条書きで。', '', 'Ask about tomorrow'];
+test('saved prompts show only their first line and send the full text from Chat and Home', async t => {
+  const savedPrompts = ['  日程は？\n箇条書きで。', '', 'Tomorrow?\r\nUse a checklist'];
   const app = await appFixture(t, fixture(), true, {savedPrompts, returnToChatAfterSend:false});
-  assert.deepEqual(app.items(),['チャット','スペース','1. 日程をまとめてください。 箇条書きで。','3. Ask about tomorrow','使用状況確認','設定']);
+  assert.deepEqual(app.items(),['チャット','スペース','1. 日程は？','3. Tomorrow?','使用状況確認','設定']);
   app.emit({listEvent:{currentSelectItemIndex:0}});
   await settle();
   const prompts = app.menu().filter(item => item.itemID >= 13);
   assert.deepEqual(prompts.map(item => item.itemID), [13,15]);
+  assert.deepEqual(prompts.map(item => item.itemName), ['1. 日程は？','3. Tomorrow?']);
   for (const {itemName} of prompts) {
     assert.ok(Buffer.byteLength(itemName) <= 32 && getTextWidth(itemName) <= 160);
-    assert.doesNotMatch(itemName, /\n/);
   }
   app.overlay(13); await settle();
   assert.equal(app.sent.length,1);
