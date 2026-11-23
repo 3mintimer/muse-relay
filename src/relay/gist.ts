@@ -28,7 +28,7 @@ export class GistRelay implements Relay {
   }
   async read(signal?: AbortSignal): Promise<Snapshot> {
     const res = await fetch(this.url,{headers:{...this.headers,...(this.etag ? {'If-None-Match':this.etag}:{})},signal:combinedSignal(signal),cache:'no-cache',redirect:'error'});
-    if (res.status === 304 && this.cached) return this.cached;
+    if (res.status === 304 && this.cached) return {...this.cached,messages:[...this.cached.messages]};
     const data = record(await jsonResponse(res));
     this.files = record(data.files) as Record<string,GistFile>;
     const root = record(JSON.parse(await this.file('g2muse-relay.json',signal)));
@@ -44,9 +44,11 @@ export class GistRelay implements Relay {
       try { snapshot.motions=parseMotionRecord(JSON.parse(await this.file('muse-relay-motions.json',signal))); }
       catch { /* Optional character art must not interrupt messages. */ }
     }
-    snapshot.capabilities = {audio:true,images:true,spaces:true};
+    snapshot.capabilities = {audio:true,images:true,spaces:true,
+      ...(snapshot.capabilities?.reply_suggestions ? {reply_suggestions:true} : {})};
     this.etag = res.headers.get('ETag') || '';
-    this.cached = snapshot;
+    // The controller merges local echoes into its copy. Keep the Gist's row order for selection checks.
+    this.cached = {...snapshot,messages:[...snapshot.messages]};
     return snapshot;
   }
   async send(request: RelayRequest, signal?: AbortSignal): Promise<void> {
@@ -64,7 +66,21 @@ export class GistRelay implements Relay {
       payload[`${kind}_mime`] = asset.mime;
       payload[`${kind}_name`] = asset.name;
     }
-    files[`muse-relay-request-${request.id}.json`] = {content:JSON.stringify(payload)};
+    const name = `muse-relay-request-${request.id}.json`;
+    const content = JSON.stringify(payload);
+    if (request.kind === 'suggestion_reply') {
+      const current = await this.read(signal);
+      if (this.files[name]) {
+        if (await this.file(name,signal) === content) return;
+        throw new Error('HTTP 409');
+      }
+      if (current.messages.some(m => m.from === 'You' && m.id === request.id && m.text === request.text)) return;
+      const parent = current.messages.findLast(m => m.from === 'Muse');
+      const input = current.messages.findLast(m => m.from === 'You' && !m.reply_to);
+      if (!current.capabilities?.reply_suggestions || !parent || parent.id !== request.suggestion_for || parent.reply_to !== input?.id
+        || !parent.reply_suggestions?.includes(request.text)) throw new Error('HTTP 409');
+    }
+    files[name] = {content};
     await jsonResponse(await fetch(this.url,{method:'PATCH',headers:{...this.headers,'Content-Type':'application/json'},body:JSON.stringify({files}),signal:combinedSignal(signal),redirect:'error'}));
     this.etag='';
   }

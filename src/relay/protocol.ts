@@ -2,6 +2,7 @@ import type { Message, Snapshot, Space, Attachment } from '../core/types';
 import { MOTION_SPACE_ID, motionKinds } from '../core/types';
 import { parseSpaceControl } from '../../protocol/space-controls.mjs';
 import { chatLocation } from '../../protocol/chat-location.mjs';
+import { parseReplySuggestions } from '../../protocol/reply-suggestions.mjs';
 
 export function record(v: unknown): Record<string, unknown> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('Invalid relay data');
@@ -42,12 +43,14 @@ export function parseSnapshot(value: unknown, source: 'relay' | 'cache' = 'relay
     if (typeof m.id !== 'string' || ids.has(m.id) || !Number.isFinite(m.ts)) continue;
     ids.add(m.id);
     const sentLocation = source === 'cache' && m.from === 'You' && chatLocation({kind:'chat', location:m.sentLocation});
+    const suggestions = source === 'relay' && m.from === 'Muse' && typeof m.reply_to === 'string' && m.reply_to.length > 0 && parseReplySuggestions(m.reply_suggestions);
     messages.push({id:string(m.id,128), from:string(m.from,100),
       ...(sentLocation ? {sentLocation} : {}),
       type:m.type === 'voice-note' ? 'voice-note' : m.type === 'image' ? 'image' : 'text',
       text:string(m.text), ts:Number(m.ts), audio_file:string(m.audio_file,256) || undefined,
       image_file:string(m.image_file,256) || undefined, mime_type:string(m.mime_type,100) || undefined,
       reply_to:string(m.reply_to,128) || undefined,
+      ...(suggestions ? {reply_suggestions:suggestions} : {}),
       ...(m.image ? {image:parseAttachment(m.image)} : {}),
     });
   }
@@ -89,7 +92,8 @@ export function parseSnapshot(value: unknown, source: 'relay' | 'cache' = 'relay
   if (v.capabilities) {
     const c=record(v.capabilities);
     snapshot.capabilities={audio:c.audio===true,images:c.images===true,spaces:c.spaces===true,
-      ...(typeof c.soniox==='boolean'?{soniox:c.soniox}:{}),...(c.live_transcription===true?{live_transcription:true}:{})};
+      ...(typeof c.soniox==='boolean'?{soniox:c.soniox}:{}),...(c.live_transcription===true?{live_transcription:true}:{}),
+      ...(c.reply_suggestions===true?{reply_suggestions:true}:{})};
   }
   return snapshot;
 }

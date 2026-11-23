@@ -5,7 +5,9 @@ import { languages, languageFromUrl, languageHref } from './language.js';
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const repo = 'https://github.com/3mintimer/muse-relay';
-const relaySource = repo + '/tree/v0.3.30-beta.1';
+const relayTag = 'v0.4.1-beta.1';
+const relaySource = repo + '/tree/' + relayTag;
+const upgradeSource = repo + '/blob/' + relayTag;
 const sdk = 'https://github.com/facebookincubator/muse-gadget-sdk';
 const state = { route: 'gist', voice: 'muse', images: false, step: 0, topic: 'connection', preset: 'schedule' };
 const el = (tag, text, className) => {
@@ -87,7 +89,25 @@ function renderRoute() {
   $('#input-detail').textContent = route.inputDetail;
   $('#output-detail').textContent = route.outputDetail;
   $('#implementation-name').textContent = route.name;
-  renderImplementation(); renderStep(); renderVoice(); renderPrompt();
+  renderImplementation(); renderStep(); renderVoice(); renderPrompt(); renderUpgradeRequest(route);
+}
+
+function renderUpgradeRequest(route) {
+  let migration;
+  if (state.route === 'gist') {
+    migration = t("Extend my existing Gist watcher and Muse handler. Keep the same Gist, its history and processing records, and a single writer. Have the handler return three short reply_suggestions with the matching answer. Enable capabilities.reply_suggestions once both components support it.");
+  } else if (state.route === 'custom') {
+    migration = t("Extend my current HTTPS service. Attach reply_suggestions to the matching Muse answer. For suggestion_reply, check suggestion_for and the full text against the latest answer and its offered choices, then handle the selection as an ordinary chat. Keep older clients working.");
+  } else {
+    migration = t("Update my existing Gadget HTTPS relay. In the Muse VM, install the Python tool from {0} at {1}. Configure my own HTTPS destination and a dedicated VM key through secure setup. Set REPLY_SUGGESTIONS_WRITER_SHA256 on the relay to the key’s SHA-256. This update uses my existing device firmware.", [upgradeSource + '/server/tools/vm-publish-reply-suggestions.py', '~/.config/muse-relay/vm-publish-reply-suggestions.py']);
+  }
+  $('#upgrade-output').value = [
+    t("Upgrade my existing {0} connection for G2 reply suggestions in Muse Relay 0.4.1. Keep my history and voice settings. Use the steps for my connection in {1}.", [route.name, docHref(upgradeSource + '/docs/relay-setup.md#reply-suggestions-upgrade')]),
+    migration,
+    t("First verify a normal reply with suggestions off. Then select a suggestion on G2 and verify that the follow-up is sent once and receives a matching Muse reply. Keep my private URLs and keys in secure configuration."),
+  ].join('\n\n');
+  $('#copy-upgrade').disabled = false;
+  $('#upgrade-status').textContent = '';
 }
 
 function stepContent() {
@@ -377,6 +397,17 @@ $('#prompt-topic').addEventListener('change', event => choosePrompt(event.target
 $('#space-preset').addEventListener('change', event => { state.preset = event.target.value; renderPrompt(); });
 $$('[data-prompt-link]').forEach(a => a.addEventListener('click', () => choosePrompt(a.dataset.promptLink)));
 $('#copy-prompt').addEventListener('click', () => { void copyText($('#prompt-output').value, $('#prompt-output'), $('#copy-status')); });
+$('#copy-upgrade').addEventListener('click', () => { void copyText($('#upgrade-output').value, $('#upgrade-output'), $('#upgrade-status')); });
+const shotDialog = $('#g2-shot-dialog');
+$$('.g2-shot').forEach(anchor => anchor.addEventListener('click', event => {
+  if (!shotDialog.showModal || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const original = shotDialog.querySelector('img');
+  original.src = anchor.href;
+  original.alt = anchor.querySelector('img').alt;
+  shotDialog.showModal();
+  original.parentElement.scrollLeft = 0;
+}));
 
 const form = $('#feedback-form');
 const feedbackMessage = $('#feedback-message');

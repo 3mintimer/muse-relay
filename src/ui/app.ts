@@ -1006,8 +1006,15 @@ export function mountApp(root: HTMLElement, controller: AppController): () => vo
     content.append(settingsGroup('voice', t('音声と画像', 'Voice & images'), draft.voice === 'soniox' ? 'Soniox' : t('中継先', 'Relay'), voiceOptions()));
     const chatLayout = select('chatLayout', t('チャット表示', 'Chat display'), [['exchange', t('入力と回答', 'Input & reply')], ['single', t('1件ずつ', 'One message at a time')]]);
     chatLayout.classList.add('chat-layout-row');
+    const suggestions = select('suggestionMode', t('返信候補', 'Reply suggestions'), [
+      ['off', t('オフ', 'Off')], ['auto', t('Museに任せる', 'Let Muse decide')], ['always', t('毎回候補を依頼', 'Ask every time')],
+    ]);
+    suggestions.classList.add('chat-layout-row');
     content.append(settingsGroup('glasses', t('G2 表示', 'G2 display'), draft.autoHideSeconds ? t('{seconds} 秒', '{seconds} seconds', {seconds: draft.autoHideSeconds}) : t('自動非表示オフ', 'Auto-hide off'), el('div', 'even-card',
-      chatLayout,
+      chatLayout, suggestions,
+      ...(draft.suggestionMode !== 'off' && controller.state.connected && signature() === signature(controller.state.settings) &&
+        !controller.state.snapshot.capabilities?.reply_suggestions ?
+        [small(t('この中継は返信候補に未対応です。', 'This relay does not support reply suggestions.'))] : []),
       select('autoHideSeconds', t('自動で非表示', 'Auto-hide display'), [0, 5, 10, 15, 20, 25, 30].map(seconds => [seconds, seconds ? t('{seconds} 秒', '{seconds} seconds', { seconds }) : t('オフ', 'Off')]), () => { if (!draft.autoHideSeconds) changed('headWake', false); }),
       toggle(t('送信後にチャットへ戻る', 'Return to chat after sending'), draft.returnToChatAfterSend, value => { changed('returnToChatAfterSend', value); render(); }, t('チャット送信のみ', 'Chat messages only')),
       button(t('復帰操作を試す', 'Try restoring the display'), () => { tutorial = true; tutorialMode = 'chat'; tutorialStep = 4; tutorialDemo = false; render(); }, { secondary: true, icon: 'help', className: 'full-width' }))));

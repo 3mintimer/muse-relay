@@ -53,7 +53,7 @@ Timestamps use Unix seconds. For IDs shared across the relay methods, use at mos
 | Field | Purpose |
 |---|---|
 | `id` | Keep it unchanged on retry; relay deduplication key |
-| `kind` | `chat` / `space` |
+| `kind` | `chat` / `space` / `suggestion_reply` (a reply selected on G2) |
 | `text` | Input text; empty for audio/image-only input |
 | `created_at` | Creation time |
 | `location` | Optional for chats. Degrees in `latitude` and `longitude`, Unix seconds in `captured_at`, optional horizontal `accuracy` in metres. Omitted while sharing is off or no fix under five minutes old is available. |
@@ -100,6 +100,16 @@ Gadget attachment format:
 | `profile` | Muse's name/configured avatar, optional: `{name?,avatar?,avatar_file?,mime_type?,updated_at?}` |
 | `device` | Reference Gadget connection state, optional |
 | `capabilities` | `images` permits image input from app to Muse. Optional `soniox` indicates a configured server key. Optional `live_transcription:true` enables live captions in Transcribe via relay on compatible app builds |
+
+### G2 reply suggestions
+
+A supporting relay advertises `capabilities.reply_suggestions:true`. The app starts with suggestions off. A chat with `suggestion_mode:"auto"` asks Muse for suggestions when a follow-up makes sense. `"always"` requests them on every turn. Process requests without this field as ordinary chats.
+
+Gist and custom HTTPS include the optional field on the Muse answer whose `reply_to` identifies the original request. For example, `"reply_suggestions":["Go ahead with this plan","Show me the cost breakdown","Skip it this time"]`. Supply three distinct single-line replies, in proceed, explore and decline order. Keep each under 49 Unicode characters and aim for about 32 Latin characters to fit the G2 list. The reference Gist watcher reads the capability from `g2muse-relay.json`, passes the requested mode to the handler and stores its suggestions with the answer.
+
+On Gadget, ATOM delivers the answer as usual. The Muse VM publishes the same turn's choices to `PUT /v1/requests/:id/reply-suggestions` with `{"reply_suggestions":[…]}`. Use the original app request ID and a dedicated bearer key. Configure its SHA-256 digest in `REPLY_SUGGESTIONS_WRITER_SHA256`. Removing that setting and applying the change disables suggestions on the same relay URL and history. The answer is readable independently of this write.
+
+The app sends a selection as `kind:"suggestion_reply"` with the **answer message ID** in `suggestion_for` and the full displayed reply in `text`. The relay matches both fields against the latest turn and handles it as a chat. Retries reuse the same request ID and payload. Accepting a new turn expires the preceding choices.
 
 ### Voice transcripts and reply matching
 

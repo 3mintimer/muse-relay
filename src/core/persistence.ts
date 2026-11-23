@@ -1,16 +1,20 @@
 import { defaults, validateSettings } from './config';
 import { parseSnapshot } from '../relay/protocol';
-import type { Settings, Snapshot } from './types';
+import type { RelayRequest, Settings, Snapshot } from './types';
 
 export const LOCAL_STATE_KEY = 'muse-relay-state-v1';
 const LOCAL_CACHE_KEY = 'muse-relay-cache-v1';
 export type StorageMode = 'native' | 'local' | 'unavailable';
+export type PendingSuggestion = Pick<RelayRequest, 'id' | 'text' | 'created_at'> & {
+  kind: 'suggestion_reply'; suggestion_for: string; suggestion_mode: 'auto' | 'always';
+};
 export interface SavedState {
   settings: Settings;
   snapshot: Snapshot;
   readIds: string[];
   hiddenIds: string[];
   selectedSpaceIds: string[];
+  pendingSuggestion?: PendingSuggestion;
   savedAt?: number;
 }
 export interface NativeStorage { load(): Promise<string>; save(value: string): Promise<void>; }
@@ -29,8 +33,16 @@ export function decodeSavedState(raw: string): SavedState | undefined {
     }
     let snapshot: Snapshot = { messages: [], spaces: [] };
     try { if (value.snapshot) snapshot = parseSnapshot(value.snapshot, 'cache'); } catch { /* Cache is optional. */ }
+    const attempt = value.pendingSuggestion;
+    const pendingSuggestion: PendingSuggestion | undefined = attempt?.kind === 'suggestion_reply' &&
+      typeof attempt.id === 'string' && /^r_[a-zA-Z0-9_-]{1,76}$/.test(attempt.id) && typeof attempt.suggestion_for === 'string' &&
+      attempt.suggestion_for.length > 0 && attempt.suggestion_for.length <= 128 &&
+      typeof attempt.text === 'string' && attempt.text.length > 0 && attempt.text.length <= 96 &&
+      Number.isSafeInteger(attempt.created_at) && (attempt.suggestion_mode === 'auto' || attempt.suggestion_mode === 'always')
+      ? {kind:'suggestion_reply', id:attempt.id, text:attempt.text, created_at:attempt.created_at,
+        suggestion_for:attempt.suggestion_for, suggestion_mode:attempt.suggestion_mode} : undefined;
     const ids = (key: string, limit: number) => Array.isArray(value[key]) ? value[key].filter((id: unknown) => typeof id === 'string').slice(-limit) : [];
-    return { settings, snapshot, readIds: ids('readIds', 300), hiddenIds: ids('hiddenIds', 300), selectedSpaceIds: [...new Set(ids('selectedSpaceIds', 15))],
+    return { settings, snapshot, pendingSuggestion, readIds: ids('readIds', 300), hiddenIds: ids('hiddenIds', 300), selectedSpaceIds: [...new Set(ids('selectedSpaceIds', 15))],
       savedAt: Number.isSafeInteger(value.savedAt) && value.savedAt > 0 ? value.savedAt : 0 };
   } catch { return; }
 }
@@ -66,7 +78,7 @@ export class StateStorage {
     if (value) {
       try {
         const cache = JSON.parse(this.local.getItem(LOCAL_CACHE_KEY) || 'null');
-        if (cache?.savedAt === this.savedAt) value = decodeSavedState(JSON.stringify({ ...value, snapshot: cache.snapshot,
+        if (cache?.savedAt === this.savedAt) value = decodeSavedState(JSON.stringify({ ...value, snapshot: cache.snapshot, pendingSuggestion:cache.pendingSuggestion,
           readIds: cache.readIds, hiddenIds: cache.hiddenIds, selectedSpaceIds: value.selectedSpaceIds })) || value;
       } catch { /* A local message cache is optional. */ }
     }
@@ -81,7 +93,7 @@ export class StateStorage {
     if (!explicit) {
       if (!this.writable) return null;
       // Polling / closing a WebView must never rewrite connection credentials.
-      try { this.local.setItem(LOCAL_CACHE_KEY, JSON.stringify({ savedAt: this.savedAt, snapshot: value.snapshot, readIds: value.readIds, hiddenIds: value.hiddenIds })); } catch { /* Optional cache. */ }
+      try { this.local.setItem(LOCAL_CACHE_KEY, JSON.stringify({ savedAt: this.savedAt, snapshot: value.snapshot, pendingSuggestion:value.pendingSuggestion, readIds: value.readIds, hiddenIds: value.hiddenIds })); } catch { /* Optional cache. */ }
       return null;
     }
     ++this.generation; // A late read can never replace a user save or credential removal.
@@ -89,7 +101,7 @@ export class StateStorage {
     const raw = JSON.stringify({ ...value, snapshot: { messages: [], spaces: [] }, savedAt: this.savedAt });
     let localSaved = false, nativeSaved = false;
     try { this.local.setItem(LOCAL_STATE_KEY, raw); localSaved = true; } catch { /* Try native storage. */ }
-    try { this.local.setItem(LOCAL_CACHE_KEY, JSON.stringify({ savedAt: this.savedAt, snapshot: value.snapshot, readIds: value.readIds, hiddenIds: value.hiddenIds })); } catch { /* Cache size cannot make a settings save fail. */ }
+    try { this.local.setItem(LOCAL_CACHE_KEY, JSON.stringify({ savedAt: this.savedAt, snapshot: value.snapshot, pendingSuggestion:value.pendingSuggestion, readIds: value.readIds, hiddenIds: value.hiddenIds })); } catch { /* Cache size cannot make a settings save fail. */ }
     if (this.native) {
       try { await this.native.save(raw); nativeSaved = true; this.nativeRead = true; } catch { /* Report the backup-only result. */ }
     }

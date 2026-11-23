@@ -1,6 +1,7 @@
 import {
   MAX_BODY, LEASE_MS, HttpError, fail, equal, validateConfig, validateRequest, isOriginAllowed,
   validatePublishedMessage, validateProfile, spaceExportRoute, validateSpaceWrite, exportSpaces, prepareMuseRequest, buildMuseRequest, fingerprint,
+  replySuggestionsRequestId, authenticateReplySuggestionsWriter,
   createMachine, byteLength,
 } from '../core.mjs';
 import { authenticateAdmin, maintenanceHeaders, maintenancePage, maintenanceStatus, issueCommand, recordDiagnostics } from '../maintenance.mjs';
@@ -13,6 +14,7 @@ const MAX_SPACE_IMAGES = 8;
 function configuration(env) {
   return validateConfig({
     recoveryAdminSha256: env.RECOVERY_ADMIN_SHA256,
+    replySuggestionsWriterSha256: env.REPLY_SUGGESTIONS_WRITER_SHA256,
     relayToken: env.RELAY_TOKEN, deviceToken: env.DEVICE_TOKEN, museToken: env.MUSE_TOKEN,
     sonioxApiKey: env.SONIOX_API_KEY, publicUrl: env.PUBLIC_URL,
     allowedOrigins: (env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
@@ -103,10 +105,12 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         }
         const device = path.startsWith('/device/');
         const spaces = spaceExportRoute(request.method, path);
+        const suggestionsId = replySuggestionsRequestId(request.method, path);
         const readLocation = request.method === 'GET' && path === '/v1/chat/location';
         const muse = readLocation || spaces || (path === '/v1/profile' && request.method === 'PUT') || (path === '/v1/messages' && request.method === 'POST') || (path === '/admin/gc' && request.method === 'POST');
         const token = device ? config.deviceToken : muse ? config.museToken : config.relayToken;
-        if (!equal(request.headers.get('authorization'), `Bearer ${token}`)) fail(401, 'unauthorized');
+        if (suggestionsId) await authenticateReplySuggestionsWriter(request.headers.get('authorization'), config);
+        else if (!equal(request.headers.get('authorization'), `Bearer ${token}`)) fail(401, 'unauthorized');
         if (!env.DB || !env.BUCKET) fail(503, 'storage_not_configured');
         if (path === '/device/diagnostics') {
           if (request.method !== 'POST') fail(405, 'method_not_allowed');
@@ -131,7 +135,7 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
           return response(200, await exportSpaces(state.spaces, image => blobs.get(image)), headers);
         }
         const mutate = change => store.update(state => {
-          const machine = createMachine(state, { now });
+          const machine = createMachine(state, { now, replySuggestionsEnabled: config.replySuggestionsEnabled });
           machine.sweep();
           if (device) state.deviceSeen = now();
           const result = change(machine, state);
@@ -168,12 +172,12 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
             ...headers, 'Server-Timing': `relay-quota;dur=${admitted - started}, soniox-issuer;dur=${Date.now() - admitted}`,
           });
         }
-        const body = ['POST', 'PUT'].includes(request.method) ? await readJson(request) : undefined;
+        const body = ['POST', 'PUT'].includes(request.method) ? await readJson(request, suggestionsId ? 4096 : MAX_BODY) : undefined;
         let status = 200, result, wroteMedia = false;
         if (request.method === 'POST' && path === '/v1/requests') {
           const validated = validateRequest(body, config.imagesEnabled);
           const hash = await fingerprint(validated);
-          const value = prepareMuseRequest(validated);
+          const value = prepareMuseRequest(validated, config.replySuggestionsEnabled);
           const requestBytes = byteLength(JSON.stringify(buildMuseRequest(value)));
           // Fresh keys cannot resurrect an object removed by a concurrent collector.
           // An idempotent retry can leave an unreferenced upload for bounded GC.
@@ -182,7 +186,7 @@ export function createWorker({ now = Date.now, fetchImpl = (...args) => globalTh
         } else if (request.method === 'GET' && path === '/v1/snapshot') {
           result = publicSnapshot(await mutate(machine => machine.snapshot(config.imagesEnabled, Boolean(config.sonioxApiKey))));
           if (liveVoice) result.capabilities.live_transcription = true;
-        }
+        } else if (suggestionsId) result = await mutate(machine => machine.publishReplySuggestions(suggestionsId, body));
         else if (request.method === 'GET' && path.startsWith('/v1/files/')) {
           let name;
           try { name = decodeURIComponent(path.slice('/v1/files/'.length)); } catch { fail(400, 'invalid_filename'); }

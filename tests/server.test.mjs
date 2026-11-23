@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,48 @@ import { createRelay } from '../server/app.mjs';
 import { isOriginAllowed,emptyState,createMachine,validateSpaces,validateRequest,buildMuseRequest } from '../server/core.mjs';
 
 const config = { relayToken: 'p'.repeat(40), deviceToken: 'd'.repeat(40), museToken: 'm'.repeat(40), allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:*'], sonioxApiKey: 'server-only-test-key' };
+test('voice replies deliver their text before exposing a separately published suggestion set', async t => {
+  const writer = 'w'.repeat(48);
+  const server = await createRelay({ config: { ...config, replySuggestionsWriterSha256: createHash('sha256').update(writer).digest('hex') } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const call = (path, token = config.relayToken, body, method) => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+    method: method || (body ? 'POST' : 'GET'), headers: { authorization: 'Bearer ' + token }, body: body && JSON.stringify(body),
+  });
+  const snapshot = async () => (await call('/v1/snapshot')).json();
+  const options = { reply_suggestions: ['Start the plan', 'Discuss the timing', 'Skip the plan'] };
+  const put = (token, body = options) => call('/v1/requests/voice/reply-suggestions', token, body, 'PUT');
+  const wav = Buffer.alloc(44); wav.write('RIFF'); wav.write('WAVE', 8);
+  const input = { id: 'voice', kind: 'chat', text: '', created_at: 1, suggestion_mode: 'auto',
+    audio: { mime: 'audio/wav', name: 'voice.wav', data_base64: wav.toString('base64') } };
+  assert.equal((await snapshot()).capabilities.reply_suggestions, true);
+  assert.equal((await call('/v1/requests', config.relayToken, input)).status, 202);
+  const { job } = await (await call('/device/jobs', config.deviceToken)).json();
+  const packet = await call('/device/jobs/voice/request', config.deviceToken);
+  assert.equal(Number(packet.headers.get('content-length')), job.request_bytes);
+  const { message, items } = await packet.json();
+  assert.match(message, /vm-publish-reply-suggestions\.py voice/);
+  assert.equal(items[0].text, message);
+  for (const token of [config.relayToken, config.deviceToken, config.museToken]) assert.equal((await put(token)).status, 401);
+  assert.equal((await call('/v1/snapshot', writer)).status, 401);
+  assert.equal((await put(writer, { reply_suggestions: ['one', 'one', 'three'] })).status, 400);
+  assert.deepEqual(await (await put(writer)).json(), { ok: true, id: 'voice' });
+  assert.equal((await put(writer, { reply_suggestions: [...options.reply_suggestions].reverse() })).status, 409);
+  const deviceEvent = (event_id, type, body) => call('/device/events', config.deviceToken, { event_id, type, body, job_id: 'voice', session_id: job.session_id });
+  await deviceEvent('ack', 'muse_ack', { message_id: 'user', session_id: job.session_id, is_thread: true });
+  const row = (event, payload) => ({ type: 'event', event, payload });
+  await deviceEvent('echo', 'muse_event', row('message.user', { message_id: 'user', text: 'Plan my trip\n' + message }));
+  await deviceEvent('partial', 'muse_event', row('delta.text_append', { message_id: 'answer', reply_to_message_id: 'user', text: 'Take a train.' }));
+  const [you, partial] = (await snapshot()).messages;
+  assert.equal(you.text, 'Plan my trip');
+  assert.equal(partial.text, 'Take a train.');
+  assert.equal(partial.reply_suggestions, undefined);
+  await deviceEvent('done', 'muse_event', row('delta.message_done', { message_id: 'answer' }));
+  const final = (await snapshot()).messages.at(-1);
+  assert.equal(final.text, partial.text);
+  assert.deepEqual(final.reply_suggestions, options.reply_suggestions);
+  assert.deepEqual(await (await put(writer)).json(), { ok: true, id: 'voice' });
+});
 test('space actions survive the SDK boundary, validate exported controls and remain idempotent',()=>{
   const machine=createMachine(emptyState());
   const spaces=validateSpaces({spaces:[{id:'daily',title:'Today',layout:'list',items:[{id:'focus',title:'Focus',text:'',control:{type:'slider',min:5,max:60,step:5,value:25}}]}]});

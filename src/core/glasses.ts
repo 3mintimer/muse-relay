@@ -1,10 +1,12 @@
 import { waitForEvenAppBridge, CreateStartUpPageContainer, RebuildPageContainer, TextContainerUpgrade, ImageRawDataUpdate, ImageRawDataUpdateResult, AudioInputSource, type EvenAppBridge, type EvenHubEvent, ListContainerProperty } from '@evenrealities/even_hub_sdk';
+import { getAdvW } from '@evenrealities/pretext';
 import type { AppState, Attachment } from './types';
 import { glassImageTiles, imageBytes, MOTION_FRAME_MS, MOTION_SIZE, resizeImage, type GlassImageTile } from './media';
 import { excerpt, G2_LINE_HEIGHT, lineBudget, wrapLines } from './glass-text';
 
 export interface GlassMenuItem { itemID:number; itemName:string; }
 export interface GlassTextStyle { bodyColor?:1|4; input?:string; }
+export const replyListContainer = {containerID:14, containerName:'replies'};
 
 const WIDTH = 576;
 const HEIGHT = 288;
@@ -30,6 +32,15 @@ function bands(footer: string, top?: string) {
 
 export function glassBodyRows(footer: string, input?: string): number {
   return lineBudget(bands(footer, input).bodyHeight);
+}
+
+function glassListLabel(item: string, width: number): string {
+  return excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24);
+}
+
+// Missing glyphs appear as placeholders. Sending a row requires every glyph of its original text.
+export function fitsReplyList(item: string): boolean {
+  return glassListLabel(item, WIDTH) === item && Array.from(item).every(char => getAdvW(char.codePointAt(0)!) > 0);
 }
 
 function label(id: number, name: string, y: number, height: number, content: string, capture = false, color: 1|4 = 4) {
@@ -162,7 +173,8 @@ export class Glasses {
     await this.paint(renderId, state, menuItems, text, [], bitmaps, messageId);
   }
 
-  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment, motion?:GlassMotion): Promise<void> {
+  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment, motion?:GlassMotion,
+    container = {containerID:3, containerName:'list'}): Promise<void> {
     if (!this.ready) return;
     const renderId = ++this.serial;
     const { first, last, bodyHeight } = bands(footer, header);
@@ -170,9 +182,9 @@ export class Glasses {
     if (first.height) text.push(label(13, 'header', 0, first.height, first.content));
     if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content));
     const width = avatar || motion ? avatarBounds.x : WIDTH;
-    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
+    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, ...container, isEventCapture: 1,
       itemContainer: { itemCount: items.length, itemWidth: 0, isItemSelectBorderEn: 1,
-        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24)) } });
+        itemName: items.map(item => glassListLabel(item, width)) } });
     const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
       ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
     await this.paint(renderId, state, menuItems, text, [list], bitmaps, undefined, motion);

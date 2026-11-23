@@ -53,7 +53,7 @@ G2Museのメッセージ形式を読み取れます。機能の基準として�
 | 項目 | 用途 |
 |---|---|
 | `id` | 再送でも同じID。中継側の重複排除キー |
-| `kind` | `chat` / `space` |
+| `kind` | `chat` / `space` / `suggestion_reply`（G2で選んだ返信） |
 | `text` | 入力テキスト。音声や画像のみなら空文字 |
 | `created_at` | 作成日時 |
 | `location` | チャットの任意項目。緯度・経度（度）を `latitude`・`longitude`、取得時刻（Unix 秒）を `captured_at`、任意の水平精度（m）を `accuracy` に格納。共有オフ・未取得・取得から5分以上の場合は項目を省略。 |
@@ -100,6 +100,16 @@ Gadgetの添付形式:
 | `profile` | Museの名前・設定済みアバター（任意）。`{name?,avatar?,avatar_file?,mime_type?,updated_at?}` |
 | `device` | Gadget参照実装の接続状態（任意） |
 | `capabilities` | `images` はアプリからMuseへの画像送信可否。任意の `soniox` はサーバー側でキーが設定済みかを示す。任意の `live_transcription:true` は対応アプリの「中継先で文字起こし」でリアルタイム字幕を有効にする |
+
+### G2の返信候補
+
+対応中継は `capabilities.reply_suggestions:true` を返します。アプリの初期設定はオフです。依頼に `suggestion_mode:"auto"` があれば、Museは会話に必要なときに候補を作ります。`"always"` は毎回候補を依頼します。未指定の依頼は通常どおり処理します。
+
+GistとカスタムHTTPSでは、`reply_to` で依頼IDを示したMuseの回答に `"reply_suggestions":["この案で進めて","費用の内訳を教えて","今回は見送る"]` を添えます。候補は「進める・詳しく聞く・見送る」の順に、各1行、最大48文字の異なる文を3つ。G2で全文が収まるよう、日本語では16文字程度を目安にします。Gistの参考watcherは `g2muse-relay.json` の能力フラグが有効なら、ハンドラーに `suggestion_mode` を渡し、返された候補を本文と一緒に保存します。
+
+GadgetではATOMが通常どおり本文を返し、MuseのVMが同じターンの候補を `PUT /v1/requests/:id/reply-suggestions` に `{"reply_suggestions":[…]}` で投稿します。`:id` は元のアプリ依頼IDです。専用のBearer鍵を使い、中継にはそのSHA-256を `REPLY_SUGGESTIONS_WRITER_SHA256` として設定します。この設定を外して中継へ反映すれば、同じURLと履歴のまま候補を停止できます。本文は候補の到着を待たずに読めます。
+
+候補を選ぶと、アプリは `kind:"suggestion_reply"`、`suggestion_for` に回答のメッセージID、`text` に表示した全文を入れて送ります。中継は最新ターンの親と本文を照合して通常のチャットとして処理します。同じ選択の再送は依頼IDと内容を維持します。次の発言を受け付けると以前の候補は失効します。
 
 ### 文字起こしと返信の対応
 

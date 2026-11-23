@@ -890,6 +890,77 @@ svg {
   margin: 12px 0;
 }
 
+.g2-shots {
+  margin: 28px 0;
+}
+
+.g2-shots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 375px), 1fr));
+  gap: 20px;
+}
+
+.g2-shots-grid figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.g2-shot,
+.g2-shot-original {
+  display: block;
+  background: #070a08;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.g2-shot {
+  padding: 8px;
+}
+
+.g2-shot img {
+  display: block;
+  width: min(100%, 576px);
+  height: auto;
+  margin-inline: auto;
+}
+
+.g2-shots-grid figcaption {
+  margin-top: 6px;
+}
+
+.g2-shot-dialog {
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  border: 0;
+  border-radius: var(--radius);
+  padding: 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.g2-shot-dialog::backdrop {
+  background: rgb(0 0 0 / 75%);
+}
+
+.g2-shot-dialog form {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.g2-shot-original {
+  overflow: auto;
+  max-width: 100%;
+  border-radius: 0;
+}
+
+.g2-shot-original img {
+  display: block;
+  width: 576px;
+  height: 288px;
+}
+
 .troubleshooting {
   display: grid;
   grid-template-columns: 180px 1fr;

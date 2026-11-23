@@ -26,6 +26,32 @@
 
 カスタム中継はHTTPSのベースURLだけで利用できます。サーバーが要求する場合にスマートフォン用トークンやホスティング用接続キーを入力します。設定画面のOriginをCORSに登録し、Museへの接続処理を用意します。[最小の依頼・受付・返信例](protocol.ja.md#custom-relay)
 
+<a id="reply-suggestions-upgrade"></a>
+
+## 既存のBetaでG2の返信候補を使う（0.4.1）
+
+Evenアプリの **プロフィール → My plugins → Beta → Muse Relay → Update** で今のアプリを更新します。参加済みのアカウントは同じ接続先と履歴を使えます。通常のチャットを続ける方はこれで完了です。0.3系からの更新では返信候補はオフです。
+
+返信候補を使う方は、[公開ガイド](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup)で自分の接続方式を選び、更新依頼文をコピーしてMuseに渡してください。運用担当者が更新する場合は、[0.4.1 Betaの参考実装](https://github.com/3mintimer/muse-relay/tree/v0.4.1-beta.1)を使います。
+
+| 接続方式 | 既存の中継で行うこと |
+| --- | --- |
+| Gadget（ATOM・Linux） | 同じ版の `server/` と `protocol/` を今の中継に適用する。Node・Dockerでは設定と状態ファイル・ボリュームを、Worker・Sitesでは既存のD1・R2・シークレットを引き継ぐ。下記のPythonをMuseのVMに配置する。デバイスは現在のファームウェアまたはSDKアダプターで本文を返せる |
+| GitHub Gist | 今のGistと処理済みIDの記録を維持し、稼働中のwatcherとハンドラーを更新する。Museが依頼の `suggestion_mode` に従って作った3文を、ハンドラーが本文と一緒に `reply_suggestions` で返す。選択を検証できる状態になったら `g2muse-relay.json` の既存の `capabilities` に `reply_suggestions:true` を加える |
+| カスタムHTTPS | 回答に元の依頼を示す `reply_to` と任意の `reply_suggestions` を返す。受付で `kind:"suggestion_reply"` の `suggestion_for` と本文を最新の回答・候補文に照合し、同じ依頼IDの再送を1回として処理する。対応できたら `capabilities.reply_suggestions:true` を返す。[通信仕様](protocol.ja.md#g2の返信候補) |
+
+**Gadget用のVM設定**　0.4.1のソースから[投稿スクリプト](../server/tools/vm-publish-reply-suggestions.py)を次のように、回答を作るMuseのVM内に配置します。最後のURLには自分のHTTPS中継のベースURL（必要ならサブパスも）を指定してください。
+
+```sh
+install -d -m 700 ~/.config/muse-relay
+install -m 600 server/tools/vm-publish-reply-suggestions.py ~/.config/muse-relay/
+python3 ~/.config/muse-relay/vm-publish-reply-suggestions.py --setup https://relay.example.com
+```
+
+専用鍵と送信先がVM内の所有者専用ファイル `~/.config/muse-relay/reply-suggestions.json` に保存されます。出力されたSHA-256を中継の `REPLY_SUGGESTIONS_WRITER_SHA256` に設定して再起動または再配備します。同じURLで初期化を繰り返すと同じ照合値を返します。所有者限定のSitesゲートウェイを使う場合だけ、VMの `~/.config/muse-relay/reply-suggestions-site.token` にホスティング用接続キーを所有者専用権限（0600）で保存します。
+
+**G2で試す**　チャットのコンテクスチュアルメニューから「候補を毎回依頼」を選び、短い質問を1件送ります。本文を最後まで読んでタップし、3つの文から1件を選ぶと、その文がスマホ履歴に1件残ります。「候補はMuse任せ」では必要な場面で候補を依頼します。「候補をオフ」で通常の会話に戻れます。
+
 <a id="relay-upgrade"></a>
 
 ## 既存の中継を 0.3.30 に合わせる

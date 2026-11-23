@@ -26,6 +26,32 @@ Voice uses the mode and microphone saved in **Settings → Voice & images**. Rel
 
 A custom relay needs only its HTTPS base URL. Enter the phone token and hosting key if your server requires them. Allow the origin shown in the app and supply your own connection to Muse. [Minimal requests, acknowledgements and replies](protocol.md#custom-relay)
 
+<a id="reply-suggestions-upgrade"></a>
+
+## Add G2 reply suggestions to an existing Beta installation (0.4.1)
+
+Open **Profile → My plugins → Beta → Muse Relay → Update** in the Even app. An existing Beta account can continue using its relay and history. For ordinary chat, the app update is the only step. Suggestions start off when upgrading from 0.3.x.
+
+To use suggestions, open the [setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup), select your connection method and copy the upgrade instructions to your Muse. Relay operators can also follow the steps below using the [0.4.1 Beta reference source](https://github.com/3mintimer/muse-relay/tree/v0.4.1-beta.1).
+
+| Connection | Changes to the existing relay |
+| --- | --- |
+| Gadget (ATOM or Linux) | Deploy the matching `server/` and `protocol/` to the existing relay URL. Preserve the Node or Docker configuration, state file and volume, or the Worker's existing D1, R2 and secret bindings. Install the Python publisher in the Muse VM as described below. The device can deliver the answer with its current firmware or SDK adapter. |
+| GitHub Gist | Keep the same Gist, its history and processing ledger. Update the running watcher and handler. The handler passes the requested `suggestion_mode` to Muse and returns its three replies in `reply_suggestions` alongside the answer text. When the watcher can validate a selection, add `reply_suggestions:true` to the existing `capabilities` in `g2muse-relay.json`. |
+| Custom HTTPS | Include the original request ID in `reply_to` and the optional `reply_suggestions` on Muse's answer. Accept `kind:"suggestion_reply"` by matching `suggestion_for` and the exact text to the latest answer and its options. Deduplicate retries by request ID. Advertise `capabilities.reply_suggestions:true` when ready. [Protocol](protocol.md#g2-reply-suggestions) |
+
+**Gadget VM setup.** From the 0.4.1 source, install the [publisher](../server/tools/vm-publish-reply-suggestions.py) inside the Muse VM that produces the answer. Substitute your own HTTPS relay base URL, including its base path if needed.
+
+```sh
+install -d -m 700 ~/.config/muse-relay
+install -m 600 server/tools/vm-publish-reply-suggestions.py ~/.config/muse-relay/
+python3 ~/.config/muse-relay/vm-publish-reply-suggestions.py --setup https://relay.example.com
+```
+
+The VM stores the destination and a dedicated writer key in its owner-only `~/.config/muse-relay/reply-suggestions.json`. Set the printed SHA-256 digest as `REPLY_SUGGESTIONS_WRITER_SHA256` on the relay, then restart or redeploy it. Repeating setup for the same URL returns the same digest. For a Sites owner-only gateway, store its hosting access key in the owner-only file `~/.config/muse-relay/reply-suggestions-site.token` (mode 0600).
+
+**Try it on G2.** Set reply suggestions to be requested every time from the chat's contextual menu, then send one short question. At the end of the answer, tap to open the three options. Tap one reply and confirm that it appears once in phone history. You can also let Muse decide when to suggest a reply or turn suggestions off to continue ordinary chat.
+
 <a id="relay-upgrade"></a>
 
 ## Update an existing relay for 0.3.30

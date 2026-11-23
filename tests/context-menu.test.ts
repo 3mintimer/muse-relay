@@ -10,6 +10,11 @@ import type { Locale } from '../src/core/types.ts';
 // An exact comparison catches valid-length translations accidentally assigned to a different action.
 const order: Locale[] = ['en', 'ja', 'zh-Hans', 'zh-Hant', 'ko', 'es', 'fr', 'de', 'it'];
 const reviewed: Record<ContextAction, string[]> = {
+  singleMessages: ["Single messages", "1件ずつ表示", "逐条显示", "逐則顯示", "한 건씩 보기", "De uno en uno", "Un par un", "Einzeln zeigen", "Uno alla volta"],
+  inputAndReply: ["Input + reply", "入力と回答を表示", "输入和回复", "輸入與回覆", "입력과 답변", "Entrada y resp.", "Saisie + réponse", "Eingabe + Antwort", "Input e risposta"],
+  suggestionsOff: ["Suggestions off", "候補をオフ", "关闭建议", "關閉建議", "추천 끄기", "Sin sugerencias", "Sans suggestions", "Vorschläge aus", "Niente proposte"],
+  museDecides: ["Muse decides", "候補はMuse任せ", "由 Muse 决定", "由 Muse 決定", "Muse가 결정", "Muse decide", "Muse décide", "Muse entscheidet", "Decide Muse"],
+  alwaysAsk: ["Always ask", "候補を毎回依頼", "每次请求建议", "每次要求建議", "매번 추천 요청", "Pedir siempre", "À chaque réponse", "Immer anfragen", "Chiedi sempre"],
   markAllRead: ['Mark all read', '全件既読', '全部标为已读', '全部標為已讀', '모두 읽음 처리', 'Dar todo por leído', 'Tout marquer lu', 'Alle als gelesen', 'Tutti come letti'],
   home: ['Home', 'ホーム', '主页', '首頁', '홈', 'Inicio', 'Accueil', 'Startseite', 'Home'],
   sendRecording: ['Send audio', '録音を送信', '发送录音', '傳送錄音', '녹음 전송', 'Enviar audio', 'Envoyer l’audio', 'Audio senden', 'Invia audio'],

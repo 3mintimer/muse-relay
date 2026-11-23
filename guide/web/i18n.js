@@ -25,7 +25,7 @@ export function t(key, values = []) {
   return message.replace(/\{(\d+)\}/g, (_, index) => String(values[Number(index)] ?? `{${index}}`));
 }
 
-const repository = 'https://github.com/3mintimer/muse-relay/blob/main/';
+const repository = 'https://github.com/3mintimer/muse-relay/blob/';
 // Add a path only when a Japanese source file is available in the public export.
 const japaneseDocs = new Set([
   'README.md', 'CONTRIBUTING.md',
@@ -35,11 +35,11 @@ const japaneseDocs = new Set([
 
 export function docHref(href, language = locale) {
   if (!href.startsWith(repository)) return href;
-  const tail = href.slice(repository.length);
-  const hash = tail.indexOf('#');
-  const path = (hash < 0 ? tail : tail.slice(0, hash)).replace(/\.ja\.md$/, '.md');
-  const fragment = hash < 0 ? '' : tail.slice(hash);
-  return repository + (language === 'ja' && japaneseDocs.has(path) ? path.replace(/\.md$/, '.ja.md') : path) + fragment;
+  const match = href.slice(repository.length).match(/^(main|v\d+\.\d+\.\d+(?:-beta\.\d+)?)\/([^#]+)(#.*)?$/);
+  if (!match) return href;
+  const [, ref, filename, fragment = ''] = match;
+  const path = filename.replace(/\.ja\.md$/, '.md');
+  return repository + ref + '/' + (language === 'ja' && japaneseDocs.has(path) ? path.replace(/\.md$/, '.ja.md') : path) + fragment;
 }
 
 export function localizeDocText(value) {
@@ -48,7 +48,7 @@ export function localizeDocText(value) {
 
 export function translatePage(root = document) {
   root.querySelectorAll('[data-i18n]').forEach(node => { node.textContent = t(node.getAttribute('data-i18n')); });
-  for (const attribute of ['aria-label', 'placeholder', 'content', 'title']) {
+  for (const attribute of ['aria-label', 'alt', 'placeholder', 'content', 'title']) {
     root.querySelectorAll(`[data-i18n-${attribute}]`).forEach(node => {
       node.setAttribute(attribute, t(node.getAttribute(`data-i18n-${attribute}`)));
     });

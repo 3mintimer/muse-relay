@@ -84,6 +84,9 @@ test('all nine pages contain translated titles, actions, navigation, and languag
       ['strong', 'Custom relay server'],
       ['summary', 'Share phone location (optional)'],
       ['a', 'Update an existing relay for 0.3.30'],
+      ['summary', 'Update from 0.3.36 to 0.4.1'],
+      ['button', 'Copy upgrade request for Muse'],
+      ['h3', 'Reply suggestions on G2'],
       ['h2', 'Ask Muse to set it up'],
       ['button', 'Copy instructions'],
       ['summary', 'Reply arrived, but no transcript'],
@@ -103,10 +106,20 @@ test('all nine pages contain translated titles, actions, navigation, and languag
       for (const [name, value] of [['href', languageHref(target)], ['lang', target], ['hreflang', target]]) assert.ok(tag.includes(`${name}="${value}"`), `${code}: language link ${name}`);
       if (target === code) assert.ok(tag.includes('aria-current="page"'));
     }
-    for (const anchor of ['setup', 'connection', 'voice', 'relay', 'feedback', 'g2muse']) assert.ok(html.includes(`id="${anchor}"`));
+    for (const anchor of ['setup', 'connection', 'voice', 'relay', 'feedback', 'g2muse', 'reply-suggestions-upgrade']) assert.ok(html.includes(`id="${anchor}"`));
     assert.ok(html.includes('src="/app.js"') && html.includes('href="/style.css"'));
     assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md`));
     assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#relay-upgrade`));
+    assert.ok(html.includes(`/blob/v0.4.1-beta.1/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#reply-suggestions-upgrade`));
+    for (const [file, key] of [
+      ['chat-reply.png', 'Last page of a Muse answer on G2, with a tap hint for suggested replies.'],
+      ['reply-choices.png', 'Three suggested replies listed on G2, with one row highlighted.'],
+      ['chat-menu.png', 'G2 system menu showing reply-suggestion settings for the chat.'],
+    ]) {
+      assert.ok(html.includes(`href="/screenshots/${file}"`));
+      const image = html.match(new RegExp(`<img\\b[^>]*src="/screenshots/${escapeRegExp(file)}"[^>]*>`))?.[0];
+      assert.ok(image?.includes(` alt="${escapeHtml(messageFor(key, code))}"`), `${code}: ${file} alt`);
+    }
     assert.ok(html.includes('action="/api/feedback"'));
     assert.match(html, /<input type="checkbox" name="share">/);
   }

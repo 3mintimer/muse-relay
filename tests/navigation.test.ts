@@ -1735,14 +1735,14 @@ test('Home settings save chat preferences, preserve the connection and support b
   };
   const back = async () => { app.emit({sysEvent:{eventType:3}}); await settle(); };
   await tap('設定');
-  assert.deepEqual(app.items(), ['チャットに現在地を付ける','画像を使用','チャット表示','送信後にチャットへ戻る','自動で非表示','通常の受信間隔']);
+  assert.deepEqual(app.items(), ['チャットに現在地を付ける','画像を使用','チャット表示','返信候補','送信後にチャットへ戻る','自動で非表示','通常の受信間隔']);
   await tap('チャットに現在地を付ける');
   assert.deepEqual(app.items(), ['✓ オフ','オン']);
   await back();
   assert.equal(app.controller.state.settings.shareLocation, false);
   for (const [label, choice] of [
     ['チャットに現在地を付ける', 'オン'], ['位置の取得間隔', '3 分'], ['画像を使用', 'オフ'],
-    ['チャット表示', 'メッセージごと'], ['送信後にチャットへ戻る','オフ'], ['自動で非表示','15 秒'], ['通常の受信間隔', '30 秒'],
+    ['チャット表示', 'メッセージごと'], ['返信候補','Museに任せる'], ['送信後にチャットへ戻る','オフ'], ['自動で非表示','15 秒'], ['通常の受信間隔', '30 秒'],
   ]) {
     await tap(label); await tap(choice);
     assert.ok(app.items().includes('✓ ' + choice));
@@ -1752,7 +1752,95 @@ test('Home settings save chat preferences, preserve the connection and support b
   assert.deepEqual(app.items(), ['チャット','スペース','使用状況確認','設定']);
   await app.controller.reloadSettings();
   assert.deepEqual(app.controller.state.settings, {...before,shareLocation:true,locationIntervalMinutes:3,images:false,
-    chatLayout:'single',returnToChatAfterSend:false,autoHideSeconds:15,pollSeconds:30});
+    chatLayout:'single',suggestionMode:'auto',returnToChatAfterSend:false,autoHideSeconds:15,pollSeconds:30});
+});
+
+test('an older relay, disabled suggestions and an answer without usable choices leave ordinary chat available', async t => {
+  const live = fixture(), app = await appFixture(t, live, true, {suggestionMode:'always'});
+  await app.controller.sendText('元の質問');
+  assert.equal(app.sent[0].kind, 'chat');
+  assert.equal(app.sent[0].suggestion_mode, undefined);
+  const answer = {id:'answer-old', reply_to:app.sent[0].id, from:'Muse', type:'text' as const, text:'元の回答', ts:12,
+    reply_suggestions:['進める','詳しく聞く','見送る']};
+  live.messages.push(answer); await app.controller.refresh();
+  const ordinary = app.text();
+  assert.match(ordinary, /元の回答/); assert.doesNotMatch(ordinary, /返信候補/);
+  app.emit({sysEvent:{}}); await settle(); assert.equal(app.text(), ordinary);
+  await app.controller.saveSettings({...app.controller.state.settings, suggestionMode:'off'});
+  live.capabilities={audio:true, images:false, spaces:true, reply_suggestions:true};
+  await app.controller.refresh();
+  assert.doesNotMatch(app.text(), /返信候補/);
+  await app.controller.sendText('通常の続き'); assert.equal(app.sent[1].suggestion_mode, undefined);
+  await app.controller.saveSettings({...app.controller.state.settings, suggestionMode:'auto'});
+  await app.controller.sendText('別の質問');
+  assert.equal(app.sent[2].suggestion_mode, 'auto');
+  const current = {...answer, id:'latest-answer', reply_to:app.sent[2].id, text:'候補がない回答', reply_suggestions:[]};
+  live.messages.push(current); await app.controller.refresh();
+  assert.match(app.text(), /候補がない回答/); assert.doesNotMatch(app.text(), /返信候補/);
+  current.reply_suggestions=['あ'.repeat(40),'詳しく聞く','見送る']; await app.controller.refresh();
+  assert.doesNotMatch(app.text(), /返信候補/, 'a choice whose full text would be clipped is never sent');
+  current.reply_suggestions=['🦭に任せる','詳しく聞く','見送る']; await app.controller.refresh();
+  assert.doesNotMatch(app.text(), /返信候補/, 'a missing G2 glyph cannot silently change a choice');
+  await app.controller.showMessage(answer.id); assert.doesNotMatch(app.text(), /返信候補/, 'an earlier exchange stays closed');
+});
+
+test('two silent G2 follow-ups send their exact displayed rows once and follow each resulting chat turn', async t => {
+  const live: Snapshot = {messages:[], spaces:[], capabilities:{audio:true,images:false,spaces:true,reply_suggestions:true}};
+  const app = await appFixture(t, live, true, {suggestionMode:'always', returnToChatAfterSend:false});
+  const tap = async () => { app.emit({sysEvent:{eventSource:2}}); await settle(); };
+  const choose = (index:number) => app.emit({listEvent:{containerID:14, currentSelectItemIndex:index}});
+  app.emit({listEvent:{}}); await settle(); // Enter Chat before sending from the phone.
+  await app.controller.sendText('週末の予定を提案して');
+  const initial = app.sent[0];
+  assert.equal(initial.suggestion_mode, 'always');
+  const choices = ['この予定で進める','予算を詳しく聞く','今回は見送る'];
+  const firstAnswer = {id:'first-plan', from:'Muse', type:'text' as const, text:Array.from({length:17}, (_,i)=>'日程 '+(i+1)).join('\n'),
+    reply_to:initial.id, ts:11, reply_suggestions:choices};
+  live.messages.push(firstAnswer); await app.controller.refresh();
+  assert.doesNotMatch(app.text(), /返信候補/);
+  for (let i=0; i<5 && !app.text().includes('返信候補'); i++) await tap();
+  const finalPage = app.text();
+  assert.match(finalPage, /日程 17/); assert.match(finalPage, /タップで返信候補/);
+  await tap(); assert.deepEqual(app.items(), choices);
+  app.emit({sysEvent:{eventType:3}}); await settle();
+  assert.equal(app.text(), finalPage); assert.equal(app.sent.length, 1);
+  await tap();
+  firstAnswer.reply_suggestions = ['別の案で進める', choices[1], choices[2]];
+  await app.controller.refresh();
+  choose(0); await settle();
+  assert.equal(app.sent.length, 1, 'a late selection cannot send a replacement row');
+  assert.deepEqual(app.items(), []);
+  await tap(); assert.deepEqual(app.items(), firstAnswer.reply_suggestions);
+  app.document.hidden = true; app.document.dispatchEvent(new Event('visibilitychange'));
+  const receipt = deferred<Response>(); app.setSend(()=>receipt.promise);
+  choose(1); choose(1); await settle();
+  assert.equal(app.sent.length, 2);
+  const first = app.sent[1];
+  assert.deepEqual([first.kind, first.text, first.suggestion_for, first.suggestion_mode, first.location],
+    ['suggestion_reply', choices[1], firstAnswer.id, 'always', undefined]);
+  receipt.resolve(new Response('{}',{status:503})); await settle();
+  assert.match(app.text(), /再試行/);
+  await app.controller.saveSettings({...app.controller.state.settings, suggestionMode:'auto'});
+  t.mock.timers.tick(1000); await settle();
+  app.setSend(async()=>new Response('{}')); await tap();
+  assert.deepEqual(app.sent[2], first, 'an explicit retry keeps the entire original request');
+  assert.equal(app.controller.state.selectedMessageId, first.id); assert.match(app.text(), /返信待ち/);
+  const secondChoices = ['この予算で決める','交通費も確認する','決定を保留する'];
+  const secondAnswer = {id:'second-plan', from:'Muse', type:'text' as const, text:'合計は5千円です。', ts:13,
+    reply_to:first.id, reply_suggestions:secondChoices};
+  live.messages.push({id:first.id, from:'You', type:'text', text:first.text, ts:first.created_at}, secondAnswer);
+  await app.controller.refresh();
+  assert.match(app.text(), /5千円/); await tap(); assert.deepEqual(app.items(), secondChoices);
+  choose(0); await settle();
+  const second = app.sent[3];
+  assert.deepEqual([second.text, second.suggestion_for, second.suggestion_mode], [secondChoices[0], secondAnswer.id, 'auto']);
+  assert.notEqual(first.id, second.id);
+  live.messages.push({id:second.id, from:'You', type:'text', text:second.text, ts:second.created_at},
+    {id:'last', from:'Muse', type:'text', text:'予定をまとめました。', reply_to:second.id, ts:15});
+  await app.controller.refresh();
+  assert.match(app.text(), /予定をまとめました/);
+  assert.deepEqual(app.controller.state.snapshot.messages.filter(row=>row.from==='You').map(row=>row.text).sort(),
+    [initial.text, choices[1], secondChoices[0]].sort(), 'phone history contains the initial prompt and one row per actual selection');
 });
 
 test('the contextual all-read action preserves chat, hidden messages and future unread arrivals', async t => {
@@ -1765,7 +1853,7 @@ test('the contextual all-read action preserves chat, hidden messages and future 
   assert.deepEqual(menu(), ['全件既読']);
   await app.controller.hideMessages(['hidden']);
   await app.controller.showMessage('latest');
-  assert.deepEqual(menu(), ['全件既読','スペース']);
+  assert.deepEqual(menu(), ['全件既読','スペース','1件ずつ表示','候補はMuse任せ','候補を毎回依頼']);
   for (const retired of [1,2,4,11]) { app.overlay(retired); await settle(); }
   assert.equal(app.controller.state.recording,false);
   assert.deepEqual(app.controller.state.readIds,['latest']);
@@ -1784,13 +1872,105 @@ test('the contextual all-read action preserves chat, hidden messages and future 
   assert.deepEqual(app.items(), ['チャット','スペース','使用状況確認','設定']);
 });
 
+test('chat menu switches the displayed historical answer, persists its settings and keeps all three shortcuts', async t => {
+  const live = fixture();
+  live.messages = [
+    {id:'input', from:'You', type:'text', text:'古い質問', ts:1},
+    {id:'answer', from:'Muse', type:'text', text:'古い回答', reply_to:'input', ts:2},
+    {id:'new-input', from:'You', type:'text', text:'別の質問', ts:3},
+    {id:'new-answer', from:'Muse', type:'text', text:'別の回答', reply_to:'new-input', ts:4},
+  ];
+  const app = await appFixture(t, live, true, {savedPrompts:['春','夏','秋']});
+  const menu = () => app.menu().map(item => item.itemName);
+  assert.deepEqual(menu(), ['全件既読']);
+  await app.controller.showSpace('test-space');
+  assert.ok(app.menu().every(item => item.itemID < 16));
+  await app.controller.showMessage('input');
+  assert.equal(app.controller.state.selectedMessageId, 'input');
+  assert.match(bodyGeometry(app).body.content, /古い回答/);
+  const existing = ['全件既読','スペース','1. 春','2. 夏','3. 秋'];
+  assert.deepEqual(menu(), [...existing, '1件ずつ表示','候補はMuse任せ','候補を毎回依頼']);
+  assert.equal(new Set(app.menu().map(item => item.itemID)).size, 8);
+
+  const localSet = localStorage.setItem;
+  const nativeSet = app.bridge.setLocalStorage;
+  localStorage.setItem = () => { throw new Error('storage offline'); };
+  app.bridge.setLocalStorage = async () => false;
+  app.overlay(16); await settle();
+  assert.equal(app.controller.state.settings.chatLayout, 'exchange');
+  assert.match(app.text(), /再試行/);
+  localStorage.setItem = localSet;
+  app.bridge.setLocalStorage = nativeSet;
+  app.emit({sysEvent:{}}); await settle();
+  assert.equal(app.controller.state.settings.chatLayout, 'single');
+  assert.equal(app.controller.state.selectedMessageId, 'answer');
+  assert.equal(bodyGeometry(app).input, undefined);
+  assert.match(bodyGeometry(app).body.content, /古い回答/);
+  assert.deepEqual(menu(), [...existing, '入力と回答を表示','候補はMuse任せ','候補を毎回依頼']);
+
+  app.emit({sysEvent:{eventType:4}});
+  app.emit({menuItemClickEvent:{itemID:19}});
+  await app.controller.saveSettings({...app.controller.state.settings, theme:'dark'});
+  assert.equal(app.controller.state.settings.suggestionMode, 'off', 'the native overlay still owns the screen');
+  app.emit({sysEvent:{eventType:5}}); await settle();
+  assert.equal(app.controller.state.settings.suggestionMode, 'auto');
+  assert.equal(app.controller.state.settings.theme, 'dark');
+  app.overlay(17); await settle();
+  assert.match(bodyGeometry(app).input.content, /古い質問/);
+  assert.match(bodyGeometry(app).body.content, /古い回答/);
+  assert.deepEqual(menu(), [...existing,'1件ずつ表示','候補をオフ','候補を毎回依頼']);
+  app.emit({sysEvent:{eventType:4}});
+  app.emit({menuItemClickEvent:{itemID:20}});
+  await app.controller.showMessage('new-answer'); // The phone explicitly opened another message.
+  app.emit({sysEvent:{eventType:5}}); await settle();
+  assert.equal(app.controller.state.selectedMessageId, 'new-answer');
+  await app.controller.reloadSettings();
+  assert.equal(app.controller.state.settings.suggestionMode, 'always');
+  assert.deepEqual(app.sent, []);
+});
+
+test('reply-list menu changes the preference on the same answer without choosing a suggested reply', async t => {
+  const live: Snapshot = {messages:[
+    {id:'input', from:'You', type:'text', text:'どこに行く？', ts:1},
+    {id:'answer', from:'Muse', type:'text', text:'公園に行きましょう。', reply_to:'input', ts:2,
+      reply_suggestions:['公園に行く','行き方を聞く','今回は見送る']},
+  ], spaces:[], capabilities:{audio:true, images:false, spaces:true, reply_suggestions:true}};
+  const app = await appFixture(t, live, true, {suggestionMode:'auto', savedPrompts:['固定','','']});
+  const menu = () => app.menu().map(item => item.itemName);
+  const openReplies = async () => {
+    app.emit({sysEvent:{}}); await settle();
+    assert.deepEqual(app.items(), live.messages[1].reply_suggestions);
+  };
+  await app.controller.showMessage('input'); await openReplies();
+  assert.deepEqual(menu(), ['ホーム','1件ずつ表示','候補をオフ','候補を毎回依頼']);
+  app.overlay(20); await settle();
+  assert.equal(app.controller.state.settings.suggestionMode, 'always');
+  assert.equal(app.controller.state.selectedMessageId, 'answer');
+  assert.deepEqual(app.items(), []);
+  assert.match(bodyGeometry(app).body.content, /公園に行きましょう/);
+  await openReplies();
+  assert.deepEqual(menu(), ['ホーム','1件ずつ表示','候補をオフ','候補はMuse任せ']);
+  app.overlay(16); await settle();
+  assert.equal(app.controller.state.settings.chatLayout, 'single');
+  assert.match(bodyGeometry(app).body.content, /公園に行きましょう/);
+  await openReplies(); app.overlay(18); await settle();
+  assert.equal(app.controller.state.settings.suggestionMode, 'off');
+  assert.doesNotMatch(app.text(), /タップで返信候補/);
+  app.emit({listEvent:{containerID:14, currentSelectItemIndex:0}}); await settle();
+  assert.deepEqual(app.sent, []);
+  assert.match(bodyGeometry(app).body.content, /公園に行きましょう/);
+  await app.controller.sendText('次の質問');
+  assert.equal(app.sent.length, 1);
+  assert.equal(app.sent[0].suggestion_mode, undefined);
+});
+
 test('saved prompts show only their first line and send the full text from Chat and Home', async t => {
   const savedPrompts = ['  日程は？\n箇条書きで。', '', 'Tomorrow?\r\nUse a checklist'];
   const app = await appFixture(t, fixture(), true, {savedPrompts, returnToChatAfterSend:false});
   assert.deepEqual(app.items(),['チャット','スペース','1. 日程は？','3. Tomorrow?','使用状況確認','設定']);
   app.emit({listEvent:{currentSelectItemIndex:0}});
   await settle();
-  const prompts = app.menu().filter(item => item.itemID >= 13);
+  const prompts = app.menu().filter(item => item.itemID >= 13 && item.itemID <= 15);
   assert.deepEqual(prompts.map(item => item.itemID), [13,15]);
   assert.deepEqual(prompts.map(item => item.itemName), ['1. 日程は？','3. Tomorrow?']);
   for (const {itemName} of prompts) {

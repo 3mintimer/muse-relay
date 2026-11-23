@@ -21,6 +21,13 @@ flowchart LR
   G --> H[Fast-forward main and publish the stable tag]
 ```
 
+### Owner-only Private pilot for 0.4.0 reply suggestions
+
+1. Deploy the owner's relay at its existing URL with suggestions disabled. Exchange one ordinary chat from 0.3.36, then enable the VM suggestion writer.
+2. Register the checked EHPK as Private with the changelog `preview build`. On the owner's G2, select **Ask every time** and reply twice from consecutive suggestion lists. Verify each chosen reply appears once in phone history. Review the on-glasses interaction before proceeding to Beta and publishing upgrade notes for Gist, Gadget and custom HTTPS.
+
+If the pilot needs to be rolled back, remove `REPLY_SUGGESTIONS_WRITER_SHA256` and redeploy the same relay version. Ordinary chat continues on the existing URL and history.
+
 ### Prepare a candidate
 
 `npm run pack` checks every contextual action against its reviewed wording in each supported language, including the 32-byte SDK limit and the compact menu width. Review each changed label in its screen context before updating `tests/context-menu.test.ts`. Packing rebuilds the app from the checked source.

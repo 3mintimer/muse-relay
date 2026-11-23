@@ -45,6 +45,7 @@ createServer(async (req, res) => {
       const config = validateConfig({
         publicUrl,
         gatewayToken,
+        replySuggestionsWriterSha256: saved.replySuggestionsWriterSha256,
         allowedOrigins: [...new Set(allowedOrigins)],
         relayToken: saved.relayToken || token(), deviceToken: saved.deviceToken || token(), museToken: saved.museToken || token(),
         sonioxApiKey: value.clearSoniox ? '' : String(value.sonioxApiKey || saved.sonioxApiKey || ''),

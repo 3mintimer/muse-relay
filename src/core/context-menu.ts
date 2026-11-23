@@ -14,9 +14,24 @@ export const contextItems = {
   items: [9, '項目一覧', 'Space items'],
   wake: [10, '表示を戻す', 'Wake display'],
   markAllRead: [12, '全件既読', 'Mark all read'],
+  singleMessages: [16, '1件ずつ表示', 'Single messages'],
+  inputAndReply: [17, '入力と回答を表示', 'Input + reply'],
+  suggestionsOff: [18, '候補をオフ', 'Suggestions off'],
+  museDecides: [19, '候補はMuse任せ', 'Muse decides'],
+  alwaysAsk: [20, '候補を毎回依頼', 'Always ask'],
 } as const;
 
 export type ContextAction = keyof typeof contextItems;
+
+// Stable IDs select explicit values even if the phone changes settings while the OS menu is open.
+export const chatMenuPreferences = [
+  {action:'singleMessages', key:'chatLayout', value:'single'},
+  {action:'inputAndReply', key:'chatLayout', value:'exchange'},
+  {action:'suggestionsOff', key:'suggestionMode', value:'off'},
+  {action:'museDecides', key:'suggestionMode', value:'auto'},
+  {action:'alwaysAsk', key:'suggestionMode', value:'always'},
+] as const;
+export type ContextNavigation = Exclude<ContextAction, typeof chatMenuPreferences[number]['action']>;
 
 export function contextItem(action: ContextAction, language: Language) {
   const [itemID, ja, en] = contextItems[action];

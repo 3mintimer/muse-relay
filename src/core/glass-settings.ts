@@ -1,7 +1,7 @@
 import { translate } from './i18n';
 import type { Settings } from './types';
 
-export type GlassSettingKey = 'shareLocation' | 'locationIntervalMinutes' | 'images' | 'chatLayout'
+export type GlassSettingKey = 'shareLocation' | 'locationIntervalMinutes' | 'images' | 'chatLayout' | 'suggestionMode'
   | 'returnToChatAfterSend' | 'autoHideSeconds' | 'pollSeconds';
 
 export function glassSettings(settings: Settings) {
@@ -20,6 +20,9 @@ export function glassSettings(settings: Settings) {
     field('images', t('画像を使用', 'Enable images'), onOff),
     field('chatLayout', t('チャット表示', 'Chat display'), [
       ['exchange', t('入力と回答', 'Input & reply')], ['single', t('メッセージごと', 'One message at a time')],
+    ]),
+    field('suggestionMode', t('返信候補', 'Reply suggestions'), [
+      ['off', t('オフ', 'Off')], ['auto', t('Museに任せる', 'Let Muse decide')], ['always', t('毎回候補を依頼', 'Ask every time')],
     ]),
     field('returnToChatAfterSend', t('送信後にチャットへ戻る', 'Return to chat after sending'), onOff),
     field('autoHideSeconds', t('自動で非表示', 'Auto-hide display'),

@@ -10,6 +10,7 @@ export async function loadConfig() {
   return {
     ...saved,
     recoveryAdminSha256: process.env.RECOVERY_ADMIN_SHA256 || saved.recoveryAdminSha256,
+    replySuggestionsWriterSha256: process.env.REPLY_SUGGESTIONS_WRITER_SHA256 || saved.replySuggestionsWriterSha256,
     relayToken: process.env.RELAY_TOKEN || saved.relayToken,
     deviceToken: process.env.DEVICE_TOKEN || saved.deviceToken,
     museToken: process.env.MUSE_TOKEN || saved.museToken,

@@ -85,10 +85,19 @@ test('chat history scrolls to the oldest message and back to the composer', { ti
   const messages = Array.from({ length: 8 }, (_, i) => ({
     id: 'test-' + i, from: 'Muse', type: 'text', text: 'Fixture message ' + i, ts: i + 1
   }));
-  const { page, touch } = await openPhone(t, { messages, spaces: [] });
+  const first = ['Go ahead','Check the budget','Skip this plan'];
+  const second = ['Use that budget','Review transport','Decide later'];
+  Object.assign(messages[3], {from:'You'});
+  Object.assign(messages[4], {reply_to:messages[3].id, reply_suggestions:first});
+  Object.assign(messages[5], {from:'You', text:first[1]});
+  Object.assign(messages[6], {reply_to:messages[5].id, reply_suggestions:second});
+  Object.assign(messages[7], {from:'You', text:second[0]});
+  const { page, touch } = await openPhone(t, { messages, spaces: [], capabilities:{reply_suggestions:true} }, {suggestionMode:'auto'});
   const oldest = page.getByRole('article').filter({ hasText: 'Fixture message 0' });
   const markRead = oldest.getByRole('button', { name: 'Mark read', exact: true });
   await markRead.waitFor();
+  for (const chosen of [first[1], second[0]]) assert.equal(await page.getByText(chosen, {exact:true}).count(), 1);
+  for (const unused of [first[0], first[2], second[1], second[2]]) assert.equal(await page.getByText(unused, {exact:true}).count(), 0);
   const { x, y } = await swipeToControl(touch, markRead);
   await page.touchscreen.tap(x, y);
   await oldest.getByText('Read', { exact: true }).waitFor();

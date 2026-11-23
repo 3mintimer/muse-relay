@@ -6,7 +6,7 @@ export const defaults: Settings = {
   relay: 'gist', gistId: '', githubToken: '', relayUrl: '', relayToken: '', gatewayToken: '',
   customRelayUrl: '', customRelayToken: '', customGatewayToken: '',
   sonioxAuth: 'auto', sonioxApiKey: '', sonioxTokenUrl: '', sonioxTokenAuth: '', sonioxGatewayToken: '', voice: 'muse', mic: 'glasses', speakerFilter: 'all',
-  theme: 'system', language: 'system',
+  theme: 'system', language: 'system', suggestionMode: 'off',
   headWake: false, headWakeMic: false, headWakeAngle: 30, neutralPitch: 0,
   pollSeconds: 15, autoHideSeconds: 0, returnToChatAfterSend: true, chatLayout: 'exchange', shareLocation: false, locationIntervalMinutes: 1, images: false, configured: false,
   homeAvatar: 'animation', waitingAvatar: 'animation',
@@ -90,6 +90,7 @@ export function validateSettings(input: Settings, requireConnection=true): Setti
   if (!Number.isFinite(result.neutralPitch) || Math.abs(result.neutralPitch) > 90) result.neutralPitch = 0;
   if (typeof result.returnToChatAfterSend !== 'boolean') result.returnToChatAfterSend = defaults.returnToChatAfterSend;
   if (!['exchange','single'].includes(result.chatLayout)) result.chatLayout = defaults.chatLayout;
+  if (!['off','auto','always'].includes(result.suggestionMode)) result.suggestionMode = defaults.suggestionMode;
   if (!['animation','still','off'].includes(result.homeAvatar)) result.homeAvatar = defaults.homeAvatar;
   if (!['animation','off'].includes(result.waitingAvatar)) result.waitingAvatar = defaults.waitingAvatar;
   for (const key of ['gatewayToken','sonioxGatewayToken','customGatewayToken','customRelayToken'] as const) {

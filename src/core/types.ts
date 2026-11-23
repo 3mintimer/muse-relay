@@ -32,6 +32,7 @@ export interface Settings {
   neutralPitch: number;
   returnToChatAfterSend: boolean;
   chatLayout: 'exchange' | 'single';
+  suggestionMode: 'off' | 'auto' | 'always';
   shareLocation: boolean;
   locationIntervalMinutes: 1 | 3 | 5;
   images: boolean;
@@ -55,6 +56,7 @@ export interface Message {
   image_file?: string;
   mime_type?: string;
   reply_to?: string;
+  reply_suggestions?: string[];
   image?: Attachment;
 }
 export type SpaceControl =
@@ -78,13 +80,15 @@ export interface Snapshot {
   profile?: MuseProfile;
   motions?: Partial<Record<MotionKind, MotionSource>>;
   device?: { connected: boolean; last_seen?: number };
-  capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean; live_transcription?: boolean };
+  capabilities?: { audio: boolean; images: boolean; spaces: boolean; soniox?: boolean; live_transcription?: boolean; reply_suggestions?: boolean };
 }
 export interface ChatLocation { latitude: number; longitude: number; captured_at: number; accuracy?: number }
 export interface RelayRequest {
   location?: ChatLocation;
   id: string;
-  kind: 'chat' | 'space';
+  kind: 'chat' | 'space' | 'suggestion_reply';
+  suggestion_for?: string;
+  suggestion_mode?: 'auto' | 'always';
   text: string;
   created_at: number;
   space_id?: string;

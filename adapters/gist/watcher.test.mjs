@@ -183,16 +183,35 @@ test('Gist watcher preserves handler result across ambiguous publish, without le
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('Gist handler receives optional chat location separately from its visible input', async t => {
+test('Gist sends the optional chat location and can continue the answer with an exact reply', async t => {
   const location = { latitude: 0, longitude: -1, captured_at: 10 };
-  const raw = { protocol: 'muse-relay/1', id: 'loc', kind: 'chat', created_at: 11, text: 'Where?', location };
-  const files = { 'muse-relay-request-loc.json': { content: JSON.stringify(raw) } };
+  const raw = { protocol: 'muse-relay/1', id: 'loc', kind: 'chat', created_at: 11, text: 'Where?', location, suggestion_mode:'auto' };
+  const choices = ['Walk there', 'Show the route', 'Stay here'];
+  const files = {
+    'g2muse-relay.json': { content: JSON.stringify({messages:[], capabilities:{reply_suggestions:true}}) },
+    'muse-relay-request-loc.json': { content: JSON.stringify(raw) },
+  };
+  const calls = [];
   const { watcher } = await memoryWatcher(t, files, async request => {
-    assert.deepEqual(request.location, location);
-    return { text: 'Test reply' };
+    calls.push(request);
+    return { text: 'Test reply', reply_suggestions:choices };
   });
   await watcher.tick();
   const root = JSON.parse(files['g2muse-relay.json'].content);
+  assert.deepEqual(calls[0].location, location);
+  assert.equal(calls[0].suggestion_mode, 'auto');
   assert.equal(root.messages.find(m => m.from === 'You').text, raw.text);
   assert.doesNotMatch(JSON.stringify(root), /latitude/);
+  const answer = root.messages.find(m => m.from === 'Muse');
+  assert.deepEqual(answer.reply_suggestions, choices);
+  const selection = {protocol:'muse-relay/1', kind:'suggestion_reply', suggestion_for:answer.id, text:choices[1], created_at:12};
+  for (const id of ['chosen','stale']) {
+    files[`muse-relay-request-${id}.json`] = {content:JSON.stringify({...selection,id})};
+    await watcher.tick();
+  }
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].kind, 'chat');
+  assert.equal(calls[1].text, choices[1]);
+  const history = JSON.parse(files['g2muse-relay.json'].content).messages;
+  assert.deepEqual(history.filter(m => m.from === 'You').map(m => m.text), [raw.text, choices[1]]);
 });

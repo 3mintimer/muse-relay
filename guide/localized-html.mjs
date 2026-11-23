@@ -20,7 +20,7 @@ export function localizedHtml(source, language) {
   const expected = (source.match(/\bdata-i18n="/g) || []).length;
   if (translated !== expected) throw new Error('data-i18n must mark a text-only element.');
   html = html.replace(/<[a-z][\w:-]*\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi, tag => {
-    for (const attribute of ['aria-label', 'placeholder', 'content', 'title']) {
+    for (const attribute of ['aria-label', 'alt', 'placeholder', 'content', 'title']) {
       const match = tag.match(new RegExp(`\\bdata-i18n-${attribute}="([^"]*)"`));
       if (match) tag = tag.replace(new RegExp(`(\\s${attribute}=")[^"]*"`), (_, prefix) => prefix + escape(messageFor(decode(match[1]), language)) + '"');
     }

@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 import {
   MAX_BODY, LEASE_MS, HttpError, fail, equal, validateConfig, validateRequest, isOriginAllowed,
   validatePublishedMessage, validateProfile, spaceExportRoute, validateSpaceWrite, exportSpaces, prepareMuseRequest, buildMuseRequest, fingerprint,
+  replySuggestionsRequestId, authenticateReplySuggestionsWriter,
   emptyState, validateState, createMachine, byteLength,
 } from './core.mjs';
 export { validateConfig, buildMuseRequest } from './core.mjs';
@@ -35,7 +36,7 @@ export async function createRelay(options) {
     try { state = validateState(JSON.parse(await readFile(options.stateFile, 'utf8'))); }
     catch (error) { if (error.code !== 'ENOENT') throw new Error('Relay state could not be loaded; restore a valid state file before starting.'); }
   }
-  const machine = createMachine(state, { now });
+  const machine = createMachine(state, { now, replySuggestionsEnabled: config.replySuggestionsEnabled });
   let transaction = Promise.resolve();
   function atomic(work) { const task = transaction.then(work); transaction = task.catch(() => {}); return task; }
   async function persist() {
@@ -69,10 +70,12 @@ export async function createRelay(options) {
         return send(res, 202, await atomic(() => issueCommand(maintenance, intent, now())));
       }
       const spaces = spaceExportRoute(req.method, path);
+      const suggestionsId = replySuggestionsRequestId(req.method, path);
       const readLocation = req.method === 'GET' && path === '/v1/chat/location';
       const muse = readLocation || spaces || (path === '/v1/profile' && req.method === 'PUT') || (path === '/v1/messages' && req.method === 'POST');
       const token = path.startsWith('/device/') ? config.deviceToken : muse ? config.museToken : config.relayToken;
-      if (!equal(req.headers.authorization, `Bearer ${token}`)) fail(401, 'unauthorized');
+      if (suggestionsId) await authenticateReplySuggestionsWriter(req.headers.authorization, config);
+      else if (!equal(req.headers.authorization, `Bearer ${token}`)) fail(401, 'unauthorized');
       if (path === '/device/diagnostics') {
         if (req.method !== 'POST') fail(405, 'method_not_allowed');
         const data = await readJson(req, 4096);
@@ -99,7 +102,7 @@ export async function createRelay(options) {
         const data = await upstream.json(); if (typeof data.api_key !== 'string') fail(502, 'soniox_invalid_response');
         return send(res, 200, { api_key: data.api_key, expires_at: data.expires_at });
       }
-      const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req) : undefined;
+      const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req, suggestionsId ? 4096 : MAX_BODY) : undefined;
       const result = await atomic(async () => {
         machine.sweep();
         if (path.startsWith('/device/')) state.deviceSeen = now();
@@ -112,8 +115,9 @@ export async function createRelay(options) {
         }
         else if (req.method === 'POST' && path === '/v1/requests') {
           const value = validateRequest(body, config.imagesEnabled);
-          reply = [202, machine.addRequest(prepareMuseRequest(value), await fingerprint(value))];
-        } else if (req.method === 'GET' && path.startsWith('/v1/files/')) {
+          reply = [202, machine.addRequest(prepareMuseRequest(value, config.replySuggestionsEnabled), await fingerprint(value))];
+        } else if (suggestionsId) reply = [200, machine.publishReplySuggestions(suggestionsId, body)];
+        else if (req.method === 'GET' && path.startsWith('/v1/files/')) {
           const name = decodeURIComponent(path.slice('/v1/files/'.length)); if (!Object.hasOwn(state.files, name)) fail(404, 'file_not_found'); reply = [200, state.files[name]];
         } else if (req.method === 'POST' && path === '/v1/messages') reply = [200, machine.publishMessage(validatePublishedMessage(body))];
         else if (spaces) {

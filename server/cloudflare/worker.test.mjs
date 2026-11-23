@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile, readdir } from 'node:fs/promises';
 import { createWorker } from './worker.mjs';
@@ -46,6 +47,53 @@ async function applyMigrations(DB) {
   for (const file of (await readdir(dir)).filter(name => name.endsWith('.sql')).sort())
     DB.sqlite.exec(await readFile(new URL(file, dir), 'utf8'));
 }
+
+test('a finalized answer accepts late suggestions and only one concurrent silent reply', async t => {
+  const DB = new TestD1();
+  t.after(() => DB.sqlite.close());
+  await applyMigrations(DB);
+  const writer = 'w'.repeat(48);
+  const env = { DB, BUCKET: new TestR2(), RELAY_TOKEN: 'p'.repeat(40), DEVICE_TOKEN: 'd'.repeat(40), MUSE_TOKEN: 'm'.repeat(40) };
+  const worker = createWorker();
+  const call = (path, token = env.RELAY_TOKEN, body, method) => worker.fetch(new Request('https://relay.example' + path, {
+    method: method || (body ? 'POST' : 'GET'), headers: { authorization: 'Bearer ' + token }, body: body && JSON.stringify(body),
+  }), env);
+  const snapshot = async () => (await call('/v1/snapshot')).json();
+  assert.equal((await snapshot()).capabilities.reply_suggestions, false);
+  env.REPLY_SUGGESTIONS_WRITER_SHA256 = createHash('sha256').update(writer).digest('hex');
+  const input = { id: 'plan', kind: 'chat', text: 'Plan my trip', created_at: 1, suggestion_mode: 'always' };
+  await call('/v1/requests', env.RELAY_TOKEN, input);
+  const { job } = await (await call('/device/jobs', env.DEVICE_TOKEN)).json();
+  await call('/device/jobs/plan/request', env.DEVICE_TOKEN);
+  const event = (event_id, type, body) => call('/device/events', env.DEVICE_TOKEN, { job_id: 'plan', session_id: job.session_id, event_id, type, body });
+  await event('ack', 'muse_ack', { message_id: 'user', is_thread: true, session_id: job.session_id });
+  await event('done', 'muse_event', { type: 'event', event: 'message.assistant', payload: { message_id: 'answer', reply_to_message_id: 'user', text: 'Take a train.' } });
+  const source = (await snapshot()).messages.at(-1);
+  assert.equal(source.text, 'Take a train.');
+  assert.equal(source.reply_suggestions, undefined);
+  const choices = ['Choose the train', 'Compare routes', 'Skip this trip'];
+  const put = () => call('/v1/requests/plan/reply-suggestions', writer, { reply_suggestions: choices }, 'PUT');
+  assert.equal((await put()).status, 200);
+  assert.deepEqual((await snapshot()).messages.at(-1).reply_suggestions, choices);
+  const select = (id, text) => ({ id, kind: 'suggestion_reply', suggestion_for: source.id, text, created_at: 2, suggestion_mode: 'auto' });
+  const submit = input => call('/v1/requests', env.RELAY_TOKEN, input);
+  assert.equal((await submit(select('wrong', 'Some other action'))).status, 409);
+  const picks = [select('first', choices[0]), select('second', choices[1])];
+  const results = await Promise.all(picks.map(submit));
+  assert.deepEqual(results.map(result => result.status).sort(), [202, 409]);
+  const accepted = picks[results.findIndex(result => result.status === 202)];
+  assert.equal((await (await submit(accepted)).json()).duplicate, true);
+  assert.equal((await put()).status, 409);
+  const messages = (await snapshot()).messages;
+  assert.equal(messages.find(message => message.id === source.id).reply_suggestions, undefined);
+  assert.equal(messages.at(-1).text, accepted.text);
+  const next = (await (await call('/device/jobs', env.DEVICE_TOKEN)).json()).job;
+  assert.equal(next.kind, 'chat');
+  assert.equal(next.session_id, job.session_id);
+  const packet = await call(`/device/jobs/${accepted.id}/request`, env.DEVICE_TOKEN);
+  assert.equal(Number(packet.headers.get('content-length')), next.request_bytes);
+  assert.match((await packet.json()).message, /Take a train\./);
+});
 
 test('live transcription is opt-in and requires the phone credential and upgrade before Soniox', async t => {
   const DB = new TestD1(), BUCKET = new TestR2();

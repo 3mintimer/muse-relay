@@ -77,7 +77,30 @@
         <label class="route-card"><input type="radio" name="route" value="custom"><span class="route-content"><strong data-i18n="Custom relay server">Custom relay server</strong><span data-i18n="Choose how your server connects to Muse">Choose how your server connects to Muse</span></span></label>
       </fieldset>
       <div class="actions setup-actions"><a class="button primary" href="#relay" data-prompt-link="connection" data-i18n="Ask Muse to set it up">Ask Muse to set it up</a><a class="text-link" href="#g2muse" data-gist-only data-prompt-link="reuse" data-i18n="Reuse my G2Muse Gist →">Reuse my G2Muse Gist →</a></div>
+      <details class="disclosure" id="reply-suggestions-upgrade" open>
+        <summary data-i18n="Update from 0.3.36 to 0.4.1">Update from 0.3.36 to 0.4.1</summary>
+        <div class="details-body">
+          <p data-i18n="Beta testers can update in the Even app under My plugins → Beta → Muse Relay → Update. For ordinary text and voice chats, you only need the app update. G2 reply suggestions start off.">Beta testers can update in the Even app under My plugins → Beta → Muse Relay → Update. For ordinary text and voice chats, you only need the app update. G2 reply suggestions start off.</p>
+          <p data-i18n="To use suggestions, select your current relay above and copy its upgrade request into Muse. Once it is ready, open Settings → G2 display → Reply suggestions and choose Let Muse decide or Ask every time.">To use suggestions, select your current relay above and copy its upgrade request into Muse. Once it is ready, open Settings → G2 display → Reply suggestions and choose Let Muse decide or Ask every time.</p>
+          <div class="actions"><button type="button" class="button secondary" id="copy-upgrade" disabled data-i18n="Copy upgrade request for Muse">Copy upgrade request for Muse</button><a class="text-link" href="https://github.com/3mintimer/muse-relay/blob/v0.4.1-beta.1/docs/relay-setup.md#reply-suggestions-upgrade" data-i18n="0.4.1 relay upgrade guide">0.4.1 relay upgrade guide</a></div>
+          <p id="upgrade-status" class="small" role="status"></p>
+          <details class="disclosure prompt-full"><summary data-i18n="Read the full request">Read the full request</summary><div class="details-body"><label class="sr-only" for="upgrade-output" data-i18n="Instructions to copy">Instructions to copy</label><textarea id="upgrade-output" rows="5" readonly spellcheck="false"></textarea></div></details>
+        </div>
+      </details>
       <a class="text-link" href="https://github.com/3mintimer/muse-relay/blob/main/docs/relay-setup.md#relay-upgrade" data-i18n="Update an existing relay for 0.3.30">Update an existing relay for 0.3.30</a>
+      <div class="g2-shots" id="g2-reply-screens">
+        <h3 data-i18n="Reply suggestions on G2">Reply suggestions on G2</h3>
+        <p class="small muted" data-i18n="English screens from the official Even Hub Simulator. Open an image to read it at full size.">English screens from the official Even Hub Simulator. Open an image to read it at full size.</p>
+        <div class="g2-shots-grid">
+          <figure><a class="g2-shot" href="/screenshots/chat-reply.png"><img src="/screenshots/chat-reply.png" width="576" height="288" loading="lazy" alt="Last page of a Muse answer on G2, with a tap hint for suggested replies." data-i18n-alt="Last page of a Muse answer on G2, with a tap hint for suggested replies."></a><figcaption data-i18n="On the last page of an answer, tap to open its suggested replies.">On the last page of an answer, tap to open its suggested replies.</figcaption></figure>
+          <figure><a class="g2-shot" href="/screenshots/reply-choices.png"><img src="/screenshots/reply-choices.png" width="576" height="288" loading="lazy" alt="Three suggested replies listed on G2, with one row highlighted." data-i18n-alt="Three suggested replies listed on G2, with one row highlighted."></a><figcaption data-i18n="Swipe to a reply and tap to send it. Double-tap to go back.">Swipe to a reply and tap to send it. Double-tap to go back.</figcaption></figure>
+          <figure><a class="g2-shot" href="/screenshots/chat-menu.png"><img src="/screenshots/chat-menu.png" width="576" height="288" loading="lazy" alt="G2 system menu showing reply-suggestion settings for the chat." data-i18n-alt="G2 system menu showing reply-suggestion settings for the chat."></a><figcaption data-i18n="Use the chat’s system menu to turn suggestions off, let Muse decide or ask every time.">Use the chat’s system menu to turn suggestions off, let Muse decide or ask every time.</figcaption></figure>
+        </div>
+        <dialog class="g2-shot-dialog" id="g2-shot-dialog" aria-label="Reply suggestions on G2" data-i18n-aria-label="Reply suggestions on G2">
+          <form method="dialog"><button class="button secondary" data-i18n="Close image">Close image</button></form>
+          <div class="g2-shot-original"><img width="576" height="288" alt=""></div>
+        </dialog>
+      </div>
       <details class="disclosure route-requirements"><summary data-i18n="What to prepare">What to prepare</summary>
       <div class="route-summary card">
         <div><h3 data-i18n="What you provide">What you provide</h3><ul id="supplies"><li data-i18n="Your secret GitHub Gist and a token with gist scope">Your secret GitHub Gist and a token with gist scope</li><li data-i18n="A watcher and handler that forward new requests to Muse">A watcher and handler that forward new requests to Muse</li></ul></div>

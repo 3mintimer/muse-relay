@@ -1,4 +1,5 @@
 import { chatLocation } from '../../protocol/chat-location.mjs';
+import { isSuggestionMode, parseReplySuggestions } from '../../protocol/reply-suggestions.mjs';
 import {parseSpaceControl,parseSpaceAction,matchesSpaceAction} from '../../protocol/space-controls.mjs';
 import { validateProfile } from '../../server/core.mjs';
 import { spawn } from 'node:child_process';
@@ -87,7 +88,8 @@ export class GistStore {
 }
 function validateRequest(raw, name) {
   if (!object(raw) || raw.protocol !== 'muse-relay/1' || !ID.test(raw.id || '') || name !== `${REQUEST_PREFIX}${raw.id}.json`) throw new Error('Invalid request envelope.');
-  if (!['chat', 'space'].includes(raw.kind) || typeof raw.text !== 'string' || raw.text.length > 20_000 || !Number.isFinite(raw.created_at)) throw new Error('Invalid request content.');
+  if (!['chat', 'space', 'suggestion_reply'].includes(raw.kind) || typeof raw.text !== 'string' || raw.text.length > 20_000 || !Number.isFinite(raw.created_at)) throw new Error('Invalid request content.');
+  if (raw.kind === 'suggestion_reply' && (!ID.test(raw.suggestion_for || '') || raw.audio_file || raw.image_file)) throw new Error('Invalid suggestion selection.');
   if (raw.kind === 'space' && !ID.test(raw.space_id || '')) throw new Error('Invalid space identifier.');
   if (raw.space_action !== undefined) {
     if (raw.kind !== 'space') throw new Error('Invalid space action.');
@@ -115,6 +117,8 @@ function validateResult(result) {
   if (!result.text && !result.image && result.spaces === undefined && result.profile === undefined) throw new Error('Handler returned no display result.');
   // Emit only protocol fields, never incidental handler metadata.
   const clean = { text: result.text };
+  const suggestions = parseReplySuggestions(result.reply_suggestions);
+  if (suggestions && result.text.trim()) clean.reply_suggestions = suggestions;
   if (result.profile !== undefined) clean.profile = validateProfile(result.profile);
   if (result.transcript !== undefined) clean.transcript = result.transcript;
   if (result.image) clean.image = { mime: result.image.mime, data_base64: result.image.data_base64, name: typeof result.image.name === 'string' ? result.image.name.slice(0, 128) : 'reply.png' };
@@ -189,12 +193,21 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
     const owner = object(message) && message.muse_relay_owner;
     return object(owner) && owner.writer === state.writerId && ID.test(owner.request_id || '')
       && ((message.id === owner.request_id && message.from === 'You')
-        || (message.id === replyId(owner.request_id) && message.from === 'Muse' && message.reply_to === owner.request_id))
+        || (message.id === replyId(owner.request_id) && ['Muse','Relay'].includes(message.from) && message.reply_to === owner.request_id))
       && state.rows[message.id] === hash(message);
   };
-  async function hydrate(raw, inputs) {
-    const request = { id: raw.id, kind: raw.kind, text: raw.text, created_at: raw.created_at, ...(raw.space_id ? { space_id: raw.space_id } : {}) };
-    const location = chatLocation(raw);
+  async function hydrate(raw, inputs, root) {
+    const selection = raw.kind === 'suggestion_reply';
+    const request = { id: raw.id, kind: selection ? 'chat' : raw.kind, text: raw.text, created_at: raw.created_at, ...(raw.space_id ? { space_id: raw.space_id } : {}) };
+    if (selection) {
+      const parent = root.messages.findLast(m => m?.from === 'Muse' || m?.from === 'You');
+      if (root.capabilities?.reply_suggestions !== true || parent?.from !== 'Muse' || !parent.reply_to
+        || parent.id !== raw.suggestion_for || (state.lastChat && state.lastChat !== parent.reply_to)
+        || !parseReplySuggestions(parent.reply_suggestions)?.includes(raw.text)) return;
+      request.suggestion_for = parent.id;
+    }
+    if (request.kind === 'chat' && root.capabilities?.reply_suggestions === true && isSuggestionMode(raw.suggestion_mode)) request.suggestion_mode = raw.suggestion_mode;
+    const location = chatLocation({kind:request.kind, location:raw.location});
     if (location) request.location = location;
     if (raw.space_action) {
       const spaces = store.files[SPACES] ? safeJson(await store.file(SPACES)).spaces : [];
@@ -308,7 +321,8 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
     }
     const owner = { writer: state.writerId, request_id: raw.id, digest: record.digest };
     const input = { id: raw.id, from: 'You', type: raw.audio_file ? 'voice-note' : raw.image_file ? 'image' : 'text', text: result.transcript ?? raw.text, ts: raw.created_at, muse_relay_owner: owner };
-    const message = { id: ownId, from: 'Muse', type: result.image ? 'image' : 'text', text: result.text, ts: time, reply_to: raw.id, muse_relay_owner: owner };
+    const message = { id: ownId, from: record.rejected ? 'Relay' : 'Muse', type: result.image ? 'image' : 'text', text: result.text, ts: time, reply_to: raw.id, muse_relay_owner: owner };
+    if (root.capabilities?.reply_suggestions === true && isSuggestionMode(raw.suggestion_mode) && raw.kind !== 'space' && result.reply_suggestions) message.reply_suggestions = result.reply_suggestions;
     const keep = root.messages.filter(message => !object(message) || ![ownId, raw.id].includes(message.id));
     const files = {};
     const outputs = {};
@@ -317,8 +331,9 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
       message.mime_type = result.image.mime;
       outputs[message.image_file] = await output(files, message.image_file, result.image.data_base64);
     }
-    keep.push(input, message);
-    state.rows[input.id] = hash(input); state.rows[message.id] = hash(message);
+    if (!record.rejected) { keep.push(input); state.rows[input.id] = hash(input); }
+    keep.push(message);
+    state.rows[message.id] = hash(message);
     const counts = new Map();
     for (const message of keep) if (object(message)) counts.set(message.id, (counts.get(message.id) || 0) + 1);
     let remaining = 50;
@@ -376,17 +391,26 @@ export async function createWatcher({ store, stateFile, handler, now = Date.now 
         }
         if (record?.status === 'uncertain') continue;
         if (!record) {
-          if ((await inbound()).messages.some(message => object(message) && ([raw.id, replyId(raw.id)].includes(message.id)
+          const root = await inbound();
+          if (root.messages.some(message => object(message) && ([raw.id, replyId(raw.id)].includes(message.id)
             || (['You', 'Muse'].includes(message.from) && message.reply_to === raw.id)))) {
             throw new InspectionError('Request ID already appears in shared history; inspect before handling.');
           }
           const inputs = { [`${REQUEST_PREFIX}${raw.id}.json`]: hash(await store.file(`${REQUEST_PREFIX}${raw.id}.json`)) };
-          const request = await hydrate(raw, inputs);
+          const request = await hydrate(raw, inputs, root);
           record = { status: 'claimed', digest, inputs, claimedAt: now(), claimUntil: now() + 10 * 60_000 };
           state.requests[raw.id] = record;
+          if (request?.kind === 'chat') state.lastChat = request.id;
           await save();
           try {
-            record.result = validateResult(await handler(request));
+            if (request) {
+              record.result = validateResult(await handler(request));
+              if (!request.suggestion_mode) delete record.result.reply_suggestions;
+            }
+            else {
+              record.rejected = true;
+              record.result = {text:'This reply suggestion is no longer available.'};
+            }
             record.status = 'handled';
             await save();
           } catch {

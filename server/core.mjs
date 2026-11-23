@@ -1,5 +1,6 @@
 // Shared protocol and state transitions. No Node, network, or filesystem dependencies.
 import { chatLocation } from '../protocol/chat-location.mjs';
+import { isSuggestionMode, parseReplySuggestions } from '../protocol/reply-suggestions.mjs';
 import {parseSpaceControl,parseSpaceAction,matchesSpaceAction} from '../protocol/space-controls.mjs';
 export const byteLength = text => new TextEncoder().encode(text).byteLength;
 export const decodeBase64 = value => Uint8Array.from(atob(value), ch => ch.charCodeAt(0));
@@ -46,6 +47,19 @@ export function spaceExportRoute(method, path) {
   if (id) return { kind: 'upsert', id };
 }
 
+export function replySuggestionsRequestId(method, path) {
+  return method === 'PUT' && /^\/v1\/requests\/([A-Za-z0-9_-]{1,80})\/reply-suggestions$/.exec(path)?.[1];
+}
+
+export async function authenticateReplySuggestionsWriter(authorization, config) {
+  const token = /^Bearer ([A-Za-z0-9_-]{32,128})$/.exec(authorization || '')?.[1];
+  if (!config.replySuggestionsEnabled || !token ||
+    [config.relayToken, config.deviceToken, config.museToken].some(other => equal(other, token))) fail(401, 'unauthorized');
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  const hash = Array.from(new Uint8Array(bytes), n => n.toString(16).padStart(2, '0')).join('');
+  if (!equal(hash, config.replySuggestionsWriterSha256)) fail(401, 'unauthorized');
+}
+
 const LOOPBACK_PORT_ORIGIN = 'http://127.0.0.1:*';
 function isCanonicalOrigin(origin) {
   try { return new URL(origin).origin === origin; } catch { return false; }
@@ -66,7 +80,9 @@ export function validateConfig(config) {
   const allowedOrigins = config.allowedOrigins || [];
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(origin => typeof origin !== 'string' || (origin !== 'null' && origin !== LOOPBACK_PORT_ORIGIN && (origin.includes('*') || !isCanonicalOrigin(origin))))) throw new Error('allowedOrigins must contain exact origins, null, or the explicit http://127.0.0.1:* opt-in.');
   if (config.publicUrl && new URL(config.publicUrl).protocol !== 'https:') throw new Error('publicUrl must use HTTPS.');
-  return { ...config, allowedOrigins, imagesEnabled: config.imagesEnabled === true };
+  const replySuggestionsEnabled = /^[0-9a-f]{64}$/.test(config.replySuggestionsWriterSha256 || '')
+    && config.replySuggestionsWriterSha256 !== config.recoveryAdminSha256;
+  return { ...config, allowedOrigins, imagesEnabled: config.imagesEnabled === true, replySuggestionsEnabled };
 }
 
 export function attachment(value, kind) {
@@ -83,10 +99,16 @@ export function attachment(value, kind) {
 }
 export function validateRequest(value, imagesEnabled) {
   if (!object(value) || !/^[A-Za-z0-9_-]{1,80}$/.test(value.id || '') || /^(muse_|status_)/.test(value.id)) fail(400, 'invalid_request_id');
-  if (!['chat', 'space'].includes(value.kind)) fail(400, 'invalid_request_kind');
+  if (!['chat', 'space', 'suggestion_reply'].includes(value.kind)) fail(400, 'invalid_request_kind');
   if (typeof value.text !== 'string' || value.text.length > 10_000) fail(400, 'invalid_text');
   if (value.image && !imagesEnabled) fail(422, 'gadget_images_not_enabled');
   const request = { id: value.id, kind: value.kind, text: value.text.trim(), created_at: timestamp(value.created_at) };
+  if (value.kind === 'suggestion_reply') {
+    if (typeof value.suggestion_for !== 'string' || !ID_PATTERN.test(value.suggestion_for)
+      || !request.text || value.text !== request.text || value.audio || value.image) fail(400, 'invalid_suggestion_reply');
+    request.suggestion_for = value.suggestion_for;
+  }
+  if (value.kind !== 'space' && isSuggestionMode(value.suggestion_mode)) request.suggestion_mode = value.suggestion_mode;
   if (value.kind === 'space') {
     if (!ID_PATTERN.test(value.space_id || '')) fail(400, 'invalid_space_id');
     request.space_id = value.space_id;
@@ -95,7 +117,7 @@ export function validateRequest(value, imagesEnabled) {
     if (value.kind !== 'space') fail(400, 'invalid_space_action');
     try { request.space_action = parseSpaceAction(value.space_action); } catch { fail(400, 'invalid_space_action'); }
   }
-  const location = chatLocation(value);
+  const location = chatLocation(value.kind === 'suggestion_reply' ? { ...value, kind: 'chat' } : value);
   if (location) request.location = location;
   if (value.audio) request.audio = attachment(value.audio, 'audio');
   if (value.image) request.image = attachment(value.image, 'image');
@@ -104,9 +126,36 @@ export function validateRequest(value, imagesEnabled) {
 }
 // Keep queued jobs on their original prompt: ATOM requires the leased byte count to match exactly.
 // This server-owned flag is assigned after hashing the client request so retries across upgrades still match.
-export function prepareMuseRequest(request) {
-  if (request.location) return { ...request, locationInMessage: true };
-  return request.kind === 'space' ? { ...request, spaceExportUpsert: true } : request;
+export function prepareMuseRequest(request, replySuggestionsEnabled = false) {
+  const prepared = { ...request };
+  if (request.location) prepared.locationInMessage = true;
+  if (request.kind === 'space') prepared.spaceExportUpsert = true;
+  if (request.suggestion_mode) {
+    if (replySuggestionsEnabled) {
+      // Store the exact instruction with the job: already-leased SDK payload sizes are immutable.
+      const when = request.suggestion_mode === 'always' ? 'For this answer' : 'Only if a next step would be useful';
+      prepared.suggestionPrompt = [
+        `${when}, prepare three different short user replies in the language of this conversation: proceed with a specific next step, explore it further, and decline it.`,
+        'Use one line per reply. Aim for about 16 characters in Japanese or 32 in Latin script, with a maximum of 48 Unicode characters.',
+        'Return your ordinary answer promptly. Keep the list out of the answer.',
+        `Publish the options separately with python3 ~/.config/muse-relay/vm-publish-reply-suggestions.py ${request.id} and {"reply_suggestions":[...]} on standard input.`,
+        'If publishing is unavailable or needs approval, finish the answer without waiting. Proposing an action never authorizes it.',
+      ].join(' ');
+    } else delete prepared.suggestion_mode;
+  }
+  return prepared;
+}
+const suggestionNoteStart = id => `[[Muse Relay G2 ${id}]]`;
+const suggestionNoteEnd = id => `[[/Muse Relay G2 ${id}]]`;
+
+function removeSuggestionNote(text, request) {
+  if (!request.suggestionPrompt && !request.suggestionContext) return text;
+  const start = text.indexOf(suggestionNoteStart(request.id));
+  if (start === -1) return text;
+  const endMarker = suggestionNoteEnd(request.id);
+  const end = text.indexOf(endMarker, start);
+  // An ATOM user row may end halfway through the service instructions.
+  return [text.slice(0, start), end === -1 ? '' : text.slice(end + endMarker.length)].filter(Boolean).join(' ').trim();
 }
 export function buildMuseRequest(request) {
   const body = { message: request.text, output_modality: 'text' };
@@ -133,6 +182,11 @@ export function buildMuseRequest(request) {
     // Already queued by v22: the device may already hold a lease for this exact byte count.
     const data = new TextEncoder().encode(JSON.stringify(request.location));
     files.push({ mime: 'application/json', name: 'phone-location.json', data_base64: encodeBase64(data) });
+  }
+  const instructions = [request.suggestionContext, request.suggestionPrompt].filter(Boolean);
+  if (instructions.length) {
+    const note = [suggestionNoteStart(request.id), ...instructions, suggestionNoteEnd(request.id)].join('\n');
+    body.message = [body.message, note].filter(Boolean).join('\n\n');
   }
   if (files.length) {
     if (request.audio || request.image) body.device = 'mcu-wearable';
@@ -220,7 +274,7 @@ export async function exportSpaces(spaces, loadImage = image => image) {
   return { spaces: result };
 }
 
-export function createMachine(state, {now = Date.now} = {}) {
+export function createMachine(state, {now = Date.now, replySuggestionsEnabled = false} = {}) {
   validateState(state);
   const streamBuffers = new Map(Object.entries(state.streams).map(([id,value])=>[id,decodeBase64(value)]));
   const beforeAck = new Map(Object.entries(state.pending));
@@ -244,6 +298,9 @@ export function createMachine(state, {now = Date.now} = {}) {
     delete job.request.location;
     delete job.request.audio;
     delete job.request.image;
+    delete job.request.suggestionContext;
+    delete job.request.suggestionPrompt;
+    if (status === 'error') delete job.replySuggestions;
     job.request.text = '';
     job.responseText = '';
     job.museIds = [];
@@ -277,11 +334,34 @@ export function createMachine(state, {now = Date.now} = {}) {
     // Worker requestBytes includes the R2 payload; only the session-field overhead changes.
     return (requestBytes ?? before) + byteLength(JSON.stringify(buildMuseRequest(request))) - before;
   }
+  function finalSuggestionSource(job) {
+    if (!job?.request.suggestion_mode || job.status !== 'done') return;
+    const latest = state.messages.findLast(message => message.from === 'Muse' && typeof message.text === 'string' && message.text.trim());
+    if (latest?.id === `muse_${job.request.id}` && latest.reply_to === job.request.id && latest.type === 'text') return latest;
+  }
+  function publishReplySuggestions(id, body) {
+    const suggestions = parseReplySuggestions(body?.reply_suggestions);
+    if (!suggestions) fail(400, 'invalid_reply_suggestions');
+    const job = state.jobs.at(-1);
+    if (!replySuggestionsEnabled || job?.request.id !== id || !job.request.suggestion_mode || !job.deliveredAt
+      || job.status === 'error' || (job.status === 'done' && !finalSuggestionSource(job))) fail(409, 'reply_suggestions_changed');
+    if (job.replySuggestions && !suggestions.every((text, index) => text === job.replySuggestions[index])) fail(409, 'reply_suggestions_changed');
+    job.replySuggestions = suggestions;
+    return { ok: true, id };
+  }
   function addRequest(request, fingerprint, requestBytes) {
     const existing = state.jobs.find(job => job.request.id === request.id);
     if (existing) {
       if (existing.fingerprint && existing.fingerprint !== fingerprint) fail(409, 'request_id_conflict');
       return { accepted: true, duplicate: true, status: existing.status, id: request.id };
+    }
+    const previous = state.jobs.at(-1);
+    if (request.kind === 'suggestion_reply') {
+      const source = finalSuggestionSource(previous);
+      if (!replySuggestionsEnabled || source?.id !== request.suggestion_for || !previous?.replySuggestions?.includes(request.text)) fail(409, 'reply_suggestions_changed');
+      request = { ...request, kind: 'chat', suggestionContext: `The user's message is the exact reply they selected to your previous answer in this chat: ${JSON.stringify(source.text)}` };
+      // Selections have no media. Compute the full packet length after resolving its parent.
+      requestBytes = undefined;
     }
     if (request.space_action) {
       const control = state.spaces.find(space=>space.id===request.space_id)?.items.find(item=>item.id===request.space_action.item_id)?.control;
@@ -289,6 +369,7 @@ export function createMachine(state, {now = Date.now} = {}) {
     }
     if (state.jobs.filter(job => !TERMINAL.has(job.status)).length >= 20) fail(429, 'queue_full');
     requestBytes = scopeRequest(request, requestBytes);
+    if (previous) delete previous.replySuggestions;
     const job = { request, fingerprint, requestBytes, queuedAt: now(), status: 'queued', leaseUntil: 0, eventIds: [], museIds: [], responseId: null, responseIds: [], responseText: '', afterOwnUser: false, acknowledged: false };
     state.jobs.push(job);
     const message = { id: request.id, from: 'You', type: request.audio ? 'voice-note' : request.image ? 'image' : 'text', text: request.text || (request.kind === 'space' ? `Space: ${request.space_id}` : ''), ts: request.created_at };
@@ -350,7 +431,7 @@ export function createMachine(state, {now = Date.now} = {}) {
     if (user) {
       job.afterOwnUser = matches;
       if (!matches) return;
-      const text = bounded(payload.display_text || payload.text || payload.content, 10_000);
+      const text = removeSuggestionNote(bounded(payload.display_text || payload.text || payload.content, 10_000), job.request);
       if (text && job.request.audio) {
         const source = state.messages.find(m => m.id === job.request.id);
         if (source) {
@@ -481,6 +562,12 @@ export function createMachine(state, {now = Date.now} = {}) {
   }
   function publishMessage(message) {
     const index = state.messages.findIndex(item => item.id === message.id);
+    const job = state.jobs.at(-1);
+    // A separate writer replacing the SDK reply cannot inherit its choices.
+    if (job && message.id === `muse_${job.request.id}`) {
+      delete job.request.suggestion_mode;
+      delete job.replySuggestions;
+    }
     if (index >= 0) state.messages[index] = message; else state.messages.push(message);
     if (message.image) state.files[message.image_file] = message.image;
     trimMessages(); return {ok:true,id:message.id,updated:index >= 0};
@@ -497,7 +584,14 @@ export function createMachine(state, {now = Date.now} = {}) {
     return setSpaces(spaces);
   }
   function setProfile(profile) { state.profile = profile; if (profile.avatar_file && profile.avatar) state.files[profile.avatar_file] = profile.avatar; trimMessages(); return {ok:true}; }
-  function snapshot(imagesEnabled, sonioxConfigured = false) { return {messages:state.messages,spaces:state.spaces,...(state.profile === undefined ? {} : {profile:state.profile}),device:{connected:Boolean(state.deviceSeen) && now()-state.deviceSeen<45000,last_seen:state.deviceSeen?Math.floor(state.deviceSeen/1000):undefined},capabilities:{audio:true,images:imagesEnabled,spaces:true,soniox:Boolean(sonioxConfigured)}}; }
+  function snapshot(imagesEnabled, sonioxConfigured = false) {
+    const job = state.jobs.at(-1);
+    const source = replySuggestionsEnabled && job?.replySuggestions && finalSuggestionSource(job);
+    const messages = source ? state.messages.map(message => message === source ? { ...message, reply_suggestions: job.replySuggestions } : message) : state.messages;
+    return { messages, spaces: state.spaces, ...(state.profile === undefined ? {} : {profile:state.profile}),
+      device:{connected:Boolean(state.deviceSeen) && now()-state.deviceSeen<45000,last_seen:state.deviceSeen?Math.floor(state.deviceSeen/1000):undefined},
+      capabilities:{audio:true,images:imagesEnabled,spaces:true,soniox:Boolean(sonioxConfigured),reply_suggestions:replySuggestionsEnabled} };
+  }
   function useSoniox() {
     const time = now();
     state.sonioxCalls = state.sonioxCalls.filter(call => call > time - SONIOX_TOKEN_WINDOW_MS);
@@ -505,5 +599,5 @@ export function createMachine(state, {now = Date.now} = {}) {
     state.sonioxCalls.push(time);
   }
   function serialize() { state.streams = Object.fromEntries([...streamBuffers].map(([id,bytes])=>[id,encodeBase64(bytes)])); state.pending=Object.fromEntries(beforeAck); return state; }
-  return {state,sweep,addRequest,handleDeviceEvent,leaseNext,takeRequest,readChatLocation,publishMessage,setSpaces,upsertSpace,setProfile,snapshot,useSoniox,serialize};
+  return {state,sweep,addRequest,handleDeviceEvent,leaseNext,takeRequest,readChatLocation,publishMessage,publishReplySuggestions,setSpaces,upsertSpace,setProfile,snapshot,useSoniox,serialize};
 }
