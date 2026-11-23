@@ -45,7 +45,7 @@ function fixture(results: ImageRawDataUpdateResult[] = []) {
     async textContainerUpgrade(next: Record<string, any>) {
       const target = page.textObject?.find((item: any) => item.containerID === next.containerID && item.containerName === next.containerName);
       assert.ok(target, 'text updates must refer to a current container');
-      target.content = next.content; target.textColor = next.textColor; textUpdates.push(structuredClone(next)); return true;
+      target.content = next.content; textUpdates.push(structuredClone(next)); return true;
     },
     async updateImageRawData(next: ImageRawDataUpdate) {
       const serialized = ImageRawDataUpdate.toJson(next);
@@ -68,39 +68,21 @@ function fixture(results: ImageRawDataUpdateResult[] = []) {
   return { glasses, wire, rebuilds, textUpdates, page:()=>page,body: () => page.textObject?.find((item: any) => item.containerName === 'body')?.content };
 }
 
-test('home avatar uses a right-side square and clock updates preserve its pixels and both columns',async()=>{
-  const app=fixture(),items=['Chat','Spaces','Record voice'];
-  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:00',image);
-  const page=app.page();assert.equal(page.containerTotalNum,8);
+test('home avatar uses a right-side square and clock updates preserve its pixels and the native list',async()=>{
+  const app=fixture(),items=['Chat','Spaces','Usage','Settings'];
+  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:00',image);
+  const page=app.page();assert.equal(page.containerTotalNum,4);
   assert.deepEqual(page.imageObject.map((c:any)=>[c.xPosition,c.yPosition,c.width,c.height]),[[432,72,144,144]]);
-  const [left,right]=page.textObject.filter((c:any)=>c.containerName.startsWith('rows-'));
-  assert.ok(left.xPosition+left.width <= right.xPosition);
-  assert.equal(right.xPosition+right.width,432);
-  const targets=page.textObject.filter((c:any)=>c.isEventCapture);
-  assert.deepEqual(targets.map((c:any)=>[c.containerName,c.content.trim()]),[['gesture','']]);
-  const rightItems=['1. Test','2. —','3. —','Usage'];
-  const originalGeometry=page.textObject.map(({xPosition,yPosition,width,height}:any)=>[xPosition,yPosition,width,height]);
-  for(const selected of [0,1,2,3,4,5,6,0]){
-    await app.glasses.home(state,items,rightItems,selected,'Tap: open',[],'2026/11/17 22:00',image);
-    assert.deepEqual(app.page().textObject.map(({xPosition,yPosition,width,height}:any)=>[xPosition,yPosition,width,height]),originalGeometry);
-    for(const [side,names,offset] of [['left',items,0],['right',rightItems,items.length]] as const){
-      const dim=page.textObject.find((c:any)=>c.containerName==='rows-'+side);
-      const bright=page.textObject.find((c:any)=>c.containerName==='focus-'+side);
-      assert.equal(dim.textColor,2); assert.equal(bright.textColor,4);
-      names.forEach((name,row)=>{
-        const chosen=selected===offset+row;
-        assert.equal(dim.content.split('\n\n')[row].trim(),chosen?'':name);
-        assert.equal((bright.content.split('\n\n')[row] || '').trim(),chosen?name+' <':'');
-      });
-    }
-  }
+  assert.equal(page.listObject[0].itemContainer.isItemSelectBorderEn,1);
+  assert.equal(page.listObject[0].width,432);assert.equal(page.listObject[0].isEventCapture,1);
+  assert.ok(page.textObject.every((c:any)=>c.isEventCapture===0));
   assert.equal(app.wire.length,1);assert.equal(app.wire[0]!.containerName,'avatar');
-  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:01',{...image});
+  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:01',{...image});
   assert.equal(app.wire.length,1);assert.equal(app.rebuilds.length,1);
   await app.glasses.show(state,'Chat');
-  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:02',image);assert.equal(app.wire.length,2);
-  await app.glasses.home(state,items,['1. Test','2. —','3. —','Usage'],0,'Tap: open',[],'2026/11/17 22:03');
-  assert.equal(app.page().imageObject.length,0);const wide=app.page().textObject.find((c:any)=>c.containerName==='rows-right');assert.equal(wide.xPosition+wide.width,576);
+  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:02',image);assert.equal(app.wire.length,2);
+  await app.glasses.list(state,items,'Tap: open',[],'2026/11/17 22:03');
+  assert.equal(app.page().imageObject.length,0);assert.equal(app.page().listObject[0].width,576);
 });
 
 test('photo tiles fill the space above the gesture footer and are sent once per native layout', async () => {
@@ -187,7 +169,7 @@ test('updating the Home clock between two motion frames preserves the four-secon
   t.mock.method(performance,'now',()=>Date.now());
   const app=fixture(),motion={frames:Array.from({length:16},(_,i)=>Uint8Array.of(i)),failed:assert.fail};
   const settle=()=>new Promise<void>(r=>setImmediate(r));
-  const home=(time:string)=>app.glasses.home(state,['Chat','Spaces','Settings'],['1. —','2. —','3. —','Usage'],0,'Open',[],time,undefined,motion);
+  const home=(time:string)=>app.glasses.list(state,['Chat','Spaces'],'Open',[],time,undefined,motion);
   await home('11:59');await settle();
   for(let i=1;i<=7;i++){t.mock.timers.tick(250);await settle();}
   t.mock.timers.tick(100);await home('12:00');await settle();

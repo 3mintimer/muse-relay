@@ -122,7 +122,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   let autoHiddenReplies=new Set<string>();
   let drawingChatFrame: number | undefined;
   let lastChatPage: {frame: number; key: string; inlineImage?: string; ready: Promise<void>} | undefined;
-  let homeSelection = 0;
   let menuActions:Array<()=>Promise<void>>=[];
   let displayTimer:ReturnType<typeof setTimeout>|undefined,displayDeadline=0;
   let followingChat:(SentChat & {targetId:string; animated?:boolean})|undefined;
@@ -196,7 +195,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
   const fire=(promise:Promise<unknown>)=>{void promise.catch(error);};
   const homeClockVisible=()=>!disposed&&active&&state.glasses&&state.persistence!=='loading'&&screen==='home'
     &&!state.displaySleeping&&!state.recording&&!voiceBusy&&!state.busy&&!contextualOpen&&!feedback;
-  // Clock redraws must preserve the Home selection and the user's hide deadline.
+  // Clock redraws must preserve native list selection and the user's hide deadline.
   function syncDisplayTimers(interaction=false){
     clearTimeout(homeClockTimer);
     if(homeClockVisible())homeClockTimer=setTimeout(()=>{if(homeClockVisible())fire(render());},60000-Date.now()%60000);
@@ -486,7 +485,7 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         state.selectedMessageId = undefined; state.spaceAction = undefined; state.lastSync = undefined;
         spaceId = ''; spaceItemId = ''; spaceLayouts.clear(); spaceEditor = undefined;
         ++actionSerial; pendingMenuAction = undefined; contextualOpen = false; menuActions = [];
-        screen = 'home'; homeSelection = 0; page = 0; feedback = undefined;
+        screen = 'home'; page = 0; feedback = undefined;
       }
       raise.reset();fire(syncImu());
       document.documentElement.dataset.evenTheme=checked.theme;
@@ -644,22 +643,29 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
       return;
     }
     if(screen==='home'){
-      const left = [text('チャット','Chat'),text('スペース','Spaces'),text('設定','Settings')];
-      const right = state.settings.savedPrompts.map((prompt,slot) =>
-        `${slot+1}. ${prompt.trim().replace(/\s+/gu,' ').slice(0,64) || '—'}`);
-      right.push(usageTitle());
-      if (!homeEnabled(homeSelection)) homeSelection = 0;
+      const rows = [
+        {label:text('チャット','Chat'), open:showChat},
+        {label:text('スペース','Spaces'), open:showSpaces},
+        ...state.settings.savedPrompts.flatMap((prompt,slot) => {
+          const preview = prompt.trim().replace(/\s+/gu,' ');
+          return preview ? [{label:`${slot+1}. ${preview}`, open:()=>sendPreset(slot,true)}] : [];
+        }),
+        {label:usageTitle(), open:openUsage},
+        {label:text('設定','Settings'), open:showSettings},
+      ];
+      menuActions = rows.map(row => row.open);
       const dateTime=new Date().toLocaleString(resolveLocale(state.settings.language),{
         year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
       });
+      const items = rows.map(row => row.label);
       const footer=text('タップ: 開く · 2回: 終了','Tap: open · Double-tap: exit');
       const avatar=avatarDisplay(state,'idle')==='still'?state.snapshot.profile?.avatar:undefined;
-      try{await glasses.home(state,left,right,homeSelection,footer,contextualMenu(),dateTime,avatar,glassMotion('idle'));}
+      try{await glasses.list(state,items,footer,contextualMenu(),dateTime,avatar,glassMotion('idle'));}
       catch(e){
         if(!avatar)throw e;
         if(frame!==renderSerial)return;
         avatarFailedKey=avatarKey();state.avatarStatus='error';
-        await glasses.home(state,left,right,homeSelection,footer,contextualMenu(),dateTime);emit();
+        await glasses.list(state,items,footer,contextualMenu(),dateTime);emit();
       }
       return;
     }
@@ -790,24 +796,10 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     const sent = await send(request(value), false);
     await returnToSentChat(sent, fromHome && screen === 'home');
   }
-  function homeEnabled(index:number) {
-    return index < 3 || index === 6 || Boolean(state.settings.savedPrompts[index-3]);
-  }
-  function moveHome(step:number) {
-    do { homeSelection = (homeSelection + step + 7) % 7; } while (!homeEnabled(homeSelection));
-    fire(render());
-  }
-  async function activateHome() {
-    if (homeSelection === 0) return showChat();
-    if (homeSelection === 1) return showSpaces();
-    if (homeSelection === 2) return showSettings();
-    if (homeSelection === 6) return openUsage();
-    await sendPreset(homeSelection-3,true);
-  }
   async function showMenu(){
     if(state.recording||voiceBusy)return;
     displayInteraction();followingChat=undefined;
-    screen='home';homeSelection=0;page=0;feedback=undefined;await render();
+    screen='home';page=0;feedback=undefined;await render();
   }
   async function showSettings() {
     if (state.recording || voiceBusy) return;
@@ -1235,9 +1227,8 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
         if(feedback.kind==='busy')return;
         const retry=feedback.retry,back=feedback.back;feedback=undefined;fire(retry?retry():act(back||render));return;
       }
-      if(screen==='home'){if(!e.listEvent)fire(act(activateHome,undefined,false));return;}
       if(e.listEvent){
-        if(['settings','spaces','space-list','space-control'].includes(screen)){
+        if(['home','settings','spaces','space-list','space-control'].includes(screen)){
           const action=menuActions[e.listEvent.currentSelectItemIndex??0];
           if(action)fire(act(action));
         }return;
@@ -1254,7 +1245,6 @@ export function createController(options:{bridgeFactory?:()=>Promise<EvenAppBrid
     }
     if(type===1||type===2){if(state.recording||voiceBusy)return;
       if(feedback)return;
-      if(screen==='home'){if(!e.listEvent)moveHome(type===1?-1:1);return;}
       if(screen==='usage'){page=Math.max(0,Math.min(usagePages().length-1,page+(type===1?-1:1)));fire(render());return;}
       if(screen==='space-control'&&spaceEditor?.target.control.type==='slider'){
         const c=spaceEditor.target.control;spaceEditor.value=sliderValue(c,Number(spaceEditor.value)+(type===1?c.step:-c.step));fire(act(render));return;

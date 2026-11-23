@@ -32,7 +32,7 @@ export function glassBodyRows(footer: string, input?: string): number {
   return lineBudget(bands(footer, input).bodyHeight);
 }
 
-function label(id: number, name: string, y: number, height: number, content: string, capture = false, color: 1|2|4 = 4) {
+function label(id: number, name: string, y: number, height: number, content: string, capture = false, color: 1|4 = 4) {
   return { containerID: id, containerName: name, xPosition: 0, yPosition: y, width: WIDTH, height,
     paddingLength: 0, borderWidth: 0, isEventCapture: capture ? 1 : 0, textColor: color, content: content || ' ' };
 }
@@ -162,51 +162,20 @@ export class Glasses {
     await this.paint(renderId, state, menuItems, text, [], bitmaps, messageId);
   }
 
-  async home(state: AppState, left: string[], right: string[], selected: number, footer: string,
-    menuItems: GlassMenuItem[], header: string, avatar?: Attachment, motion?: GlassMotion): Promise<void> {
+  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string, avatar?: Attachment, motion?:GlassMotion): Promise<void> {
     if (!this.ready) return;
     const renderId = ++this.serial;
-    const {first, last, bodyHeight} = bands(footer, header);
-    const available = avatar || motion ? avatarBounds.x : WIDTH;
-    const split = Math.floor(available * 0.42);
-    // Leave a blank line between rows when the translated header and footer allow it.
-    const separator = lineBudget(bodyHeight) >= 7 ? '\n\n' : '\n';
-    const inset = 8;
-    // Both brightness layers have the same origin and line spacing. Each row
-    // has glyphs on just one layer, so a swipe changes its tone in place.
-    const column = (names: string[], offset: number, x: number, width: number, id: number, side: string) => {
-      const labels = names.map(value => excerpt(value, 1, width - inset - 28));
-      const current = selected - offset;
-      const dim = labels.map((value,row) => row === current ? ' ' : value).join(separator);
-      const bright = current >= 0 && current < labels.length
-        ? separator.repeat(current) + labels[current] + ' <' : ' ';
-      return [
-        {...label(id,'rows-'+side,first.height,bodyHeight,dim,false,2), xPosition:x+inset, width:width-inset},
-        {...label(id+1,'focus-'+side,first.height,bodyHeight,bright), xPosition:x+inset, width:width-inset},
-      ];
-    };
-    // Keep native swipe scrolling confined to a blank target beside the clock.
-    const text = [
-      {...label(13,'header',0,first.height,first.content), width:WIDTH - 24},
-      {...label(14,'gesture',0,G2_LINE_HEIGHT,' ',true), xPosition:WIDTH - 24, width:24},
-      ...column(left,0,0,split,15,'left'), ...column(right,left.length,split,available-split,17,'right'),
-      label(11,'footer',HEIGHT-last.height,last.height,last.content),
-    ];
-    const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
-      ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
-    await this.paint(renderId,state,menuItems,text,[],bitmaps,undefined,motion);
-  }
-
-  async list(state: AppState, items: string[], footer = '', menuItems: GlassMenuItem[] = [], header?: string): Promise<void> {
-    if (!this.ready) return;
     const { first, last, bodyHeight } = bands(footer, header);
     const text: ReturnType<typeof label>[] = [];
     if (first.height) text.push(label(13, 'header', 0, first.height, first.content));
     if (last.height) text.push(label(11, 'footer', HEIGHT - last.height, last.height, last.content));
-    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width: WIDTH, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
+    const width = avatar || motion ? avatarBounds.x : WIDTH;
+    const list = ListContainerProperty.fromJson({ xPosition: 0, yPosition: first.height, width, height: bodyHeight, containerID: 3, containerName: 'list', isEventCapture: 1,
       itemContainer: { itemCount: items.length, itemWidth: 0, isItemSelectBorderEn: 1,
-        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, WIDTH - 24)) } });
-    await this.paint(++this.serial, state, menuItems, text, [list], []);
+        itemName: items.map(item => excerpt(Array.from(item).slice(0, 64).join(''), 1, width - 24)) } });
+    const bitmaps: GlassBitmap[] = motion ? [motionBitmap(motion)] : avatar ? [{
+      ...avatarBounds, containerID: 2, containerName: 'avatar', bytes: await this.avatarBytes(avatar) }] : [];
+    await this.paint(renderId, state, menuItems, text, [list], bitmaps, undefined, motion);
   }
 
   async waiting(state:AppState, status:string, footer:string, menuItems:GlassMenuItem[], messageId:string, motion:GlassMotion) {
