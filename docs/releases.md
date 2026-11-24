@@ -10,6 +10,11 @@ English · [日本語](releases.ja.md)
 
 Muse Relay 0.4.1 is available from Even Hub. A stable GitHub tag identifies the commit that built that version. Later guide updates can advance `main`. [Even Hub catalogue](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [GitHub Releases](https://github.com/3mintimer/muse-relay/releases)
 
+At the maintainer's request, both checks for 0.4.1 (build `158450`) were marked **confirmed** on November 25, 2026.
+
+- With **Ask every time** enabled on G2, a suggested reply can be selected and sent on two consecutive turns.
+- Each of the two selected replies appears exactly once in the phone's chat history.
+
 ```mermaid
 flowchart LR
   A[Reviewed public source] --> B[beta branch]

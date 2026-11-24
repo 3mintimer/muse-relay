@@ -10,6 +10,11 @@
 
 Muse Relay 0.4.1 は Even Hub で一般公開されています。GitHub の正式版タグは、その版のアプリをビルドしたコミットを指します。公開後もガイドなどの更新で `main` が進むことがあります。[Even Hub の掲載ページ](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [GitHub Releases](https://github.com/3mintimer/muse-relay/releases)
 
+2026年11月25日、メンテナーの指定で 0.4.1（ビルド `158450`）の次の2項目を**確認済み**として記録しました。
+
+- G2 で「毎回候補を依頼」を選び、返信候補を2回続けて選んで送信できる。
+- 選んだ2件の返信が、スマホの会話履歴にそれぞれ1件だけ表示される。
+
 ### 0.4.0 返信候補の本人用Private
 
 1. 本人用中継を従来のURLに候補オフで配備し、0.3.36から自由入力でMuseと一往復する。その後、中継でVMの候補投稿を有効にする。
