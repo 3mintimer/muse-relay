@@ -91,7 +91,8 @@ test('all nine pages contain translated titles, actions, navigation, and languag
       ['button', 'Copy instructions'],
       ['summary', 'Reply arrived, but no transcript'],
       ['a', 'Setup'],
-      ['p', 'You can install the app once it appears in the store.'],
+      ['p', 'In the Even Realities app, open Even Hub and search for Muse Relay.'],
+      ['p', 'Update Muse Relay in Even Hub. Your existing relay still handles text and voice chats. G2 reply suggestions are off by default.'],
     ]) {
       const translated = messageFor(key, code);
       if (code !== 'en') assert.notEqual(translated, key, `${code}: untranslated ${key}`);
@@ -110,7 +111,7 @@ test('all nine pages contain translated titles, actions, navigation, and languag
     assert.ok(html.includes('src="/app.js"') && html.includes('href="/style.css"'));
     assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md`));
     assert.ok(html.includes(`/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#relay-upgrade`));
-    assert.ok(html.includes(`/blob/v0.4.1-beta.1/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#reply-suggestions-upgrade`));
+    assert.ok(html.includes(`/blob/main/docs/relay-setup${code === 'ja' ? '.ja' : ''}.md#reply-suggestions-upgrade`));
     for (const [file, key] of [
       ['chat-reply.png', 'Last page of a Muse answer on G2, with a tap hint for suggested replies.'],
       ['reply-choices.png', 'Three suggested replies listed on G2, with one row highlighted.'],

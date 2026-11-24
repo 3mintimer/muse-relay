@@ -28,11 +28,11 @@ A custom relay needs only its HTTPS base URL. Enter the phone token and hosting 
 
 <a id="reply-suggestions-upgrade"></a>
 
-## Add G2 reply suggestions to an existing Beta installation (0.4.1)
+## Add G2 reply suggestions in 0.4.1
 
-Open **Profile → My plugins → Beta → Muse Relay → Update** in the Even app. An existing Beta account can continue using its relay and history. For ordinary chat, the app update is the only step. Suggestions start off when upgrading from 0.3.x.
+Open Even Hub in the Even Realities app and search for **Muse Relay** to install or update it. For ordinary text and voice chats, keep your existing relay. Suggestions start off when upgrading from 0.3.x. [Muse Relay in Even Hub](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay)
 
-To use suggestions, open the [setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup), select your connection method and copy the upgrade instructions to your Muse. Relay operators can also follow the steps below using the [0.4.1 Beta reference source](https://github.com/3mintimer/muse-relay/tree/v0.4.1-beta.1).
+To enable suggestions, select your connection method in the setup guide and copy the upgrade instructions to your Muse. Relay operators can follow the steps below using the reference code that produced the store build. [Setup guide](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup) · [0.4.1 reference source](https://github.com/3mintimer/muse-relay/tree/v0.4.1)
 
 | Connection | Changes to the existing relay |
 | --- | --- |

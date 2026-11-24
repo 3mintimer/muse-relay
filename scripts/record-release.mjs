@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { isPublicStoreBuild } from './even-hub-store.mjs';
 
 const repo = '3mintimer/muse-relay';
 const packageId = 'com.threemintimer.muserelay';
@@ -40,15 +41,26 @@ function sourceText(path, commit) {
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
-export function releaseTarget(listing, version, channel) {
+export async function releaseTarget(listing, version, channel, storefront = fetch) {
   if (!['beta', 'public'].includes(channel) || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Expected a numeric Even Hub version and beta or public.');
-  const build = listing.versions?.find(item => item.version === version);
-  if (listing.package_id !== packageId || !Number.isSafeInteger(build?.id) || !build.channels?.includes(channel)
-    || (channel === 'public' && build.status !== 'Published')) {
+  const assigned = listing.versions?.filter(item => item.channels?.includes(channel)) ?? [];
+  const [build] = assigned;
+  if (!listing.ok || listing.package_id !== packageId || assigned.length !== 1 || build.version !== version || !Number.isSafeInteger(build.id)
+    || (channel === 'public' && !await isPublicStoreBuild(packageId, build, storefront))) {
     throw new Error(`Even Hub does not list ${packageId} ${version} on the ${channel} channel.`);
   }
   const pre = channel === 'beta';
   return { id: build.id, pre, tag: `v${version}${pre ? '-beta.1' : ''}` };
+}
+
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+export function checkPackageDigests({ channel, version, id, commit, ciDigest, storeDigest }, receipt) {
+  if (ciDigest === storeDigest) return;
+  if (channel === 'public' && receipt?.packageId === packageId && receipt.version === version
+    && receipt.buildId === id && receipt.sourceCommit === commit
+    && receipt.ciSha256 === ciDigest && receipt.storeSha256 === storeDigest) return;
+  throw new Error('The CI package and Even Hub download differ without a matching reviewed store receipt.');
 }
 
 function liveTarget(version, channel) {
@@ -94,6 +106,16 @@ function checkExisting(tag, commit, pre, filename, digest) {
   return { release, asset };
 }
 
+async function releaseNotes(version, commit, pre) {
+  const path = `changelog/${version}.md`;
+  if (!pre) {
+    // The candidate is immutable. Store instructions can be corrected after Beta closes.
+    try { return await readFile(new URL('../' + path, import.meta.url), 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  return sourceText(path, commit);
+}
+
 async function record({ channel, commit: argument, publish }) {
   if (!['beta', 'public'].includes(channel) || (argument && !/^[a-f0-9]{40}$/.test(argument))) {
     throw new Error('Usage: node scripts/record-release.mjs --channel beta|public [--commit FULL_PUBLIC_SHA] [--publish]');
@@ -104,7 +126,7 @@ async function record({ channel, commit: argument, publish }) {
   const manifest = JSON.parse(sourceText('app.json', commit));
   if (manifest.package_id !== packageId) throw new Error('Unexpected app at the public commit.');
   const version = manifest.version;
-  const { id, pre, tag } = liveTarget(version, channel);
+  const { id, pre, tag } = await liveTarget(version, channel);
   const file = `muse-relay-${version}.ehpk`;
   const main = api('git/ref/heads/main').object.sha;
   const canAdvance = ['identical', 'ahead'].includes(compare(main, commit));
@@ -113,30 +135,43 @@ async function record({ channel, commit: argument, publish }) {
   const directory = await mkdtemp(join(tmpdir(), 'muse-relay-release-'));
   try {
     const verifiedRun = downloadCheckedPackage('beta', commit, directory);
-    const hubFile = join(directory, 'downloaded.ehpk');
-    run(hub, ['download', version, '--package-id', packageId, '--output', hubFile, '--json']);
+    const storeDir = join(directory, 'store');
+    await mkdir(storeDir);
+    const hubFile = join(storeDir, file);
+    const download = JSON.parse(run(hub, ['download', version, '--package-id', packageId, '--output', hubFile, '--json']));
+    const storeBytes = await readFile(hubFile);
+    if (!download.ok || download.package_id !== packageId || download.version !== version || download.size !== storeBytes.length) {
+      throw new Error('Unexpected Even Hub download metadata.');
+    }
     const ciBytes = await readFile(join(directory, file));
-    if (!ciBytes.equals(await readFile(hubFile))) throw new Error('The CI package and the actual Even Hub download differ.');
+    const ciDigest = sha256(ciBytes), digest = sha256(storeBytes);
+    let receipt;
+    if (!pre && digest !== ciDigest) {
+      const path = new URL(`../changelog/${version}.store.json`, import.meta.url);
+      try { receipt = JSON.parse(await readFile(path, 'utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    checkPackageDigests({ channel, version, id, commit, ciDigest, storeDigest: digest }, receipt);
     if (alreadyOnMain) {
       const mainDir = join(directory, 'main');
       await mkdir(mainDir);
       downloadCheckedPackage('main', main, mainDir);
       if (!ciBytes.equals(await readFile(join(mainDir, file)))) throw new Error('The more recent main commit builds a different app.');
     }
-    const digest = createHash('sha256').update(ciBytes).digest('hex');
     const title = pre ? `Muse Relay ${version} (pre-release)` : `Muse Relay ${version}`;
-    const notes = sourceText(`changelog/${version}.md`, commit).trim()
+    const changelog = await releaseNotes(version, commit, pre);
+    const notes = changelog.trim()
       + `\n\nEven Hub ${channel} · build ${id}\n\nEHPK SHA-256: \`${digest}\`\n`;
     const { release, asset } = checkExisting(tag, commit, pre, file, digest);
-    console.log(JSON.stringify({ channel, tag, commit, evenHubBuild: id, sha256: digest, verifiedRun, mode: publish ? 'publish' : 'check' }, null, 2));
+    console.log(JSON.stringify({ channel, tag, commit, evenHubBuild: id, ciSha256: ciDigest, sha256: digest, verifiedRun, mode: publish ? 'publish' : 'check' }, null, 2));
     if (!publish || (release && !release.draft)) return;
-    if (liveTarget(version, channel).id !== id) throw new Error('The Even Hub channel changed during verification.');
+    if ((await liveTarget(version, channel)).id !== id) throw new Error('The Even Hub channel changed during verification.');
     const draft = release || api('releases', 'POST', { tag_name: tag, target_commitish: commit, name: title, body: notes, draft: true, prerelease: pre, make_latest: 'false' });
-    if (!asset) run('gh', ['release', 'upload', tag, join(directory, file), '--repo', repo]);
+    if (!asset) run('gh', ['release', 'upload', tag, hubFile, '--repo', repo]);
     const verified = checkExisting(tag, commit, pre, file, digest);
     if (!verified.asset || verified.release.id !== draft.id) throw new Error('Could not verify the uploaded release asset.');
     if (!pre && canAdvance && main !== commit) api('git/refs/heads/main', 'PATCH', { sha: commit, force: false });
-    const result = api(`releases/${draft.id}`, 'PATCH', { draft: false, prerelease: pre, make_latest: pre ? 'false' : 'true' });
+    const result = api(`releases/${draft.id}`, 'PATCH', { body: notes, draft: false, prerelease: pre, make_latest: pre ? 'false' : 'true' });
     console.log(result.html_url);
   } finally {
     await rm(directory, { recursive: true, force: true });

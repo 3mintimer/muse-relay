@@ -28,11 +28,11 @@
 
 <a id="reply-suggestions-upgrade"></a>
 
-## 既存のBetaでG2の返信候補を使う（0.4.1）
+## 0.4.1 で G2 の返信候補を使う
 
-Evenアプリの **プロフィール → My plugins → Beta → Muse Relay → Update** で今のアプリを更新します。参加済みのアカウントは同じ接続先と履歴を使えます。通常のチャットを続ける方はこれで完了です。0.3系からの更新では返信候補はオフです。
+Even Realities アプリの「Even Hub」で **Muse Relay** を検索し、インストールまたは更新します。普段のテキスト・音声チャットには、これまでの中継をそのまま使えます。0.3 系から更新した場合、返信候補の初期設定はオフです。[Even Hub の Muse Relay](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay)
 
-返信候補を使う方は、[公開ガイド](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup)で自分の接続方式を選び、更新依頼文をコピーしてMuseに渡してください。運用担当者が更新する場合は、[0.4.1 Betaの参考実装](https://github.com/3mintimer/muse-relay/tree/v0.4.1-beta.1)を使います。
+返信候補を使う方は、公開ガイドで自分の接続方式を選び、更新依頼文をコピーして Muse に渡してください。運用担当者が更新する場合は、ストア版に対応する参考実装を使って以下の手順を進めます。[公開ガイド](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup) · [0.4.1 の参考実装](https://github.com/3mintimer/muse-relay/tree/v0.4.1)
 
 | 接続方式 | 既存の中継で行うこと |
 | --- | --- |

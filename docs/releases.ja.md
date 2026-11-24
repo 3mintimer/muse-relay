@@ -8,7 +8,7 @@
 | Even Hub ストアで一般公開したアプリ | GitHub の `main` | `vX.Y.Z` の GitHub Release と同一の EHPK |
 | ガイド、翻訳、投稿フォーム、運用ファイル | GitHub の `main` | アプリの公開を待たず更新 |
 
-最初のストア一般公開までは、`main` のアプリは公開ソースの初期版 v0.3.5 Beta です。一般公開後もガイドだけの更新で `main` が進むことがあります。ストアと対応する正確なコミットは正式版タグから参照できます。
+Muse Relay 0.4.1 は Even Hub で一般公開されています。GitHub の正式版タグは、その版のアプリをビルドしたコミットを指します。公開後もガイドなどの更新で `main` が進むことがあります。[Even Hub の掲載ページ](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [GitHub Releases](https://github.com/3mintimer/muse-relay/releases)
 
 ### 0.4.0 返信候補の本人用Private
 
@@ -35,8 +35,10 @@ node scripts/record-release.mjs --channel beta --commit COMMIT_SHA --publish
 
 ### 一般公開版を記録する
 
-Even Hub ポータルで一般公開が完了したら、同じコマンドの `--channel` を `public` にします。ビルドの **Published**、**public** チャンネル、EHPK の一致を確認したうえで、`main` を早送りし、正式版タグと Release を作成します。審査中または承認のみの段階では実行できません。
+Even Hub ポータルの **Public build** で **Published**、CLI で `public` の割り当てを確認します。Beta 終了後に CLI の状態が **Approved** と表示される場合は、一般向けカタログのパッケージ ID、公開チャンネル、版、サイズ、作成日時も照合します。
 
-`main` が資料更新だけ先行している場合も EHPK を照合します。履歴が分岐していれば、`main` の更新を候補へ取り込み、そのコミットを再確認します。既存タグを動かしたり、別内容の添付を上書きしたりする操作はありません。
+同じ確認・公開コマンドに `--channel public` と対象のコミットを指定します。正式版の案内は手元の `changelog/X.Y.Z.md` に記載します。Beta の案内には候補コミットの文面を使います。GitHub に添付するのはストアから取得した EHPK です。0.4.1 では CI 版とストア版で本体 198,226 バイトが一致し、パッケージ ID を含むヘッダーと末尾 64 バイトが異なります。[照合済みの SHA-256](../changelog/0.4.1.store.json) で両ファイルの全体をビルド 158450 とソースコミットに対応付けています。未確認の差分があれば処理は停止します。
+
+照合後に `main` を早送りし、正式版タグと Release を作成します。`main` が資料更新だけ先行している場合も CI の EHPK を候補と照合します。履歴が分岐していれば、`main` の更新を候補へ取り込み、そのコミットを再確認します。既存タグや添付内容が競合する場合は停止します。
 
 旧ビルドの削除は別操作です。新しいチャンネルを実地で確認し、対象バージョンとビルド ID を選びます。審査中や配布中のビルドを残します。

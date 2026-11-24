@@ -5,7 +5,7 @@ import { languages, languageFromUrl, languageHref } from './language.js';
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const repo = 'https://github.com/3mintimer/muse-relay';
-const relayTag = 'v0.4.1-beta.1';
+const relayTag = 'v0.4.1';
 const relaySource = repo + '/tree/' + relayTag;
 const upgradeSource = repo + '/blob/' + relayTag;
 const sdk = 'https://github.com/facebookincubator/muse-gadget-sdk';
@@ -102,7 +102,7 @@ function renderUpgradeRequest(route) {
     migration = t("Update my existing Gadget HTTPS relay. In the Muse VM, install the Python tool from {0} at {1}. Configure my own HTTPS destination and a dedicated VM key through secure setup. Set REPLY_SUGGESTIONS_WRITER_SHA256 on the relay to the key’s SHA-256. This update uses my existing device firmware.", [upgradeSource + '/server/tools/vm-publish-reply-suggestions.py', '~/.config/muse-relay/vm-publish-reply-suggestions.py']);
   }
   $('#upgrade-output').value = [
-    t("Upgrade my existing {0} connection for G2 reply suggestions in Muse Relay 0.4.1. Keep my history and voice settings. Use the steps for my connection in {1}.", [route.name, docHref(upgradeSource + '/docs/relay-setup.md#reply-suggestions-upgrade')]),
+    t("Upgrade my existing {0} connection for G2 reply suggestions in Muse Relay 0.4.1. Keep my history and voice settings. Use the steps for my connection in {1}.", [route.name, docHref(repo + '/blob/main/docs/relay-setup.md#reply-suggestions-upgrade')]),
     migration,
     t("First verify a normal reply with suggestions off. Then select a suggestion on G2 and verify that the follow-up is sent once and receives a matching Muse reply. Keep my private URLs and keys in secure configuration."),
   ].join('\n\n');

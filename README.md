@@ -4,7 +4,7 @@
 
 Send a message from your phone or Even G2 and read Muse’s reply on your glasses. The setup guide lets you choose your own relay and copy the instructions for Muse.
 
-[Set up Muse Relay](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup) · [Using a G2Muse Gist?](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#g2muse) · [Questions and feedback](docs/feedback.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
+[Get Muse Relay on Even Hub](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [Set up Muse Relay](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#setup) · [Using a G2Muse Gist?](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/#g2muse) · [Questions and feedback](docs/feedback.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md)
 
 ## What you need
 

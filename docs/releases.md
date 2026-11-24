@@ -8,7 +8,7 @@ English · [日本語](releases.ja.md)
 | Version available to everyone in the Even Hub store | `main` | A GitHub **Release** tagged `vX.Y.Z` with the store's EHPK |
 | Guide, translations, contribution forms or release tooling | `main` | Updated material independently of the store version |
 
-Before the first public store release, the app on `main` is the initial published **source** snapshot, v0.3.5 Beta. The **Releases** page identifies store versions. Guide edits can advance `main` while the latest store tag continues to identify the exact app commit.
+Muse Relay 0.4.1 is available from Even Hub. A stable GitHub tag identifies the commit that built that version. Later guide updates can advance `main`. [Even Hub catalogue](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [GitHub Releases](https://github.com/3mintimer/muse-relay/releases)
 
 ```mermaid
 flowchart LR
@@ -39,7 +39,7 @@ If the pilot needs to be rolled back, remove `REPLY_SUGGESTIONS_WRITER_SHA256` a
 
 ```sh
 gh run download RUN_ID --repo 3mintimer/muse-relay --name muse-relay-ehpk-COMMIT_SHA --dir artifacts
-npx --no-install evenhub upload artifacts/muse-relay-X.Y.Z.ehpk --package-id com.threemintimer.muserelay --changelog "Pre-release: describe the user-facing change"
+npx --no-install evenhub upload artifacts/muse-relay-X.Y.Z.ehpk --package-id com.threemintimer.muserelay --changelog "preview build"
 npx --no-install evenhub promote X.Y.Z --to beta --package-id com.threemintimer.muserelay
 ```
 
@@ -54,6 +54,10 @@ node scripts/record-release.mjs --channel beta --commit COMMIT_SHA --publish
 
 The first command checks the live channel, build ID, source commit and exact package bytes, then prints the plan. The second uploads that EHPK to a GitHub Pre-release. It leaves `main` at the previous app version. Without `--commit`, the command uses the current public `beta` tip. A missing or expired CI artifact can be rebuilt by rerunning **Check** for the same commit.
 
-For a store release, finish review and publication in Even Hub first. Run the same two commands with `--channel public` and the commit that produced the live build. Publication requires both **Published** status and the **public** channel. The command verifies the EHPK again, advances `main` by fast-forward and publishes the stable GitHub Release. If `main` already contains the commit plus documentation changes, its CI package must still match. For a divergent `main`, merge its changes into `beta`, run Check and repeat verification on that merge. Conflicting tags or assets stop publication. Retrying the same completed release rechecks it.
+For a store release, confirm **Published** under **Public build** in the portal and the `public` channel in the CLI. After Beta withdrawal the CLI can show **Approved**. In that case the tool also checks the public catalogue for the same package, public branch, version, size and creation time.
+
+Run the check and publish commands with `--channel public` and the commit that produced the store build. Update `changelog/X.Y.Z.md` in the maintainer checkout with the store installation instructions. Beta notes come from the candidate commit. The tool uploads the actual Even Hub download. For 0.4.1, the CI and store files have identical 198,226-byte payloads. The store file adds the package ID to the header and has a different 64-byte trailer. The [reviewed hashes](../changelog/0.4.1.store.json) bind both complete files to build 158450 and its source commit. An unreviewed difference stops publication.
+
+The tool fast-forwards `main` and publishes the stable GitHub Release. If `main` already contains the release commit plus documentation changes, its CI package must still match the candidate. For a divergent `main`, merge its changes into `beta`, run Check and verify the merge. Conflicting tags or assets stop publication. Retrying the same completed release rechecks it.
 
 Removing an old Hub build is a separate, manual operation. Confirm the new channel first and check the exact versions and build IDs. Preserve builds under review and builds still assigned to a channel. The release workflow never deletes builds.

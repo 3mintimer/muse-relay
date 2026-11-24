@@ -4,7 +4,7 @@
 
 スマートフォンや Even G2 からメッセージを送り、グラスで Muse の返信を読めます。ガイドで自分の中継方式を選ぶと、Muse に渡す設定の依頼文をコピーできます。
 
-[初回設定を始める](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup) · [G2Muse の Gist を引き継ぐ](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#g2muse) · [質問・フィードバック](docs/feedback.ja.md) · [プライバシー](PRIVACY.md) · [セキュリティ](SECURITY.md)
+[Even Hub で入手](https://hub.evenrealities.com/catalogue/com.threemintimer.muserelay) · [初回設定を始める](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#setup) · [G2Muse の Gist を引き継ぐ](https://muse-relay-guide.spicy-cup-4319.chatgpt.site/ja/#g2muse) · [質問・フィードバック](docs/feedback.ja.md) · [プライバシー](PRIVACY.md) · [セキュリティ](SECURITY.md)
 
 ## 利用するもの
 
